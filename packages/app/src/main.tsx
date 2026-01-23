@@ -37,6 +37,7 @@ import SwapPending from "./pages/SwapPending";
 import SwapCompleted from "./pages/SwapCompleted";
 import SwapLoad from "./pages/SwapLoad";
 import SwapMissing from "./pages/SwapMissing";
+import OpenOrders from "./pages/OpenOrders";
 
 dayjs.extend(localizedFormat);
 
@@ -348,6 +349,10 @@ const router = createHashRouter([
               {
                 path: "/swap/load",
                 element: <SwapLoad />,
+              },
+              {
+                path: "/swap/orders",
+                element: <OpenOrders />,
               },
             ],
           },

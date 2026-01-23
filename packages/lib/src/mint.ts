@@ -43,7 +43,7 @@ import rjs from "@radiantblockchain/radiantjs";
 import { GLYPH_NFT } from "./protocols";
 const { Script, crypto } = rjs;
 
-const defaultFeeRate = 5000;
+const defaultFeeRate = 10000;
 
 export function commitBundle(
   deployMethod: DeployMethod,

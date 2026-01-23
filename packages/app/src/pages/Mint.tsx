@@ -252,7 +252,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   const [mode, setMode] = reset(useState<ContentMode>("file"));
   const [fileState, setFileState] = reset(useState<FileState>({ ...noFile }));
   const [enableHashstamp, setEnableHashstamp] = reset(useState(true));
-  const [hashStamp, setHashstamp] = reset(useState<ArrayBuffer | undefined>());
+  const [hashStamp, setHashstamp] = reset(useState<Uint8Array | undefined>());
   const attrName = useRef<HTMLInputElement>(null);
   const attrValue = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = reset(
