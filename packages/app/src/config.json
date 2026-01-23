@@ -41,7 +41,7 @@
         "wss://radiant4.bladenet.online:50022"
       ]
     },
-    "feeRate": 2000,
+    "feeRate": 10000,
     "ipfsMethod": "gateway",
     "ipfsGatewayUrl": "https://{cid}.ipfs.nftstorage.link"
   },
