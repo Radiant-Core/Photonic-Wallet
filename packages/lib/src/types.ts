@@ -1,6 +1,56 @@
 // ESM compatibility
 import rjs from "@radiantblockchain/radiantjs";
 
+/**
+ * Glyph v2 Token Standard Constants
+ * Reference: https://github.com/Radiant-Core/Glyph-Token-Standards
+ */
+
+// Glyph magic bytes
+export const GLYPH_MAGIC = Buffer.from('gly', 'ascii');
+export const GLYPH_MAGIC_HEX = '676c79';
+
+// Protocol version
+export const GLYPH_VERSION = {
+  V1: 0x01,
+  V2: 0x02,
+} as const;
+
+// Protocol IDs per Glyph v2 spec
+export const GlyphProtocol = {
+  GLYPH_FT: 1,        // Fungible Token
+  GLYPH_NFT: 2,       // Non-Fungible Token
+  GLYPH_DAT: 3,       // Data Storage
+  GLYPH_DMINT: 4,     // Decentralized Minting
+  GLYPH_MUT: 5,       // Mutable State
+  GLYPH_BURN: 6,      // Explicit Burn
+  GLYPH_CONTAINER: 7, // Container/Collection
+  GLYPH_ENCRYPTED: 8, // Encrypted Content
+  GLYPH_TIMELOCK: 9,  // Timelocked Reveal
+  GLYPH_AUTHORITY: 10, // Issuer Authority
+  GLYPH_WAVE: 11,     // WAVE Naming
+} as const;
+
+export type GlyphProtocolId = typeof GlyphProtocol[keyof typeof GlyphProtocol];
+
+// Algorithm IDs per Glyph v2 dMint spec (REP-3010)
+export const DmintAlgorithmId = {
+  SHA256D: 0x00,
+  BLAKE3: 0x01,
+  K12: 0x02,
+  ARGON2ID_LIGHT: 0x03,
+  RANDOMX_LIGHT: 0x04,
+} as const;
+
+// DAA Mode IDs per Glyph v2 dMint spec
+export const DaaModeId = {
+  FIXED: 0x00,
+  EPOCH: 0x01,
+  ASERT: 0x02,
+  LWMA: 0x03,
+  SCHEDULE: 0x04,
+} as const;
+
 export type NetworkKey = "mainnet" | "testnet";
 
 export type Wallet = {
