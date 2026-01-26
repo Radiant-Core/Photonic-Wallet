@@ -34,6 +34,7 @@ import Card from "@app/components/Card";
 import TokenContent from "@app/components/TokenContent";
 import { SmartToken, ContractType, SmartTokenType } from "@app/types";
 import db from "@app/db";
+import opfs from "@app/opfs";
 import {
   SwapOffer,
   getOpenOrders,
@@ -53,6 +54,95 @@ import { buildTx } from "@lib/tx";
 import rxdIcon from "/rxd.png";
 import { t } from "@lingui/macro";
 import dayjs from "dayjs";
+import Outpoint from "@lib/Outpoint";
+import { decodeGlyph } from "@lib/token";
+import { Transaction } from "@radiantblockchain/radiantjs";
+
+type RoyaltySplit = { address: string; bps: number };
+
+function parseRoyalty(payload: unknown): {
+  enforced: boolean;
+  bps: number;
+  address: string;
+  minimum: number;
+  maximum: number | null;
+  splits: RoyaltySplit[];
+} | null {
+  if (!payload || typeof payload !== "object") return null;
+  const royalty = (payload as { royalty?: unknown }).royalty;
+  if (!royalty || typeof royalty !== "object") return null;
+
+  const r = royalty as {
+    enforced?: unknown;
+    bps?: unknown;
+    address?: unknown;
+    minimum?: unknown;
+    maximum?: unknown;
+    splits?: unknown;
+  };
+
+  const enforced = r.enforced === true;
+  const bps = typeof r.bps === "number" ? r.bps : NaN;
+  const address = typeof r.address === "string" ? r.address : "";
+  const minimum = typeof r.minimum === "number" ? r.minimum : 0;
+  const maximum = typeof r.maximum === "number" ? r.maximum : null;
+
+  const splits: RoyaltySplit[] = Array.isArray(r.splits)
+    ? (r.splits
+        .map((s) => {
+          if (!s || typeof s !== "object") return null;
+          const so = s as { address?: unknown; bps?: unknown };
+          const a = typeof so.address === "string" ? so.address : "";
+          const b = typeof so.bps === "number" ? so.bps : NaN;
+          if (!a || !Number.isFinite(b)) return null;
+          return { address: a, bps: b };
+        })
+        .filter(Boolean) as RoyaltySplit[])
+    : [];
+
+  if (!Number.isFinite(bps) || bps <= 0 || bps > 10000) return null;
+  if (!address) return null;
+
+  return { enforced, bps, address, minimum, maximum, splits };
+}
+
+function computeRoyaltyAmount(
+  salePrice: number,
+  bps: number,
+  minimum: number,
+  maximum: number | null
+): number {
+  const raw = Math.floor((salePrice * bps) / 10000);
+  let clamped = Math.max(raw, minimum);
+  if (maximum !== null) clamped = Math.min(clamped, maximum);
+  return clamped;
+}
+
+async function getOfferedTokenRoyalty(
+  offeredGlyph: SmartToken
+): Promise<ReturnType<typeof parseRoyalty> | null> {
+  if (!offeredGlyph.revealOutpoint) return null;
+  try {
+    const reveal = Outpoint.fromString(offeredGlyph.revealOutpoint);
+    const txid = reveal.getTxid();
+    let hex = await opfs.getTx(txid);
+    if (!hex) {
+      hex = await electrumWorker.value.getTransaction(txid);
+      if (hex) {
+        await opfs.putTx(txid, hex);
+      }
+    }
+    if (!hex) return null;
+    const tx = new Transaction(hex);
+    const input = tx.inputs[reveal.getVout()];
+    if (!input?.script) return null;
+    const decoded = decodeGlyph(input.script);
+    if (!decoded) return null;
+    return parseRoyalty(decoded.payload);
+  } catch {
+    return null;
+  }
+}
 
 interface ParsedOrder {
   offer: SwapOffer;
@@ -307,6 +397,69 @@ export default function OpenOrders() {
           script: order.wantScript,
           value: order.wantValue,
         });
+      }
+
+      // Enforced royalties (REP-3012): only apply to RXD-priced NFT sales.
+      // Canonical ordering: vout0 = NFT to buyer, vout1 = seller payment, vout2..N = royalty outputs, change after.
+      if (
+        order.offeredGlyph &&
+        order.offeredGlyph.tokenType === SmartTokenType.NFT &&
+        !order.wantGlyph &&
+        order.wantValue &&
+        order.wantValue > 0 &&
+        outputs.length >= 2
+      ) {
+        const royalty = await getOfferedTokenRoyalty(order.offeredGlyph);
+        if (royalty?.enforced) {
+          const salePrice = order.wantValue;
+          const totalRoyalty = computeRoyaltyAmount(
+            salePrice,
+            royalty.bps,
+            royalty.minimum,
+            royalty.maximum
+          );
+
+          if (totalRoyalty > 0) {
+            const royaltyOutputs: { script: string; value: number }[] = [];
+
+            if (royalty.splits.length > 0) {
+              // Allocate split amounts deterministically. Last split receives remainder.
+              let remaining = totalRoyalty;
+              for (let i = 0; i < royalty.splits.length; i++) {
+                const split = royalty.splits[i];
+                const isLast = i === royalty.splits.length - 1;
+                const amt = isLast
+                  ? remaining
+                  : Math.floor((totalRoyalty * split.bps) / royalty.bps);
+                remaining -= amt;
+                if (amt > 0) {
+                  const script = p2pkhScript(split.address);
+                  if (!script) {
+                    throw new Error("Invalid royalty split address");
+                  }
+                  royaltyOutputs.push({
+                    script,
+                    value: amt,
+                  });
+                }
+              }
+            } else {
+              const script = p2pkhScript(royalty.address);
+              if (!script) {
+                throw new Error("Invalid royalty address");
+              }
+              royaltyOutputs.push({
+                script,
+                value: totalRoyalty,
+              });
+            }
+
+            // Insert royalties immediately after seller payment output.
+            if (royaltyOutputs.length > 0) {
+              outputs.splice(2, 0, ...royaltyOutputs);
+            }
+          }
+        }
       }
 
       const changeScript = p2pkhScript(wallet.value.address);

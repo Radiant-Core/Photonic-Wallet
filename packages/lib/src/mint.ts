@@ -412,7 +412,10 @@ export function createRevealOutputs(
             tokenRef,
             dmintParams.maxHeight,
             dmintParams.reward,
-            dMintDiffToTarget(dmintParams.difficulty)
+            dMintDiffToTarget(dmintParams.difficulty),
+            dmintParams.algorithm || 'sha256d',
+            dmintParams.daaMode || 'fixed',
+            dmintParams.daaParams
           ),
           value: mint.outputValue,
         });

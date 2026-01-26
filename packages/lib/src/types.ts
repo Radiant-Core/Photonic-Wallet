@@ -22,6 +22,9 @@ export type RevealDmintParams = {
   maxHeight: number;
   reward: number;
   premine: number;
+  algorithm?: string; // 'sha256d', 'blake3', 'k12', 'argon2light'
+  daaMode?: string;    // 'fixed', 'epoch', 'asert', 'lwma', 'schedule'
+  daaParams?: any;     // Parameters for DAA (e.g., schedule array)
 };
 
 export type RevealPsbtParams = {

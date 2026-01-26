@@ -52,5 +52,5 @@
     },
     "defaultLanguage": "en"
   },
-  "mintEmbedMaxBytes": 250000
+  "mintEmbedMaxBytes": 512000
 }

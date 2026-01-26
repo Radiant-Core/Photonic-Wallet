@@ -436,11 +436,89 @@ export function dMintScript(
   tokenRef: string,
   maxHeight: number,
   reward: number,
-  target: bigint
+  target: bigint,
+  algorithm: string = 'sha256d',
+  daaMode: string = 'fixed',
+  daaParams: any = null
 ) {
-  return `${push4bytes(height)}d8${contractRef}d0${tokenRef}${pushMinimal(
+  // Enhanced dMint script with algorithm and DAA support
+  // Algorithm IDs: sha256d=0x00, blake3=0x01, k12=0x02, argon2light=0x03
+  const algorithmIds: Record<string, string> = {
+    'sha256d': '00',
+    'blake3': '01',
+    'k12': '02',
+    'argon2light': '03'
+  };
+  
+  // DAA Mode IDs: fixed=0x00, epoch=0x01, asert=0x02, lwma=0x03, schedule=0x04
+  const daaModeIds: Record<string, string> = {
+    'fixed': '00',
+    'epoch': '01',
+    'asert': '02',
+    'lwma': '03',
+    'schedule': '04'
+  };
+  
+  const algoId = algorithmIds[algorithm] || '00';
+  const daaId = daaModeIds[daaMode] || '00';
+  
+  // For legacy contracts without algorithm support, omit the new fields
+  if (algorithm === 'sha256d' && daaMode === 'fixed') {
+    // Legacy format for backward compatibility
+    return `${push4bytes(height)}d8${contractRef}d0${tokenRef}${pushMinimal(
+      maxHeight
+    )}${pushMinimal(reward)}${pushMinimal(
+      target
+    )}bd5175c0c855797ea8597959797ea87e5a7a7eaabc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551`;
+  }
+  
+  // Enhanced format with algorithm and DAA
+  // Insert algorithm and DAA bytes after target
+  const baseScript = `${push4bytes(height)}d8${contractRef}d0${tokenRef}${pushMinimal(
     maxHeight
   )}${pushMinimal(reward)}${pushMinimal(
     target
-  )}bd5175c0c855797ea8597959797ea87e5a7a7eaabc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551`;
+  )}`;
+  
+  // Add algorithm and DAA configuration
+  const enhancedScript = `${baseScript}${algoId}${daaId}`;
+  
+  // Add DAA parameters if needed
+  let paramsScript = '';
+  if (daaParams) {
+    // Encode DAA parameters based on mode
+    switch (daaMode) {
+      case 'asert':
+        // ASERT: targetBlockTime, halfLife, asymptote
+        paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
+        paramsScript += pushMinimal(daaParams.halfLife || 1000);
+        paramsScript += pushMinimal(daaParams.asymptote || 0);
+        break;
+      case 'lwma':
+        // LWMA: targetBlockTime, windowSize
+        paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
+        paramsScript += pushMinimal(daaParams.windowSize || 144);
+        break;
+      case 'epoch':
+        // Epoch: targetBlockTime, epochLength, maxAdjustment (scaled by 100)
+        paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
+        paramsScript += pushMinimal(daaParams.epochLength || 2016);
+        paramsScript += pushMinimal(Math.floor((daaParams.maxAdjustment || 4) * 100));
+        break;
+      case 'schedule':
+        // Schedule: array of {height, difficulty} pairs
+        if (Array.isArray(daaParams.schedule)) {
+          paramsScript += pushMinimal(daaParams.schedule.length);
+          for (const item of daaParams.schedule) {
+            paramsScript += pushMinimal(item.height);
+            paramsScript += pushMinimal(item.difficulty);
+          }
+        }
+        break;
+      // 'fixed' mode doesn't need parameters
+    }
+  }
+  
+  // Complete the script with the standard dMint operations
+  return `${enhancedScript}${paramsScript}bd5175c0c855797ea8597959797ea87e5a7a7eaabc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551`;
 }
