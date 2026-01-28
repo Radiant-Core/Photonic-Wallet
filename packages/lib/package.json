@@ -32,7 +32,7 @@
   "dependencies": {
     "@bitauth/libauth": "^3.0.0",
     "@noble/hashes": "^1.5.0",
-    "@radiantblockchain/radiantjs": "github:radiantblockchain/radiantjs",
+    "@radiantblockchain/radiantjs": "github:Radiant-Core/radiantjs",
     "@scure/base": "^1.1.9",
     "@scure/bip32": "^1.5.0",
     "@scure/bip39": "^1.4.0",
