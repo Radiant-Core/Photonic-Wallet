@@ -123,8 +123,7 @@ export function payToScript(address: string): string {
 export function isP2pkh(address: string): boolean {
   try {
     const addr = new Address(address);
-    // @ts-expect-error missing definition
-    return addr.isPayToPublicKeyHash();
+    return addr.type === "pubkeyhash";
   } catch {
     return false;
   }

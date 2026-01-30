@@ -278,7 +278,7 @@ export class NFTWorker implements Subscription {
 
               // Look for delegate burn
               const delegates = tx.outputs
-                .map((o) => parseDelegateBurnScript(o.script.toHex()) as string)
+                .map((o: { script: { toHex: () => string } }) => parseDelegateBurnScript(o.script.toHex()) as string)
                 .filter(Boolean);
               delegates.length && console.debug(`Found delegates`, delegates);
               delegates.forEach(foundDelegates.add, foundDelegates);
@@ -424,7 +424,7 @@ export class NFTWorker implements Subscription {
 
     // Look for related tokens in outputs
     const outputTokens = reveal.outputs
-      .map((o) => parseNftScript(o.script.toHex()).ref) // TODO handle FT, dat
+      .map((o: { script: { toHex: () => string } }) => parseNftScript(o.script.toHex()).ref) // TODO handle FT, dat
       .filter(Boolean) as string[];
     // Validate any author and container properties
     const allRefs = [...delegatedRefs, ...outputTokens];

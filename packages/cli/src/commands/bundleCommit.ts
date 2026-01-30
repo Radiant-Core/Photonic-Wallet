@@ -441,26 +441,28 @@ async function createRelatedDelegateTokens(
       const hexAddress = Address.fromString(wallet.address).toObject().hash;
 
       // TODO can use findTokenOutput
-      const refOutputIndex = tx.outputs.findIndex((output) => {
-        const params = parseNftScript(output.script.toHex());
-        const paramsRef =
-          params.ref && Outpoint.fromString(params.ref).reverse().toString();
-        if (paramsRef !== ref) {
-          debug("Ref not equal. This might need to be fixed!");
-          return false;
+      const refOutputIndex = tx.outputs.findIndex(
+        (output: { script: { toHex: () => string } }) => {
+          const params = parseNftScript(output.script.toHex());
+          const paramsRef =
+            params.ref && Outpoint.fromString(params.ref).reverse().toString();
+          if (paramsRef !== ref) {
+            debug("Ref not equal. This might need to be fixed!");
+            return false;
+          }
+          if (params.address !== hexAddress) {
+            cmd.error(
+              chalk(
+                "Token is in a different wallet:",
+                highlight(paramsRef),
+                "Wallet:",
+                highlight(params.address)
+              )
+            );
+          }
+          return true;
         }
-        if (params.address !== hexAddress) {
-          cmd.error(
-            chalk(
-              "Token is in a different wallet:",
-              highlight(paramsRef),
-              "Wallet:",
-              highlight(params.address)
-            )
-          );
-        }
-        return true;
-      });
+      );
       if (refOutputIndex === -1) {
         cmd.error(chalk("Ref not found:", highlight(ref)));
       }
