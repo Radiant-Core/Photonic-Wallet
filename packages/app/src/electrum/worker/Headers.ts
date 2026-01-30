@@ -1,5 +1,5 @@
 import { Buffer } from "buffer";
-import { BlockHeader as RadJSBlockHeader } from "@radiantblockchain/radiantjs";
+import { BlockHeader as RadJSBlockHeader } from "@radiant-core/radiantjs";
 import { Subscription } from "@app/types";
 import { ElectrumHeaderResponse, ElectrumHeadersResponse } from "@lib/types";
 import ElectrumManager from "@app/electrum/ElectrumManager";

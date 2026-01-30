@@ -1,5 +1,5 @@
 // ESM compatibility
-import rjs from "@radiantblockchain/radiantjs";
+import rjs from "@radiant-core/radiantjs";
 
 /**
  * Glyph v2 Token Standard Constants

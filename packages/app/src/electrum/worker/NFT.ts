@@ -26,7 +26,7 @@ import {
 import {
   Transaction,
   // @ts-ignore
-} from "@radiantblockchain/radiantjs";
+} from "@radiant-core/radiantjs";
 import { bytesToHex } from "@noble/hashes/utils";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import opfs from "@app/opfs";

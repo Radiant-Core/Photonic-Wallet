@@ -39,7 +39,7 @@ import {
 import { fundTx, targetToUtxo, updateUnspent } from "./coinSelect";
 import { buildTx } from "./tx";
 import Outpoint from "./Outpoint";
-import rjs from "@radiantblockchain/radiantjs";
+import rjs from "@radiant-core/radiantjs";
 import { GLYPH_NFT } from "./protocols";
 const { Script, crypto } = rjs;
 

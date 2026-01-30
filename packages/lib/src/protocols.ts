@@ -33,15 +33,28 @@ export const PROTOCOL_NAMES: Record<number, string> = {
   [GLYPH_WAVE]: 'WAVE Name',
 };
 
-// Protocol requirements
+// Protocol requirements per Glyph v2 spec Section 3.5
 export const PROTOCOL_REQUIREMENTS: Record<number, number[]> = {
   [GLYPH_DMINT]: [GLYPH_FT],
   [GLYPH_MUT]: [GLYPH_NFT],
   [GLYPH_CONTAINER]: [GLYPH_NFT],
   [GLYPH_ENCRYPTED]: [GLYPH_NFT],
+  [GLYPH_TIMELOCK]: [GLYPH_ENCRYPTED], // Timelock requires Encrypted
   [GLYPH_AUTHORITY]: [GLYPH_NFT],
   [GLYPH_WAVE]: [GLYPH_NFT, GLYPH_MUT],
 };
+
+// Protocols that cannot exist alone (action markers or modifiers)
+export const PROTOCOLS_REQUIRE_BASE: number[] = [
+  GLYPH_DMINT,
+  GLYPH_MUT,
+  GLYPH_BURN, // BURN is an action marker
+  GLYPH_CONTAINER,
+  GLYPH_ENCRYPTED,
+  GLYPH_TIMELOCK,
+  GLYPH_AUTHORITY,
+  GLYPH_WAVE,
+];
 
 // Mutually exclusive protocols
 export const PROTOCOL_EXCLUSIONS: [number, number][] = [
@@ -97,6 +110,18 @@ export function validateProtocols(protocols: number[]): { valid: boolean; error?
           return { valid: false, error: `${PROTOCOL_NAMES[protocol]} requires ${PROTOCOL_NAMES[req]}` };
         }
       }
+    }
+  }
+  
+  // Check for protocols that can't exist alone
+  if (protocols.length === 1 && PROTOCOLS_REQUIRE_BASE.includes(protocols[0])) {
+    return { valid: false, error: `${PROTOCOL_NAMES[protocols[0]]} cannot exist alone` };
+  }
+  
+  // BURN must accompany FT or NFT (it's an action marker, not a token type)
+  if (protocols.includes(GLYPH_BURN)) {
+    if (!protocols.includes(GLYPH_FT) && !protocols.includes(GLYPH_NFT)) {
+      return { valid: false, error: 'Burn must accompany Fungible Token or Non-Fungible Token' };
     }
   }
   

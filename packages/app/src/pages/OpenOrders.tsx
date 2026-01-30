@@ -56,7 +56,7 @@ import { t } from "@lingui/macro";
 import dayjs from "dayjs";
 import Outpoint from "@lib/Outpoint";
 import { decodeGlyph } from "@lib/token";
-import { Transaction } from "@radiantblockchain/radiantjs";
+import { Transaction } from "@radiant-core/radiantjs";
 
 type RoyaltySplit = { address: string; bps: number };
 

@@ -2,7 +2,7 @@
 
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
-import rjs from "@radiantblockchain/radiantjs";
+import rjs from "@radiant-core/radiantjs";
 import { Buffer } from "buffer";
 import { UnfinalizedOutput, Utxo } from "./types";
 import { parseNftScript } from "./script";

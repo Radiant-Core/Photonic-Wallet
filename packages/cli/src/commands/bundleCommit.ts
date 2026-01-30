@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { ElectrumWS } from "ws-electrumx-client";
-import rjs from "@radiantblockchain/radiantjs";
+import rjs from "@radiant-core/radiantjs";
 import {
   electrumToCoinSel,
   errorMessage,

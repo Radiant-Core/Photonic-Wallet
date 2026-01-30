@@ -37,7 +37,7 @@ import {
   Networks,
   Script,
   Transaction,
-} from "@radiantblockchain/radiantjs";
+} from "@radiant-core/radiantjs";
 import { useState } from "react";
 import { MdOutlineSwapVert } from "react-icons/md";
 import { AiOutlineSignature } from "react-icons/ai";
