@@ -220,6 +220,7 @@ export default async function bundleCommit(
       contract,
       outputValue: (token as BundleTokenFt).supply || 1,
       payload: {
+        v: 2, // Glyph v2 version
         ...args,
         ...meta,
         ...files,

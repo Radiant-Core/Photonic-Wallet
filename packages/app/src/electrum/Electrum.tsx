@@ -10,16 +10,36 @@ import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
-const sharedSupported = "SharedWorker" in globalThis;
+// TEMP: Force dedicated worker for debugging (SharedWorker logs go to separate console)
+const sharedSupported = false; // "SharedWorker" in globalThis;
+
+// Detect Safari - it has issues with ES module workers
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+if (isSafari) {
+  console.warn("[Electrum] Safari detected - module workers may have issues");
+}
 
 // SharedWorker and Worker must be used directly so Vite can compile the worker
-const worker = sharedSupported
-  ? new SharedWorker(new URL("./worker/electrumWorker.ts", import.meta.url), {
-      type: "module",
-    }).port
-  : new Worker(new URL("./worker/electrumWorker.ts", import.meta.url), {
-      type: "module",
-    });
+let worker: Worker | MessagePort;
+try {
+  worker = sharedSupported
+    ? new SharedWorker(new URL("./worker/electrumWorker.ts", import.meta.url), {
+        type: "module",
+      }).port
+    : new Worker(new URL("./worker/electrumWorker.ts", import.meta.url), {
+        type: "module",
+      });
+  
+  // Add error listener to catch worker initialization failures
+  if (worker instanceof Worker) {
+    worker.onerror = (e) => {
+      console.error("[Electrum] Worker error:", e.message, e);
+    };
+  }
+} catch (e) {
+  console.error("[Electrum] Failed to create worker:", e);
+  throw e;
+}
 
 const wrapped = wrap<{
   setServers: (servers: string[]) => void;
@@ -75,14 +95,27 @@ export default function Electrum() {
       mainnet: string[];
       testnet: string[];
     };
-    return servers[wallet.value.net];
+    console.debug("[Electrum] Loaded servers from db:", servers, "net:", wallet.value.net);
+    return servers?.[wallet.value.net];
   }, [wallet.value.net]);
+
+  // Surface worker logs to main console for debugging
+  useLiveQuery(async () => {
+    const workerLog = (await db.kvp.get("workerDebugLog")) as { log: string; data: string; time: number } | undefined;
+    if (workerLog) {
+      console.debug("[WorkerLog]", workerLog.log, workerLog.data);
+    }
+  });
 
   // Reconnect when server config changes or when wallet is ready
   useEffect(() => {
+    console.debug("[Electrum] useEffect triggered - servers:", servers, "address:", wallet.value.address);
     if (servers && wallet.value.address) {
+      console.debug("[Electrum] Calling setServers and connect");
       electrumWorker.value.setServers(servers);
       electrumWorker.value.connect(wallet.value.address);
+    } else {
+      console.debug("[Electrum] Not connecting - servers:", !!servers, "address:", !!wallet.value.address);
     }
   }, [servers, wallet.value.address]);
 

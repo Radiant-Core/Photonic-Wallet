@@ -17,17 +17,23 @@ export default class ElectrumManager {
   }
 
   public changeEndpoint(endpoint: string): boolean {
+    console.debug("[ElectrumManager] changeEndpoint called:", endpoint);
     if (this.connected() && this.client) {
+      console.debug("[ElectrumManager] Closing existing connection");
       this.client.close("");
     }
     this.endpoint = endpoint;
     try {
+      console.debug("[ElectrumManager] Creating new ElectrumWS client");
       this.client = new ElectrumWS(endpoint);
+      console.debug("[ElectrumManager] ElectrumWS client created successfully");
     } catch (error) {
+      console.error("[ElectrumManager] Failed to create ElectrumWS client:", error);
       return false;
     }
 
     this.events.forEach(([eventName, callback]) => {
+      console.debug("[ElectrumManager] Registering event:", eventName);
       this.client?.on(eventName, callback);
     });
 

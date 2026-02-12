@@ -107,6 +107,7 @@ export function commitBundle(
   } = fundTx(address, utxos, [], target, p2pkh, defaultFeeRate);
 
   if (!funded) {
+    console.error("[mint] Coin selection failed. UTXOs:", utxos.length, "Target value:", target.reduce((a, t) => a + t.value, 0));
     throw new Error("Couldn't fund transaction");
   }
 
@@ -151,6 +152,7 @@ function createLinkCommit(
   }
 ) {
   const linkPayload: SmartTokenPayload = {
+    v: 2, // Glyph v2 version
     p: [GLYPH_NFT],
     loc: targetRefVout,
   };

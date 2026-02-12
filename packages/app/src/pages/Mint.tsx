@@ -113,6 +113,17 @@ function formatNumber(num: number) {
   }).format(num);
 }
 
+// Estimate minting fee based on file size (rough approximation)
+// Fee = (baseSize + fileSize) * feeRate * 2 (commit + reveal txs)
+function estimateMintFee(fileSizeBytes: number, currentFeeRate: number): number {
+  const baseTxSize = 500; // Base transaction overhead
+  const feeRate = currentFeeRate || 10000; // Default 10000 sat/byte
+  // Rough estimate: file size + overhead for both commit and reveal transactions
+  const estimatedSize = baseTxSize + fileSizeBytes;
+  // Multiply by ~1.5 to account for script overhead and both transactions
+  return Math.ceil(estimatedSize * feeRate * 1.5);
+}
+
 function TargetBox({
   getInputProps,
   isDragActive = false,
@@ -471,6 +482,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     const coins = await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
       .toArray();
+    
+    console.debug("[Mint] Available coins:", coins.length, "Total value:", coins.reduce((a, c) => a + c.value, 0));
 
     const [payloadFilename, content] = encodeContent(
       mode,
@@ -575,11 +588,74 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       args.ticker = ticker;
     }
 
+    // Build dmint object for v2 compliance per Glyph v2 spec Section 11.7
+    let dmintPayload: { [key: string]: unknown } | undefined;
+    if (deployMethod === "dmint") {
+      const { 
+        difficulty, 
+        maxHeight, 
+        reward, 
+        premine, 
+        numContracts,
+        algorithm, 
+        daaMode, 
+        targetBlockTime,
+        asertHalfLife,
+        asertAsymptote,
+        lwmaWindowSize,
+        epochLength,
+        maxAdjustment,
+        schedule
+      } = fields;
+      
+      dmintPayload = {
+        algo: algorithm === 'sha256d' ? 0x00 : 
+              algorithm === 'blake3' ? 0x01 : 
+              algorithm === 'k12' ? 0x02 : 
+              algorithm === 'argon2light' ? 0x03 : 0x00,
+        numContracts: parseInt(numContracts, 10),
+        maxHeight: parseInt(maxHeight, 10),
+        reward: parseInt(reward, 10),
+        premine: parseInt(premine, 10),
+        diff: parseInt(difficulty, 10),
+      };
+      
+      // Add DAA configuration if not fixed
+      if (daaMode && daaMode !== 'fixed') {
+        const daaConfig: { [key: string]: unknown } = {
+          mode: daaMode === 'epoch' ? 0x01 : 
+                daaMode === 'asert' ? 0x02 : 
+                daaMode === 'lwma' ? 0x03 : 
+                daaMode === 'schedule' ? 0x04 : 0x00,
+          targetBlockTime: parseInt(targetBlockTime, 10) || 60,
+        };
+        
+        if (daaMode === 'asert') {
+          daaConfig.halfLife = parseInt(asertHalfLife, 10) || 1000;
+          if (asertAsymptote) daaConfig.asymptote = parseInt(asertAsymptote, 10);
+        } else if (daaMode === 'lwma') {
+          daaConfig.windowSize = parseInt(lwmaWindowSize, 10) || 144;
+        } else if (daaMode === 'epoch') {
+          daaConfig.epochLength = parseInt(epochLength, 10) || 2016;
+          daaConfig.maxAdjustment = parseFloat(maxAdjustment) || 4;
+        } else if (daaMode === 'schedule' && schedule) {
+          daaConfig.schedule = schedule.split(',').map((pair: string) => {
+            const [h, d] = pair.split(':').map(Number);
+            return { height: h, difficulty: d };
+          });
+        }
+        
+        dmintPayload.daa = daaConfig;
+      }
+    }
+
     const payload: SmartTokenPayload = {
+      v: 2, // Glyph v2 version
       p: protocols,
       ...(Object.keys(args).length ? args : undefined),
       ...meta,
       ...fileObj,
+      ...(dmintPayload ? { dmint: dmintPayload } : undefined),
     };
 
     try {
@@ -1121,9 +1197,22 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 </>
               )}
               {mode === "file" && fileState.file?.data && !fileState.ipfs && (
-                <Alert status="info">
-                  <AlertIcon /> {t`Your file will be stored on-chain.`}
-                </Alert>
+                <>
+                  <Alert status="info">
+                    <AlertIcon /> {t`Your file will be stored on-chain.`}
+                  </Alert>
+                  <Alert status="warning" mt={2}>
+                    <AlertIcon />
+                    <Text>
+                      {t`Estimated fee: ~${photonsToRXD(estimateMintFee(fileState.file.size || 0, feeRate.value))} ${network.value.ticker}`}
+                      {(fileState.file.size || 0) > 50000 && (
+                        <Text as="span" fontWeight="bold" color="orange.300">
+                          {" "}{t`(Large file - consider compressing)`}
+                        </Text>
+                      )}
+                    </Text>
+                  </Alert>
+                </>
               )}
               {mode === "file" && fileState.file?.data && fileState.ipfs && (
                 <Alert status="info">
@@ -1304,12 +1393,25 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
                   {/* Combined Size Display */}
                   {(dualFileState.previewImage || dualFileState.contentFile) && (
-                    <Alert status="info">
-                      <AlertIcon />
-                      <Text>
-                        {t`Combined size: ${filesize(dualFileState.totalSize) as string} / ${formatNumber(mintEmbedMaxBytes / 1000)} KB`}
-                      </Text>
-                    </Alert>
+                    <>
+                      <Alert status="info">
+                        <AlertIcon />
+                        <Text>
+                          {t`Combined size: ${filesize(dualFileState.totalSize) as string} / ${formatNumber(mintEmbedMaxBytes / 1000)} KB`}
+                        </Text>
+                      </Alert>
+                      <Alert status="warning" mt={2}>
+                        <AlertIcon />
+                        <Text>
+                          {t`Estimated fee: ~${photonsToRXD(estimateMintFee(dualFileState.totalSize, feeRate.value))} ${network.value.ticker}`}
+                          {dualFileState.totalSize > 50000 && (
+                            <Text as="span" fontWeight="bold" color="orange.300">
+                              {" "}{t`(Large file - consider compressing)`}
+                            </Text>
+                          )}
+                        </Text>
+                      </Alert>
+                    </>
                   )}
                 </>
               )}

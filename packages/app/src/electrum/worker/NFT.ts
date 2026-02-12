@@ -435,9 +435,11 @@ export class NFTWorker implements Subscription {
     const immutable = isImmutableToken(payload);
 
     const remote = remoteFiles.main;
+    // Support dual-file tokens: use preview for thumbnails, fallback to main
+    const embedSource = embeddedFiles.preview || embeddedFiles.main;
     const embed =
-      embeddedFiles.main && embeddedFiles.main.b.length < fileSizeLimit
-        ? embeddedFiles.main
+      embedSource && embedSource.b.length < fileSizeLimit
+        ? embedSource
         : undefined;
 
     // Containers and authors will be fetched later

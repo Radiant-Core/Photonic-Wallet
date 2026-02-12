@@ -461,18 +461,40 @@ export function dMintScript(
   const algoId = algorithmIds[algorithm] || '00';
   const daaId = daaModeIds[daaMode] || '00';
   
+  // dMint contract bytecode structure:
+  //   Part A (preimage building): 5175c0c855797ea8597959797ea87e5a7a7e
+  //   PoW hash opcode: aa=OP_HASH256(SHA256d), ee=OP_BLAKE3, ef=OP_K12
+  //   Part B (target comparison + contract verification):
+  //     bc01147f77587f040000000088817600a269a269577ae500a069567ae600a069
+  //     01d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a
+  //     9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d5478
+  //     54807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551
+  // NOTE: The 'aa' bytes in Part B are OP_HASH256 for contract integrity checks,
+  //       NOT the PoW hash, and must remain unchanged for all algorithms.
+  
+  const BYTECODE_PART_A = '5175c0c855797ea8597959797ea87e5a7a7e';
+  const BYTECODE_PART_B = 'bc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551';
+  
+  // Select PoW hash opcode based on algorithm
+  const powHashOpcodes: Record<string, string> = {
+    'sha256d': 'aa',  // OP_HASH256 (SHA256d)
+    'blake3': 'ee',   // OP_BLAKE3
+    'k12': 'ef',      // OP_K12
+  };
+  const powHashOp = powHashOpcodes[algorithm] || 'aa';
+  
+  const contractBytecode = `${BYTECODE_PART_A}${powHashOp}${BYTECODE_PART_B}`;
+  
   // For legacy contracts without algorithm support, omit the new fields
   if (algorithm === 'sha256d' && daaMode === 'fixed') {
-    // Legacy format for backward compatibility
     return `${push4bytes(height)}d8${contractRef}d0${tokenRef}${pushMinimal(
       maxHeight
     )}${pushMinimal(reward)}${pushMinimal(
       target
-    )}bd5175c0c855797ea8597959797ea87e5a7a7eaabc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551`;
+    )}bd${contractBytecode}`;
   }
   
   // Enhanced format with algorithm and DAA
-  // Insert algorithm and DAA bytes after target
   const baseScript = `${push4bytes(height)}d8${contractRef}d0${tokenRef}${pushMinimal(
     maxHeight
   )}${pushMinimal(reward)}${pushMinimal(
@@ -485,27 +507,22 @@ export function dMintScript(
   // Add DAA parameters if needed
   let paramsScript = '';
   if (daaParams) {
-    // Encode DAA parameters based on mode
     switch (daaMode) {
       case 'asert':
-        // ASERT: targetBlockTime, halfLife, asymptote
         paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
         paramsScript += pushMinimal(daaParams.halfLife || 1000);
         paramsScript += pushMinimal(daaParams.asymptote || 0);
         break;
       case 'lwma':
-        // LWMA: targetBlockTime, windowSize
         paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
         paramsScript += pushMinimal(daaParams.windowSize || 144);
         break;
       case 'epoch':
-        // Epoch: targetBlockTime, epochLength, maxAdjustment (scaled by 100)
         paramsScript += pushMinimal(daaParams.targetBlockTime || 60);
         paramsScript += pushMinimal(daaParams.epochLength || 2016);
         paramsScript += pushMinimal(Math.floor((daaParams.maxAdjustment || 4) * 100));
         break;
       case 'schedule':
-        // Schedule: array of {height, difficulty} pairs
         if (Array.isArray(daaParams.schedule)) {
           paramsScript += pushMinimal(daaParams.schedule.length);
           for (const item of daaParams.schedule) {
@@ -514,10 +531,8 @@ export function dMintScript(
           }
         }
         break;
-      // 'fixed' mode doesn't need parameters
     }
   }
   
-  // Complete the script with the standard dMint operations
-  return `${enhancedScript}${paramsScript}bd5175c0c855797ea8597959797ea87e5a7a7eaabc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551`;
+  return `${enhancedScript}${paramsScript}bd${contractBytecode}`;
 }

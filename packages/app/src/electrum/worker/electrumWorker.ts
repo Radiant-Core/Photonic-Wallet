@@ -20,24 +20,45 @@ let servers: string[] = [];
 let serverNum = 0;
 let reconnectTimer: Timer = null;
 let connectTimer: Timer = null;
+let connectionAttempts = 0;
+const MAX_ATTEMPTS_BEFORE_PAUSE = 10; // Pause after trying all servers twice
+const FAILOVER_TIMEOUT = 8000; // 8 seconds before trying next server
+const PAUSE_DURATION = 30000; // 30 second pause after max attempts
+
+// Helper to log to both console and DB for debugging
+function workerLog(msg: string, data?: unknown) {
+  console.debug(msg, data);
+  db.kvp.put({ log: msg, data: JSON.stringify(data), time: Date.now() }, "workerDebugLog");
+}
 
 const worker = {
   ready: false,
   active: true,
   setServers(newServers: string[]) {
+    workerLog("[Worker] setServers called:", newServers);
     serverNum = 0;
     servers = newServers;
   },
   connect(_address: string) {
+    workerLog("[Worker] connect called", { address: _address, servers, serverNum });
     const endpoint = servers[serverNum];
+    workerLog("[Worker] Selected endpoint:", endpoint);
     if (electrum.endpoint !== endpoint || address !== _address) {
       this.ready = true;
       address = _address;
-      console.debug(`Connecting: ${endpoint} ${address}`);
-      db.kvp.put({ status: ElectrumStatus.CONNECTING }, "electrumStatus");
-      electrum.changeEndpoint(endpoint);
+      workerLog(`[Worker] Connecting to: ${endpoint}`);
+      db.kvp.put({ status: ElectrumStatus.CONNECTING, server: endpoint }, "electrumStatus");
+      const result = electrum.changeEndpoint(endpoint);
+      workerLog("[Worker] changeEndpoint result:", result);
+      if (!result) {
+        workerLog("[Worker] changeEndpoint failed, trying next server");
+        tryNextServer();
+        return;
+      }
       clearTimers();
-      connectTimer = setTimeout(tryNextServer, 10000);
+      connectTimer = setTimeout(tryNextServer, FAILOVER_TIMEOUT);
+    } else {
+      workerLog("[Worker] Skipping connection - already connected to same endpoint/address");
     }
   },
   reconnect() {
@@ -46,11 +67,16 @@ const worker = {
   disconnect(reason: string) {
     electrum.disconnect(reason);
   },
-  async broadcast(hex: string) {
-    return await electrum.client?.request(
+  async broadcast(hex: string): Promise<string> {
+    if (!electrum.client) {
+      throw new Error("Electrum client not connected");
+    }
+    const result = await electrum.client.request(
       "blockchain.transaction.broadcast",
       hex
     );
+    workerLog("[Worker] Broadcast result:", result);
+    return result as string;
   },
   async getRef(ref: string) {
     return (await electrum.client?.request(
@@ -110,28 +136,50 @@ function clearTimers() {
 }
 
 function tryNextServer() {
-  console.debug("Trying next server");
-  serverNum = (serverNum + 1) % Math.max(1, servers.length);
+  connectionAttempts++;
+  const totalServers = Math.max(1, servers.length);
+  serverNum = (serverNum + 1) % totalServers;
+  
+  // If we've tried all servers multiple times, pause before retrying
+  if (connectionAttempts >= MAX_ATTEMPTS_BEFORE_PAUSE) {
+    workerLog(`[Worker] Tried all servers ${Math.floor(connectionAttempts / totalServers)} times, pausing for ${PAUSE_DURATION/1000}s`);
+    db.kvp.put({ status: ElectrumStatus.DISCONNECTED, reason: "all_servers_failed" }, "electrumStatus");
+    reconnectTimer = setTimeout(() => {
+      connectionAttempts = 0; // Reset counter after pause
+      worker.connect(address);
+    }, PAUSE_DURATION);
+    return;
+  }
+  
+  workerLog(`[Worker] Trying next server (attempt ${connectionAttempts}): ${servers[serverNum]}`);
   worker.connect(address);
 }
 
 electrum.addEvent("connected", () => {
+  workerLog("[Worker] CONNECTED event received");
   clearTimers();
-  db.kvp.put({ status: ElectrumStatus.CONNECTED }, "electrumStatus");
+  connectionAttempts = 0; // Reset on successful connection
+  db.kvp.put({ status: ElectrumStatus.CONNECTED, server: electrum.endpoint }, "electrumStatus");
   if (address) {
-    console.debug("Connected");
+    workerLog("[Worker] Connected, registering address:", address);
     rxd.register(address);
     nft.register(address);
     ft.register(address);
   }
 });
 
+electrum.addEvent("error", (error: unknown) => {
+  workerLog("[Worker] ERROR event received:", error);
+});
+
 electrum.addEvent("close", (event: unknown) => {
+  workerLog("[Worker] CLOSE event received:", event);
   // Reason will be "user" for disconnects initiated by the user
   const { reason } = event as { reason: string };
   db.kvp.put({ status: ElectrumStatus.DISCONNECTED, reason }, "electrumStatus");
 
   if (!reason) {
+    workerLog("[Worker] No reason given, will try next server in 5s");
     // Allow some time to reconnect before trying a different server
     reconnectTimer = setTimeout(tryNextServer, 5000);
   }

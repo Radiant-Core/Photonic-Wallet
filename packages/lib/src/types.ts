@@ -87,13 +87,34 @@ export type TokenRevealParams =
   | RevealDmintParams
   | RevealPsbtParams;
 
+export type DmintPayload = {
+  algo: number;           // Algorithm ID: 0x00=sha256d, 0x01=blake3, 0x02=k12, 0x03=argon2light
+  numContracts: number;   // Number of mining contracts
+  maxHeight: number;
+  reward: number;
+  premine: number;
+  diff: number;
+  daa?: {
+    mode: number;         // DAA mode: 0x00=fixed, 0x01=epoch, 0x02=asert, 0x03=lwma, 0x04=schedule
+    targetBlockTime: number;
+    halfLife?: number;    // For ASERT
+    asymptote?: number;   // For ASERT
+    windowSize?: number;  // For LWMA
+    epochLength?: number; // For Epoch
+    maxAdjustment?: number; // For Epoch
+    schedule?: { height: number; difficulty: number }[]; // For Schedule
+  };
+};
+
 export type SmartTokenPayload = {
+  v?: number;             // Glyph version (2 for v2)
   p: (string | number)[];
   in?: Uint8Array[];
   by?: Uint8Array[];
   attrs?: {
     [key: string]: unknown;
   };
+  dmint?: DmintPayload;   // dMint configuration per v2 spec
   [key: string]: unknown;
 };
 

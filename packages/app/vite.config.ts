@@ -94,10 +94,22 @@ export default defineConfig({
       },
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
-      plugins: [NodeGlobalsPolyfillPlugin({ buffer: false })],
+      plugins: [NodeGlobalsPolyfillPlugin({ buffer: true })],
     },
   },
   worker: {
     format: "es",
+    rollupOptions: {
+      output: {
+        // Ensure proper format for Safari compatibility
+        inlineDynamicImports: true,
+      },
+    },
+    plugins: () => [
+      topLevelAwait({
+        promiseExportName: "__tla",
+        promiseImportName: (i) => `__tla_${i}`,
+      }),
+    ],
   },
 });
