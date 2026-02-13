@@ -611,8 +611,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       dmintPayload = {
         algo: algorithm === 'sha256d' ? 0x00 : 
               algorithm === 'blake3' ? 0x01 : 
-              algorithm === 'k12' ? 0x02 : 
-              algorithm === 'argon2light' ? 0x03 : 0x00,
+              algorithm === 'k12' ? 0x02 : 0x00,
         numContracts: parseInt(numContracts, 10),
         maxHeight: parseInt(maxHeight, 10),
         reward: parseInt(reward, 10),
@@ -1025,8 +1024,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
   const calcTimeToMine = (diff: number) => {
     // 33 bits (4 bytes + 1 bit to make the next 64 bit number unsigned)
-    // Estimate is for RTX 4090, approx 5 GH/s
-    const seconds = Math.round((diff * Math.pow(2, 33)) / 5000000000);
+    // Hashrate estimates per algorithm (RTX 4090 approx):
+    //   SHA256d: ~5 GH/s, Blake3: ~8 GH/s, K12: ~6 GH/s
+    const hashRates: Record<string, number> = {
+      'sha256d': 5_000_000_000,
+      'blake3': 8_000_000_000,
+      'k12': 6_000_000_000,
+    };
+    const rate = hashRates[formData.algorithm] || 5_000_000_000;
+    const seconds = Math.round((diff * Math.pow(2, 33)) / rate);
     if (seconds > 86400) {
       return `${Math.round(seconds / 864) / 100} days`;
     }
@@ -1586,22 +1592,25 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         >
                           <option value="sha256d">SHA256d (Legacy)</option>
                           <option value="blake3">Blake3 (Recommended)</option>
-                          <option value="k12">KangarooTwelve (Available)</option>
-                          <option value="argon2light">Argon2id-Light (Available)</option>
+                          <option value="k12">KangarooTwelve</option>
                         </Select>
                         <FormHelperText>
                           {formData.algorithm === 'sha256d' 
-                            ? "Legacy algorithm, competes with Radiant mining"
+                            ? "Legacy double-SHA256 algorithm. Competes with Radiant L1 mining hashrate."
                             : formData.algorithm === 'blake3'
-                            ? "High-performance, GPU-friendly algorithm"
+                            ? "High-performance GPU-friendly hash. Requires V2 fork (block 410,000)."
                             : formData.algorithm === 'k12'
-                            ? "Keccak-based algorithm, excellent CPU/GPU balance"
-                            : formData.algorithm === 'argon2light'
-                            ? "Memory-hard algorithm, levels playing field between GPUs"
-                            : "Coming in Phase 3"
+                            ? "Keccak-based hash, excellent CPU/GPU balance. Requires V2 fork (block 410,000)."
+                            : ""
                           }
                         </FormHelperText>
                       </FormControl>
+                      {(formData.algorithm === 'blake3' || formData.algorithm === 'k12') && (
+                        <Alert status="info" fontSize="sm">
+                          <AlertIcon />
+                          {formData.algorithm === 'blake3' ? 'Blake3' : 'KangarooTwelve'} uses on-chain OP_{formData.algorithm === 'blake3' ? 'BLAKE3' : 'K12'} (V2 hard fork, block 410,000). Contracts deployed before activation will not be mineable.
+                        </Alert>
+                      )}
                       <FormControl>
                         <FormLabel>{t`Difficulty Adjustment`}</FormLabel>
                         <Select
@@ -1764,7 +1773,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         />
                         {timeToMine && (
                           <FormHelperText>
-                            Approx {timeToMine} to mine on an RTX 4090
+                            Approx {timeToMine} to mine on an RTX 4090 ({formData.algorithm === 'blake3' ? 'Blake3' : formData.algorithm === 'k12' ? 'K12' : 'SHA256d'})
                           </FormHelperText>
                         )}
                         {formData.daaMode === 'fixed' && Number(formData.difficulty) < 2500000 && (

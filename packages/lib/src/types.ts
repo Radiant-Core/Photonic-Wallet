@@ -72,7 +72,7 @@ export type RevealDmintParams = {
   maxHeight: number;
   reward: number;
   premine: number;
-  algorithm?: string; // 'sha256d', 'blake3', 'k12', 'argon2light'
+  algorithm?: string; // 'sha256d', 'blake3', 'k12'
   daaMode?: string;    // 'fixed', 'epoch', 'asert', 'lwma', 'schedule'
   daaParams?: any;     // Parameters for DAA (e.g., schedule array)
 };
@@ -88,7 +88,7 @@ export type TokenRevealParams =
   | RevealPsbtParams;
 
 export type DmintPayload = {
-  algo: number;           // Algorithm ID: 0x00=sha256d, 0x01=blake3, 0x02=k12, 0x03=argon2light
+  algo: number;           // Algorithm ID: 0x00=sha256d, 0x01=blake3, 0x02=k12
   numContracts: number;   // Number of mining contracts
   maxHeight: number;
   reward: number;

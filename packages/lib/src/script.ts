@@ -441,12 +441,11 @@ export function dMintScript(
   daaParams: any = null
 ) {
   // Enhanced dMint script with algorithm and DAA support
-  // Algorithm IDs: sha256d=0x00, blake3=0x01, k12=0x02, argon2light=0x03
+  // Algorithm IDs: sha256d=0x00, blake3=0x01, k12=0x02
   const algorithmIds: Record<string, string> = {
     'sha256d': '00',
     'blake3': '01',
     'k12': '02',
-    'argon2light': '03'
   };
   
   // DAA Mode IDs: fixed=0x00, epoch=0x01, asert=0x02, lwma=0x03, schedule=0x04
