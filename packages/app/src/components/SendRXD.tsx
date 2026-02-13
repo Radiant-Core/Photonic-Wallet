@@ -128,7 +128,13 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
 
       onSuccess && onSuccess(txid);
     } catch (error) {
-      setErrorMessage(t`Could not send transaction`);
+      if (error instanceof Error && error.message === "Electrum client not connected") {
+        setErrorMessage(t`Not connected to server. Check your network connection.`);
+      } else if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage(t`Could not send transaction`);
+      }
       console.error(error);
       setSuccess(false);
       setLoading(false);

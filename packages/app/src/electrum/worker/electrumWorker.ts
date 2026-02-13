@@ -43,6 +43,15 @@ const worker = {
     workerLog("[Worker] connect called", { address: _address, servers, serverNum });
     const endpoint = servers[serverNum];
     workerLog("[Worker] Selected endpoint:", endpoint);
+
+    // If already connected to ANY valid server, don't tear down the connection
+    // just because the React effect re-fired with a different serverNum.
+    // Only reconnect if the address changed or we have no connection at all.
+    if (electrum.connected() && address === _address) {
+      workerLog("[Worker] Already connected, skipping reconnect");
+      return;
+    }
+
     if (electrum.endpoint !== endpoint || address !== _address) {
       this.ready = true;
       address = _address;
