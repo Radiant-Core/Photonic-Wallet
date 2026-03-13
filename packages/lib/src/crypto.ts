@@ -7,6 +7,13 @@ import { randomBytes } from "@noble/hashes/utils";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
+/** Extract a plain ArrayBuffer from a Uint8Array (TS 5.9 BufferSource compat) */
+function toAB(u: Uint8Array): ArrayBuffer {
+  const ab = new ArrayBuffer(u.byteLength);
+  new Uint8Array(ab).set(u);
+  return ab;
+}
+
 /**
  * Encrypted content structure
  */
@@ -35,7 +42,7 @@ export async function encryptContentAES(
   // Import key
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key,
+    toAB(key),
     { name: "AES-GCM" },
     false,
     ["encrypt"]
@@ -45,11 +52,11 @@ export async function encryptContentAES(
   const encrypted = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
-      iv: nonce,
+      iv: toAB(nonce),
       tagLength: 128, // 16 bytes
     },
     cryptoKey,
-    content
+    toAB(content)
   );
 
   // Split ciphertext and tag
@@ -83,7 +90,7 @@ export async function decryptContentAES(
   // Import key
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key,
+    toAB(key),
     { name: "AES-GCM" },
     false,
     ["decrypt"]
@@ -99,7 +106,7 @@ export async function decryptContentAES(
     const decrypted = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv: encrypted.nonce,
+        iv: toAB(encrypted.nonce),
         tagLength: 128,
       },
       cryptoKey,
@@ -136,7 +143,7 @@ export async function deriveKeyFromPassword(
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: "PBKDF2",
-      salt: usedSalt,
+      salt: toAB(usedSalt),
       iterations,
       hash: "SHA-256",
     },
@@ -216,7 +223,7 @@ export async function encryptForPublicKey(
   // Import recipient public key
   const recipientKey = await crypto.subtle.importKey(
     "raw",
-    hexToBytes(recipientPublicKey),
+    toAB(hexToBytes(recipientPublicKey)),
     {
       name: "ECDH",
       namedCurve: "P-256",
@@ -256,7 +263,7 @@ export async function decryptWithPrivateKey(
   // Import ephemeral public key
   const ephemeralKey = await crypto.subtle.importKey(
     "raw",
-    hexToBytes(ephemeralPublicKey),
+    toAB(hexToBytes(ephemeralPublicKey)),
     {
       name: "ECDH",
       namedCurve: "P-256",

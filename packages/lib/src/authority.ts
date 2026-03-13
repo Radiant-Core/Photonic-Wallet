@@ -138,15 +138,16 @@ export function verifyAuthorityChain(
   authorityTokens: GlyphV2Metadata[]
 ): { valid: boolean; error?: string; authority?: GlyphV2Metadata } {
   // Check if token has 'by' field (issued by authority)
-  if (!tokenMetadata.by || tokenMetadata.by.length === 0) {
+  const byField = (tokenMetadata as Record<string, unknown>).by as Uint8Array[] | undefined;
+  if (!byField || byField.length === 0) {
     return { valid: false, error: "Token has no issuer reference" };
   }
 
   // Get issuer ref from token
-  const issuerRefBytes = tokenMetadata.by[0];
-  const issuerRef = Outpoint.fromBuffer(Buffer.from(issuerRefBytes))
-    .reverse()
-    .toString();
+  const issuerRefBytes = byField[0];
+  const issuerRef = Outpoint.fromString(
+    Buffer.from(issuerRefBytes).toString("hex")
+  ).reverse().toString();
 
   // Find matching authority token
   const authority = authorityTokens.find((auth) => {

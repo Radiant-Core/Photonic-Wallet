@@ -191,10 +191,9 @@ export default function WaveRegister() {
 
   return (
     <Container maxW="container.md" py={8}>
-      <PageHeader
-        title={t`Register WAVE Name`}
-        subtitle={t`Register a human-readable name on the Radiant blockchain`}
-      />
+      <PageHeader>
+        {t`Register WAVE Name`}
+      </PageHeader>
 
       <ContentContainer>
         <VStack spacing={6} align="stretch">

@@ -237,9 +237,12 @@ export function getContainerRef(metadata: GlyphV2Metadata): string | undefined {
   }
 
   // Fallback to legacy 'in' field
-  if (metadata.in && metadata.in.length > 0) {
-    const refBytes = metadata.in[0];
-    return Outpoint.fromBuffer(Buffer.from(refBytes)).reverse().toString();
+  const inField = (metadata as Record<string, unknown>).in as Uint8Array[] | undefined;
+  if (inField && inField.length > 0) {
+    const refBytes = inField[0];
+    return Outpoint.fromString(
+      Buffer.from(refBytes).toString("hex")
+    ).reverse().toString();
   }
 
   return undefined;

@@ -177,6 +177,11 @@ export type NetworkConfig = {
     bits: number;
     prevTime: number;
   };
+  anchorV2?: {
+    height: number;
+    bits: number;
+    prevTime: number;
+  };
   explorer: {
     tx: string;
   };

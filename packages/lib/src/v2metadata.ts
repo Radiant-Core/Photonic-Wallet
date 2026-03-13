@@ -232,7 +232,7 @@ export function signMetadata(
   const message = sha256(Buffer.concat([prefix, commitHash]));
 
   // Sign message
-  const sig = privKey.sign(Buffer.from(message));
+  const sig = (privKey as any).sign(Buffer.from(message));
 
   // Return metadata with signature
   return {
@@ -278,7 +278,7 @@ export function verifyCreatorSignature(
 
     // Verify signature
     const pubKey = rjs.PublicKey.fromString(creator.pubkey);
-    const signature = rjs.crypto.Signature.fromString(creator.sig);
+    const signature = rjs.crypto.Signature.fromString(creator.sig!);
     const valid = rjs.crypto.ECDSA.verify(
       Buffer.from(message),
       signature,

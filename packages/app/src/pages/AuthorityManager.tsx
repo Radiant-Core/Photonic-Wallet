@@ -157,10 +157,9 @@ export default function AuthorityManager() {
 
   return (
     <Container maxW="container.md" py={8}>
-      <PageHeader
-        title={t`Authority Token Manager`}
-        subtitle={t`Create and manage authority tokens for access control`}
-      />
+      <PageHeader>
+        {t`Authority Token Manager`}
+      </PageHeader>
 
       <ContentContainer>
         <Tabs colorScheme="blue">
@@ -276,6 +275,7 @@ export default function AuthorityManager() {
                     type="checkbox"
                     checked={revocable}
                     onChange={(e) => setRevocable(e.target.checked)}
+                    aria-label="Revocable"
                   />
                   <FormHelperText ml={3} mb={0}>
                     <Trans>Can this authority be revoked later?</Trans>

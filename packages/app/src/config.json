@@ -4,9 +4,14 @@
       "name": "Radiant",
       "ticker": "RXD",
       "anchor": {
-        "height": 1421481,
-        "bits": 486604799,
-        "prevTime": 1605445400
+        "height": 18206,
+        "bits": 453224288,
+        "prevTime": 1657404650
+      },
+      "anchorV2": {
+        "height": 409999,
+        "bits": 436243769,
+        "prevTime": 1773088826
       },
       "explorer": {
         "tx": "https://explorer.radiantblockchain.org/tx/{txid}"
