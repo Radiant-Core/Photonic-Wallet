@@ -97,6 +97,13 @@ export default function ViewSwap({
             {text2}
           </Text>
         </Box>
+        {!showBroadcast && (
+          <Alert status="info" mt={4}>
+            <AlertIcon />
+            This is a partially signed swap offer. Copy and share the hex locally.
+            It cannot be broadcast directly until another party completes it.
+          </Alert>
+        )}
         {broadcastTxid && (
           <Alert status="success" mt={4}>
             <AlertIcon />

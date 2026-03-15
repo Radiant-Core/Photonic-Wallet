@@ -37,6 +37,7 @@ import db from "@app/db";
 import opfs from "@app/opfs";
 import {
   SwapOffer,
+  assetToSwapTokenId,
   getOpenOrders,
   getOpenOrdersByWant,
   parsePriceTerms,
@@ -48,15 +49,25 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { wallet, openModal, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { reverseRef } from "@lib/Outpoint";
-import { ftScript, nftScript, p2pkhScript } from "@lib/script";
-import { fundTx, SelectableInput } from "@lib/coinSelect";
+import {
+  ftScript,
+  nftScript,
+  p2pkhScript,
+  parseFtScript,
+  parseNftScript,
+  parseP2pkhScript,
+} from "@lib/script";
+import { accumulateInputs, fundTx, SelectableInput } from "@lib/coinSelect";
 import { buildTx } from "@lib/tx";
 import rxdIcon from "/rxd.png";
 import { t } from "@lingui/macro";
 import dayjs from "dayjs";
 import Outpoint from "@lib/Outpoint";
 import { decodeGlyph } from "@lib/token";
-import { Transaction } from "@radiant-core/radiantjs";
+import { Transaction, Script } from "@radiant-core/radiantjs";
+import { TransferError } from "@lib/transfer";
+import { SwapPrepareError } from "./Swap";
+import { Utxo } from "@lib/types";
 
 type RoyaltySplit = { address: string; bps: number };
 
@@ -118,6 +129,26 @@ function computeRoyaltyAmount(
   return clamped;
 }
 
+function scriptMatchesContract(
+  script: string,
+  contractType: ContractType,
+  tokenRefLE?: string
+): boolean {
+  if (contractType === ContractType.RXD) {
+    return Boolean(parseP2pkhScript(script).address);
+  }
+
+  if (!tokenRefLE) {
+    return false;
+  }
+
+  if (contractType === ContractType.NFT) {
+    return parseNftScript(script).ref === tokenRefLE;
+  }
+
+  return parseFtScript(script).ref === tokenRefLE;
+}
+
 async function getOfferedTokenRoyalty(
   offeredGlyph: SmartToken
 ): Promise<ReturnType<typeof parseRoyalty> | null> {
@@ -150,6 +181,41 @@ interface ParsedOrder {
   wantGlyph?: SmartToken;
   wantValue?: number;
   wantScript?: string;
+  wantOutputs?: { script: string; value: number }[];
+}
+
+type TokenFunding = {
+  inputs: SelectableInput[];
+  outputs: { script: string; value: number }[];
+};
+
+async function fundFungible(
+  refLE: string,
+  value: number
+): Promise<TokenFunding> {
+  const fromScript = ftScript(wallet.value.address, refLE);
+  const tokens = await db.txo.where({ script: fromScript, spent: 0 }).toArray();
+  const accum = accumulateInputs(tokens, value);
+
+  if (accum.sum < value) {
+    throw new TransferError("Insufficient token balance");
+  }
+
+  const outputs = [];
+  if (accum.sum > value) {
+    outputs.push({ script: fromScript, value: accum.sum - value });
+  }
+
+  return { inputs: accum.inputs, outputs };
+}
+
+async function fundNonFungible(refLE: string): Promise<TokenFunding> {
+  const fromScript = nftScript(wallet.value.address, refLE);
+  const nft = await db.txo.where({ script: fromScript, spent: 0 }).first();
+  if (!nft) {
+    throw new SwapPrepareError("Token not found");
+  }
+  return { inputs: [nft], outputs: [] };
 }
 
 function TokenIcon({ glyph }: { glyph?: SmartToken }) {
@@ -229,6 +295,27 @@ export default function OpenOrders() {
   // Get all known glyphs for display
   const glyphs = useLiveQuery(() => db.glyph.toArray(), []);
   const glyphMap = new Map(glyphs?.map((g) => [g.ref, g]) || []);
+  const glyphByTokenId = new Map(
+    glyphs?.map((g) => [
+      assetToSwapTokenId(
+        g.tokenType === SmartTokenType.NFT ? ContractType.NFT : ContractType.FT,
+        g.ref
+      ),
+      g,
+    ]) || []
+  );
+
+  const normalizeTokenSearch = (tokenRef?: string) => {
+    if (!tokenRef) {
+      return undefined;
+    }
+
+    const trimmed = tokenRef.trim();
+    if (trimmed.length === 72) {
+      return Outpoint.fromString(trimmed).refHash();
+    }
+    return trimmed;
+  };
 
   const checkIndexAvailability = useCallback(async () => {
     const available = await isSwapIndexAvailable();
@@ -243,10 +330,11 @@ export default function OpenOrders() {
         let rawOrders: SwapOffer[] = [];
 
         if (tokenRef) {
+          const tokenId = normalizeTokenSearch(tokenRef) as string;
           // Search by specific token
           const [byOffered, byWant] = await Promise.all([
-            getOpenOrders(tokenRef, 50).catch(() => []),
-            getOpenOrdersByWant(tokenRef, 50).catch(() => []),
+            getOpenOrders(tokenId, 50).catch(() => []),
+            getOpenOrdersByWant(tokenId, 50).catch(() => []),
           ]);
           rawOrders = [...byOffered, ...byWant];
         } else {
@@ -255,12 +343,18 @@ export default function OpenOrders() {
           const allOrders: SwapOffer[] = [];
 
           for (const glyph of userGlyphs.slice(0, 10)) {
-            // Limit to first 10 tokens
             try {
-              const wantOrders = await getOpenOrdersByWant(glyph.ref, 20);
+              const wantOrders = await getOpenOrdersByWant(
+                assetToSwapTokenId(
+                  glyph.tokenType === SmartTokenType.NFT
+                    ? ContractType.NFT
+                    : ContractType.FT,
+                  glyph.ref
+                ),
+                20
+              );
               allOrders.push(...wantOrders);
             } catch {
-              // Ignore errors for individual tokens
             }
           }
           rawOrders = allOrders;
@@ -271,12 +365,16 @@ export default function OpenOrders() {
           const terms = parsePriceTerms(offer.price_terms);
           return {
             offer,
-            offeredGlyph: glyphMap.get(offer.tokenid),
+            offeredGlyph:
+              offer.tokenid === "00".repeat(32)
+                ? undefined
+                : glyphByTokenId.get(offer.tokenid),
             wantGlyph: offer.want_tokenid
-              ? glyphMap.get(offer.want_tokenid)
+              ? glyphByTokenId.get(offer.want_tokenid)
               : undefined,
             wantValue: terms?.value,
             wantScript: terms?.script,
+            wantOutputs: terms?.outputs,
           };
         });
 
@@ -304,7 +402,7 @@ export default function OpenOrders() {
         setLoading(false);
       }
     },
-    [glyphs, glyphMap, toast]
+    [glyphByTokenId, glyphs, toast]
   );
 
   useEffect(() => {
@@ -330,77 +428,94 @@ export default function OpenOrders() {
     }
 
     try {
-      // Fetch the PSRT from the offered UTXO
       const rawTx = await electrumWorker.value.getTransaction(
         order.offer.utxo.txid
       );
       if (!rawTx) {
         throw new Error("Could not fetch transaction");
       }
+      const prevTx = new Transaction(rawTx);
+      const offeredOutput = prevTx.outputs[order.offer.utxo.vout];
+      if (!offeredOutput) {
+        throw new Error("Could not locate offered output");
+      }
 
-      // Build the completing transaction
+      if (!order.offer.signature) {
+        throw new Error("Offer is missing maker signature");
+      }
+
+      const makerTerms = parsePriceTerms(order.offer.price_terms);
+      if (!makerTerms || makerTerms.outputs.length === 0) {
+        throw new Error("Offer has invalid price terms");
+      }
+
       const coins: SelectableInput[] = await db.txo
         .where({ contractType: ContractType.RXD, spent: 0 })
         .toArray();
 
-      // Determine what we need to provide
-      const wantGlyph = order.wantGlyph;
-      let myInputs: SelectableInput[] = [];
+      const fromRefLE = order.offeredGlyph?.ref
+        ? reverseRef(order.offeredGlyph.ref)
+        : "";
+      const wantRefLE = order.wantGlyph?.ref ? reverseRef(order.wantGlyph.ref) : undefined;
 
-      if (wantGlyph) {
-        // They want a token from us
-        const refLE = reverseRef(wantGlyph.ref);
-        const script =
-          wantGlyph.tokenType === SmartTokenType.FT
-            ? ftScript(wallet.value.address, refLE)
-            : nftScript(wallet.value.address, refLE);
-
-        const utxos = await db.txo
-          .where({ script, spent: 0 })
-          .toArray();
-
-        if (utxos.length === 0) {
-          throw new Error("You don't have the required token");
-        }
-
-        myInputs = utxos.map((u) => ({
-          ...u,
-          required: true,
-        }));
+      if (
+        !scriptMatchesContract(
+          offeredOutput.script.toHex(),
+          order.offeredGlyph
+            ? order.offeredGlyph.tokenType === SmartTokenType.NFT
+              ? ContractType.NFT
+              : ContractType.FT
+            : ContractType.RXD,
+          fromRefLE || undefined
+        )
+      ) {
+        throw new Error("Offer prevout script does not match advertised asset");
       }
 
-      // Build outputs - what we receive + what they receive
-      const outputs = [];
+      if (
+        !scriptMatchesContract(
+          makerTerms.outputs[0].script,
+          order.wantGlyph
+            ? order.wantGlyph.tokenType === SmartTokenType.NFT
+              ? ContractType.NFT
+              : ContractType.FT
+            : ContractType.RXD,
+          wantRefLE
+        )
+      ) {
+        throw new Error("Offer payment output does not match advertised wanted asset");
+      }
 
-      // What we receive (the offered asset)
-      if (order.offeredGlyph) {
-        const refLE = reverseRef(order.offeredGlyph.ref);
-        const receiveScript =
-          order.offeredGlyph.tokenType === SmartTokenType.FT
-            ? ftScript(wallet.value.address, refLE)
-            : nftScript(wallet.value.address, refLE);
-        outputs.push({
+      try {
+        Script.fromHex(order.offer.signature);
+      } catch {
+        throw new Error("Offer signature is not valid scriptSig hex");
+      }
+
+      const receiveScript =
+        !order.offeredGlyph
+          ? p2pkhScript(wallet.value.address)
+          : order.offeredGlyph.tokenType === SmartTokenType.FT
+          ? ftScript(wallet.value.address, fromRefLE)
+          : nftScript(wallet.value.address, fromRefLE);
+
+      const inputs: Utxo[] = [
+        {
+          txid: order.offer.utxo.txid,
+          vout: order.offer.utxo.vout,
+          script: offeredOutput.script.toString(),
+          value: offeredOutput.satoshis,
+        },
+      ];
+
+      const outputs = [
+        ...makerTerms.outputs,
+        {
           script: receiveScript,
-          value: 1, // NFT or token dust
-        });
-      } else {
-        // RXD output for us
-        outputs.push({
-          script: p2pkhScript(wallet.value.address),
-          value: order.wantValue || 0,
-        });
-      }
+          value: offeredOutput.satoshis,
+        },
+      ];
 
-      // What they receive (from price_terms)
-      if (order.wantScript && order.wantValue) {
-        outputs.push({
-          script: order.wantScript,
-          value: order.wantValue,
-        });
-      }
-
-      // Enforced royalties (REP-3012): only apply to RXD-priced NFT sales.
-      // Canonical ordering: vout0 = NFT to buyer, vout1 = seller payment, vout2..N = royalty outputs, change after.
       if (
         order.offeredGlyph &&
         order.offeredGlyph.tokenType === SmartTokenType.NFT &&
@@ -462,11 +577,24 @@ export default function OpenOrders() {
         }
       }
 
+      if (order.wantGlyph) {
+        const toRefLE = reverseRef(order.wantGlyph.ref);
+        if (order.wantGlyph.tokenType === SmartTokenType.FT) {
+          const prepared = await fundFungible(toRefLE, order.wantValue || 0);
+          inputs.push(...prepared.inputs);
+          outputs.push(...prepared.outputs);
+        } else {
+          const prepared = await fundNonFungible(toRefLE);
+          inputs.push(...prepared.inputs);
+          outputs.push(...prepared.outputs);
+        }
+      }
+
       const changeScript = p2pkhScript(wallet.value.address);
       const fund = fundTx(
         wallet.value.address,
         coins,
-        [...myInputs],
+        inputs,
         outputs,
         changeScript,
         feeRate.value
@@ -476,16 +604,21 @@ export default function OpenOrders() {
         throw new Error("Insufficient funds to complete swap");
       }
 
-      const allInputs = [...myInputs, ...fund.funding];
+      const allInputs = [...inputs, ...fund.funding];
       const allOutputs = [...outputs, ...fund.change];
 
-      // Build and sign our portion
       const tx = buildTx(
         wallet.value.address,
         wallet.value.wif,
         allInputs,
         allOutputs,
-        false
+        false,
+        (index, script) => {
+          if (index === 0) {
+            return Script.fromHex(order.offer.signature);
+          }
+          return script;
+        }
       );
 
       // Broadcast the completed transaction
