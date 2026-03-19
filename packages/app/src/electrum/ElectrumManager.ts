@@ -5,6 +5,7 @@ import { ElectrumWS } from "ws-electrumx-client";
 export default class ElectrumManager {
   public endpoint?: string;
   public client?: ElectrumWS;
+  public generation = 0;
 
   public connected(): boolean {
     return !!this.client && this.client.isConnected();
@@ -18,9 +19,10 @@ export default class ElectrumManager {
 
   public changeEndpoint(endpoint: string): boolean {
     console.debug("[ElectrumManager] changeEndpoint called:", endpoint);
-    if (this.connected() && this.client) {
+    this.generation++;
+    if (this.client) {
       console.debug("[ElectrumManager] Closing existing connection");
-      this.client.close("");
+      this.client.close("switching");
     }
     this.endpoint = endpoint;
     try {

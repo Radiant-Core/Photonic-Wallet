@@ -8,8 +8,8 @@ services:
       dockerfile: Dockerfile
     container_name: photonic-wallet
     restart: unless-stopped
-    ports:
-      - "${WALLET_PORT:-3000}:80"
+    expose:
+      - "80"
     environment:
       - NODE_ENV=production
     healthcheck:
@@ -21,7 +21,7 @@ services:
     networks:
       - photonic
 
-  # Optional: Caddy reverse proxy with automatic HTTPS
+  # Caddy reverse proxy with automatic HTTPS for photonic-wallet.com
   caddy:
     image: caddy:2-alpine
     container_name: photonic-caddy
@@ -37,8 +37,6 @@ services:
       - photonic-wallet
     networks:
       - photonic
-    profiles:
-      - with-caddy
 
 volumes:
   caddy_data:

@@ -206,11 +206,15 @@ export class NFTWorker implements Subscription {
     this.scriptHash = nftScriptHash(address as string);
     this.address = address;
 
-    this.electrum.client?.subscribe(
-      "blockchain.scripthash",
-      this.onSubscriptionReceived.bind(this) as ElectrumCallback,
-      this.scriptHash
-    );
+    try {
+      await this.electrum.client?.subscribe(
+        "blockchain.scripthash",
+        this.onSubscriptionReceived.bind(this) as ElectrumCallback,
+        this.scriptHash
+      );
+    } catch (error) {
+      console.warn("[NFT] Subscription failed:", error);
+    }
   }
 
   /**

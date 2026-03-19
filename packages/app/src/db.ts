@@ -75,6 +75,20 @@ export class Database extends Dexie {
     this.version(6).stores({
       swap: "++id, status, txid",
     });
+
+    // Update servers to latest list (V2 hard fork compatible)
+    this.version(7).upgrade(async (transaction) => {
+      const mainnet = shuffle([...config.defaultConfig.servers.mainnet]);
+      const testnet = config.defaultConfig.servers.testnet;
+      transaction.table("kvp").put({ mainnet, testnet }, "servers");
+    });
+
+    // Remove failing :50004 servers, keep only working :50022 servers
+    this.version(8).upgrade(async (transaction) => {
+      const mainnet = shuffle([...config.defaultConfig.servers.mainnet]);
+      const testnet = config.defaultConfig.servers.testnet;
+      transaction.table("kvp").put({ mainnet, testnet }, "servers");
+    });
   }
 }
 

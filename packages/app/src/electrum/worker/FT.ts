@@ -168,10 +168,14 @@ export class FTWorker extends NFTWorker {
     this.scriptHash = ftScriptHash(address as string);
     this.address = address;
 
-    this.electrum.client?.subscribe(
-      "blockchain.scripthash",
-      this.onSubscriptionReceived.bind(this) as ElectrumCallback,
-      this.scriptHash
-    );
+    try {
+      await this.electrum.client?.subscribe(
+        "blockchain.scripthash",
+        this.onSubscriptionReceived.bind(this) as ElectrumCallback,
+        this.scriptHash
+      );
+    } catch (error) {
+      console.warn("[FT] Subscription failed:", error);
+    }
   }
 }

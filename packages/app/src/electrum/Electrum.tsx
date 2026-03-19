@@ -1,7 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { t } from "@lingui/macro";
 import db from "@app/db";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { electrumStatus, wallet } from "@app/signals";
 import { useToast } from "@chakra-ui/react";
 import { ContractType, ElectrumStatus, SmartToken } from "@app/types";
@@ -95,29 +95,28 @@ export default function Electrum() {
       mainnet: string[];
       testnet: string[];
     };
-    console.debug("[Electrum] Loaded servers from db:", servers, "net:", wallet.value.net);
     return servers?.[wallet.value.net];
   }, [wallet.value.net]);
 
-  // Surface worker logs to main console for debugging
-  useLiveQuery(async () => {
-    const workerLog = (await db.kvp.get("workerDebugLog")) as { log: string; data: string; time: number } | undefined;
-    if (workerLog) {
-      console.debug("[WorkerLog]", workerLog.log, workerLog.data);
+  // Stabilize servers reference - only update when content actually changes
+  const serversRef = useRef<string[] | undefined>();
+  const stableServers = (() => {
+    const prev = serversRef.current;
+    if (prev && servers && prev.length === servers.length && prev.every((s, i) => s === servers[i])) {
+      return prev;
     }
-  });
+    serversRef.current = servers;
+    return servers;
+  })();
 
   // Reconnect when server config changes or when wallet is ready
   useEffect(() => {
-    console.debug("[Electrum] useEffect triggered - servers:", servers, "address:", wallet.value.address);
-    if (servers && wallet.value.address) {
-      console.debug("[Electrum] Calling setServers and connect");
-      electrumWorker.value.setServers(servers);
+    if (stableServers && wallet.value.address) {
+      console.debug("[Electrum] Connecting with servers:", stableServers.length);
+      electrumWorker.value.setServers(stableServers);
       electrumWorker.value.connect(wallet.value.address);
-    } else {
-      console.debug("[Electrum] Not connecting - servers:", !!servers, "address:", !!wallet.value.address);
     }
-  }, [servers, wallet.value.address]);
+  }, [stableServers, wallet.value.address]);
 
   return null;
 }

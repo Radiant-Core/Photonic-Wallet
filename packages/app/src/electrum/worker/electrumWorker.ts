@@ -21,14 +21,13 @@ let serverNum = 0;
 let reconnectTimer: Timer = null;
 let connectTimer: Timer = null;
 let connectionAttempts = 0;
+let connectedGeneration = 0;
 const MAX_ATTEMPTS_BEFORE_PAUSE = 10; // Pause after trying all servers twice
 const FAILOVER_TIMEOUT = 8000; // 8 seconds before trying next server
 const PAUSE_DURATION = 30000; // 30 second pause after max attempts
 
-// Helper to log to both console and DB for debugging
 function workerLog(msg: string, data?: unknown) {
   console.debug(msg, data);
-  db.kvp.put({ log: msg, data: JSON.stringify(data), time: Date.now() }, "workerDebugLog");
 }
 
 const worker = {
@@ -55,6 +54,7 @@ const worker = {
     if (electrum.endpoint !== endpoint || address !== _address) {
       this.ready = true;
       address = _address;
+      clearTimers();
       workerLog(`[Worker] Connecting to: ${endpoint}`);
       db.kvp.put({ status: ElectrumStatus.CONNECTING, server: endpoint }, "electrumStatus");
       const result = electrum.changeEndpoint(endpoint);
@@ -64,7 +64,6 @@ const worker = {
         tryNextServer();
         return;
       }
-      clearTimers();
       connectTimer = setTimeout(tryNextServer, FAILOVER_TIMEOUT);
     } else {
       workerLog("[Worker] Skipping connection - already connected to same endpoint/address");
@@ -168,6 +167,7 @@ electrum.addEvent("connected", () => {
   workerLog("[Worker] CONNECTED event received");
   clearTimers();
   connectionAttempts = 0; // Reset on successful connection
+  connectedGeneration = electrum.generation;
   db.kvp.put({ status: ElectrumStatus.CONNECTED, server: electrum.endpoint }, "electrumStatus");
   if (address) {
     workerLog("[Worker] Connected, registering address:", address);
@@ -182,14 +182,26 @@ electrum.addEvent("error", (error: unknown) => {
 });
 
 electrum.addEvent("close", (event: unknown) => {
-  workerLog("[Worker] CLOSE event received:", event);
-  // Reason will be "user" for disconnects initiated by the user
   const { reason } = event as { reason: string };
+  workerLog("[Worker] CLOSE event received", { reason, gen: electrum.generation, connGen: connectedGeneration });
+
+  // Ignore close events from old clients when we intentionally switched servers
+  if (reason === "switching") {
+    workerLog("[Worker] Ignoring close from intentional server switch");
+    return;
+  }
+
+  // Ignore stale close events from old connections
+  if (electrum.connected()) {
+    workerLog("[Worker] Ignoring stale close - already connected to another server");
+    return;
+  }
+
   db.kvp.put({ status: ElectrumStatus.DISCONNECTED, reason }, "electrumStatus");
 
+  // Reason will be "user" for disconnects initiated by the user
   if (!reason) {
-    workerLog("[Worker] No reason given, will try next server in 5s");
-    // Allow some time to reconnect before trying a different server
+    workerLog("[Worker] Server dropped connection, will try next server in 5s");
     reconnectTimer = setTimeout(tryNextServer, 5000);
   }
 });

@@ -6,7 +6,7 @@
 # Usage:
 #   docker compose --profile with-caddy up -d
 
-wallet.yourdomain.com {
+photonic-wallet.com {
     reverse_proxy photonic-wallet:80
 
     # Security headers
