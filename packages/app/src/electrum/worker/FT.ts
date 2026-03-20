@@ -175,7 +175,14 @@ export class FTWorker extends NFTWorker {
         this.scriptHash
       );
     } catch (error) {
-      console.warn("[FT] Subscription failed:", error);
+      console.warn("[FT] Subscription failed, falling back to manual sync:", error);
+      // Subscription may fail for large histories, but listunspent still works
+      try {
+        await this.onSubscriptionReceived(this.scriptHash, "manual-fallback", true);
+        console.debug("[FT] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[FT] Manual fallback also failed:", fallbackError);
+      }
     }
   }
 }
