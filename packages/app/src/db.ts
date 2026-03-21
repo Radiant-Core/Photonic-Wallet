@@ -89,6 +89,30 @@ export class Database extends Dexie {
       const testnet = config.defaultConfig.servers.testnet;
       transaction.table("kvp").put({ mainnet, testnet }, "servers");
     });
+
+    // Merge in any newly added default servers without dropping user-edited entries
+    this.version(9).upgrade(async (transaction) => {
+      const current = (await transaction.table("kvp").get("servers")) as
+        | { mainnet?: string[]; testnet?: string[] }
+        | undefined;
+
+      const mainnet = [...(current?.mainnet || [])];
+      const missing = config.defaultConfig.servers.mainnet.filter(
+        (server) => !mainnet.includes(server)
+      );
+
+      if (missing.length > 0) {
+        mainnet.push(...missing);
+      }
+
+      const testnet = current?.testnet?.length
+        ? current.testnet
+        : config.defaultConfig.servers.testnet;
+
+      transaction
+        .table("kvp")
+        .put({ mainnet: shuffle(mainnet), testnet }, "servers");
+    });
   }
 }
 

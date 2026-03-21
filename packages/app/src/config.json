@@ -39,11 +39,13 @@
         "wss://testnet.bladenet.online:53002"
       ],
       "mainnet": [
+        "wss://82.180.136.182:50004",
         "wss://electrumx.radiant4people.com:50022",
         "wss://radiant2.bladenet.online:50022",
         "wss://radiantus.bladenet.online:50022",
         "wss://radiant4.bladenet.online:50022",
-        "wss://electrumx2.radiant4people.com:50022"
+        "wss://electrumx2.radiant4people.com:50022",
+        "wss://radiantcore.org:50004"
       ]
     },
     "feeRate": 10000,
