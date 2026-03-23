@@ -101,7 +101,13 @@ export class RXDWorker implements Subscription {
         this.scriptHash
       );
     } catch (error) {
-      console.warn("[RXD] Subscription failed:", error);
+      console.warn("[RXD] Subscription failed, falling back to manual sync:", error);
+      try {
+        await this.onSubscriptionReceived(this.scriptHash, "manual-fallback", true);
+        console.debug("[RXD] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[RXD] Manual fallback also failed:", fallbackError);
+      }
     }
   }
 }

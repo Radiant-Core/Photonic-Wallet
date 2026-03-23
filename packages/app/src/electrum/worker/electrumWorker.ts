@@ -76,15 +76,33 @@ const worker = {
     electrum.disconnect(reason);
   },
   async broadcast(hex: string): Promise<string> {
-    if (!electrum.client) {
+    if (!electrum.client || !electrum.connected()) {
       throw new Error("Electrum client not connected");
     }
-    const result = await electrum.client.request(
-      "blockchain.transaction.broadcast",
-      hex
-    );
-    workerLog("[Worker] Broadcast result:", result);
-    return result as string;
+
+    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error("Broadcast timeout")), ms)
+        ),
+      ]);
+
+    try {
+      const result = await withTimeout(
+        electrum.client.request("blockchain.transaction.broadcast", hex),
+        15000
+      );
+      workerLog("[Worker] Broadcast result:", result);
+      return result as string;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("transactionalreadyinblockchain")) {
+        workerLog("[Worker] Broadcast already in blockchain");
+        return "";
+      }
+      throw error;
+    }
   },
   async getRef(ref: string) {
     return (await electrum.client?.request(

@@ -417,7 +417,22 @@ export function push4bytes(n: number) {
 
 // Push a number with minimal encoding
 export function pushMinimal(n: bigint | number) {
-  return bytesToHex(encodeDataPush(bigIntToVmNumber(BigInt(n))));
+  const value = BigInt(n);
+
+  if (value === 0n) {
+    return "00"; // OP_0
+  }
+
+  if (value === -1n) {
+    return "4f"; // OP_1NEGATE
+  }
+
+  if (value >= 1n && value <= 16n) {
+    const opcode = 0x50 + Number(value); // OP_1 .. OP_16
+    return opcode.toString(16).padStart(2, "0");
+  }
+
+  return bytesToHex(encodeDataPush(bigIntToVmNumber(value)));
 }
 
 export function pushMinimalAsm(n: bigint | number) {
@@ -442,23 +457,23 @@ export function dMintScript(
 ) {
   // Enhanced dMint script with algorithm and DAA support
   // Algorithm IDs: sha256d=0x00, blake3=0x01, k12=0x02
-  const algorithmIds: Record<string, string> = {
-    'sha256d': '00',
-    'blake3': '01',
-    'k12': '02',
+  const algorithmIds: Record<string, number> = {
+    sha256d: 0,
+    blake3: 1,
+    k12: 2,
   };
   
   // DAA Mode IDs: fixed=0x00, epoch=0x01, asert=0x02, lwma=0x03, schedule=0x04
-  const daaModeIds: Record<string, string> = {
-    'fixed': '00',
-    'epoch': '01',
-    'asert': '02',
-    'lwma': '03',
-    'schedule': '04'
+  const daaModeIds: Record<string, number> = {
+    fixed: 0,
+    epoch: 1,
+    asert: 2,
+    lwma: 3,
+    schedule: 4,
   };
   
-  const algoId = algorithmIds[algorithm] || '00';
-  const daaId = daaModeIds[daaMode] || '00';
+  const algoId = algorithmIds[algorithm] ?? 0;
+  const daaId = daaModeIds[daaMode] ?? 0;
   
   // dMint contract bytecode structure:
   //   Part A (preimage building): 5175c0c855797ea8597959797ea87e5a7a7e
@@ -501,7 +516,7 @@ export function dMintScript(
   )}`;
   
   // Add algorithm and DAA configuration
-  const enhancedScript = `${baseScript}${algoId}${daaId}`;
+  const enhancedScript = `${baseScript}${pushMinimal(algoId)}${pushMinimal(daaId)}`;
   
   // Add DAA parameters if needed
   let paramsScript = '';

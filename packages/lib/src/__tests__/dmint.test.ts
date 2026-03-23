@@ -1,6 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { SmartTokenPayload, DmintPayload } from '../types';
 import { GLYPH_FT, GLYPH_DMINT } from '../protocols';
+import { dMintScript, dMintDiffToTarget } from '../script';
+import rjs from '@radiant-core/radiantjs';
+
+const { Script } = rjs;
+
+function hasNonMinimalDataPush(scriptHex: string): boolean {
+  const asm = Script.fromHex(scriptHex).toASM();
+  const tokens = asm.split(' ');
+
+  return tokens.some((token) => {
+    if (!/^[0-9a-f]{2}$/i.test(token)) return false;
+    const value = Number.parseInt(token, 16);
+    return value === 0 || (value >= 1 && value <= 16) || value === 0x81;
+  });
+}
+
+function getPowHashOp(scriptHex: string): string | undefined {
+  return scriptHex.toLowerCase().match(/7ea87e5a7a7e(aa|ee|ef)bc01147f/)?.[1];
+}
 
 describe('dMint Token Creation (Glyph v2)', () => {
   describe('Payload Structure', () => {
@@ -28,6 +47,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should include dmint object with algorithm', () => {
       const dmint: DmintPayload = {
         algo: 0x01, // Blake3
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -83,6 +103,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should support fixed DAA mode (0x00)', () => {
       const dmint: DmintPayload = {
         algo: 0x01,
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -96,6 +117,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should support ASERT DAA mode (0x02)', () => {
       const dmint: DmintPayload = {
         algo: 0x01,
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -115,6 +137,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should support LWMA DAA mode (0x03)', () => {
       const dmint: DmintPayload = {
         algo: 0x01,
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -134,6 +157,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should support Epoch DAA mode (0x01)', () => {
       const dmint: DmintPayload = {
         algo: 0x00, // sha256d
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -154,6 +178,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
     it('should support Schedule DAA mode (0x04)', () => {
       const dmint: DmintPayload = {
         algo: 0x01,
+        numContracts: 1,
         maxHeight: 10000,
         reward: 100,
         premine: 0,
@@ -184,6 +209,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
         name: 'Blake3 Token',
         dmint: {
           algo: 0x01, // Blake3
+          numContracts: 1,
           maxHeight: 10000,
           reward: 100,
           premine: 0,
@@ -211,6 +237,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
         name: 'SHA256d Token',
         dmint: {
           algo: 0x00, // SHA256d
+          numContracts: 1,
           maxHeight: 21000000,
           reward: 50,
           premine: 1000000,
@@ -232,6 +259,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
         name: 'KangarooTwelve Token',
         dmint: {
           algo: 0x02, // K12
+          numContracts: 1,
           maxHeight: 5000,
           reward: 200,
           premine: 0,
@@ -257,6 +285,7 @@ describe('dMint Token Creation (Glyph v2)', () => {
         name: 'Argon2 Light Token',
         dmint: {
           algo: 0x03, // Argon2Light
+          numContracts: 1,
           maxHeight: 100000,
           reward: 10,
           premine: 500,
@@ -273,6 +302,55 @@ describe('dMint Token Creation (Glyph v2)', () => {
       expect(payload.dmint?.algo).toBe(0x03);
       expect(payload.dmint?.daa?.mode).toBe(0x01);
       expect(payload.dmint?.daa?.epochLength).toBe(500);
+    });
+  });
+
+  describe('dMint Script Encoding', () => {
+    const contractRef = '11'.repeat(36);
+    const tokenRef = '22'.repeat(36);
+    const target = dMintDiffToTarget(10);
+
+    const algoCases = [
+      { algo: 'sha256d', expectedOp: 'aa' },
+      { algo: 'blake3', expectedOp: 'ee' },
+      { algo: 'k12', expectedOp: 'ef' },
+    ] as const;
+
+    const daaCases = [
+      { daaMode: 'fixed', daaParams: null },
+      { daaMode: 'asert', daaParams: { targetBlockTime: 60, halfLife: 1000, asymptote: 0 } },
+      { daaMode: 'lwma', daaParams: { targetBlockTime: 60, windowSize: 144 } },
+      { daaMode: 'epoch', daaParams: { targetBlockTime: 60, epochLength: 2016, maxAdjustment: 4 } },
+      {
+        daaMode: 'schedule',
+        daaParams: {
+          schedule: [
+            { height: 0, difficulty: 10 },
+            { height: 1000, difficulty: 50 },
+          ],
+        },
+      },
+    ] as const;
+
+    it('should emit canonical minimal pushes for all supported algorithms and DAA modes', () => {
+      for (const { algo, expectedOp } of algoCases) {
+        for (const { daaMode, daaParams } of daaCases) {
+          const script = dMintScript(
+            0,
+            contractRef,
+            tokenRef,
+            100,
+            10,
+            target,
+            algo,
+            daaMode,
+            daaParams
+          );
+
+          expect(getPowHashOp(script)).toBe(expectedOp);
+          expect(hasNonMinimalDataPush(script)).toBe(false);
+        }
+      }
     });
   });
 });
