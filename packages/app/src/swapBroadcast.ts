@@ -43,9 +43,9 @@ export interface SwapRpcConfig {
   password?: string;
 }
 
-// Default to local node
+// Default RPC endpoint used by Open Orders / swap views
 const DEFAULT_RPC_CONFIG: SwapRpcConfig = {
-  url: "http://127.0.0.1:7332",
+  url: "https://radiantcore.org:50004",
 };
 
 let rpcConfig: SwapRpcConfig = DEFAULT_RPC_CONFIG;

@@ -72,6 +72,7 @@ import {
 import { electrumWorker } from "@app/electrum/Electrum";
 import { PromiseExtended } from "dexie";
 import { mintEmbedMaxBytes } from "@app/config.json";
+import { updateRxdBalances } from "@app/utxos";
 
 // IPFS uploading is currently disabled until an alternative to nft.storage can be found
 //const MAX_IPFS_BYTES = 5_000_000;
@@ -105,6 +106,16 @@ const noDualFile: DualFileState = {
 
 function cleanError(message: string) {
   return message.replace(/(\(code \d+\)).*/s, "$1").substring(0, 200);
+}
+
+function isMissingInputsError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.toLowerCase().includes("missing inputs");
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatNumber(num: number) {
@@ -479,6 +490,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
     setLoading(true);
 
+    try {
+      await electrumWorker.value.manualSync();
+    } catch (error) {
+      console.debug("[Mint] Preflight UTXO refresh failed", error);
+    }
+
     const coins = await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
       .toArray();
@@ -760,21 +777,53 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       const broadcast = async (rawTx: string) =>
         await electrumWorker.value.broadcast(rawTx);
 
+      const broadcastRevealWithRetry = async (rawTx: string) => {
+        try {
+          return await broadcast(rawTx);
+        } catch (error) {
+          if (!isMissingInputsError(error)) {
+            throw error;
+          }
+
+          console.debug(
+            "[Mint] Reveal broadcast returned Missing inputs; refreshing UTXOs and retrying"
+          );
+          await electrumWorker.value.manualSync();
+          await wait(1500);
+          return await broadcast(rawTx);
+        }
+      };
+
       if (!dryRun) {
         // Broadcast commit
         const commitTxId = await broadcast(commitTx.toString());
-        db.broadcast.put({
+        await db.broadcast.put({
           txid: commitTxId,
           date: Date.now(),
           description: `${shortTokenType}_mint`,
         });
+
+        try {
+          await electrumWorker.value.manualSync();
+        } catch (error) {
+          console.debug("[Mint] Post-commit UTXO refresh failed", error);
+        }
+        await updateRxdBalances(wallet.value.address);
+
         // Broadcast reveal
-        const revealTxId = await broadcast(revealTx.toString());
-        db.broadcast.put({
+        const revealTxId = await broadcastRevealWithRetry(revealTx.toString());
+        await db.broadcast.put({
           txid: revealTxId,
           date: Date.now(),
           description: `${shortTokenType}_mint`,
         });
+
+        try {
+          await electrumWorker.value.manualSync();
+        } catch (error) {
+          console.debug("[Mint] Post-reveal UTXO refresh failed", error);
+        }
+        await updateRxdBalances(wallet.value.address);
       }
 
       revealTxIdRef.current = revealTx.id;

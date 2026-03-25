@@ -1,6 +1,6 @@
 {
   "name": "@photonic/cli",
-  "version": "0.1.4",
+  "version": "2.0.0",
   "type": "module",
   "description": "",
   "exports": "./dist/cli.js",
