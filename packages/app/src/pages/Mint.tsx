@@ -214,6 +214,8 @@ const formReducer = (
   return { ...state, [event.name]: event.value };
 };
 
+const isAdaptiveDaaMode = (daaMode?: string) => Boolean(daaMode && daaMode !== "fixed");
+
 const encodeContent = (
   mode: ContentMode,
   fileState: FileState,
@@ -368,7 +370,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >
   ) => {
-    setFormData({ name: event.target.name, value: event.target.value });
+    const { name, value } = event.target;
+    setFormData({ name, value });
+
+    if (name === "daaMode" && isAdaptiveDaaMode(value)) {
+      setFormData({ name: "numContracts", value: "1" });
+    }
   };
   const img = useRef<HTMLImageElement>(null);
 
@@ -624,12 +631,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         maxAdjustment,
         schedule
       } = fields;
+      const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
+        ? 1
+        : parseInt(numContracts, 10);
       
       dmintPayload = {
         algo: algorithm === 'sha256d' ? 0x00 : 
               algorithm === 'blake3' ? 0x01 : 
               algorithm === 'k12' ? 0x02 : 0x00,
-        numContracts: parseInt(numContracts, 10),
+        numContracts: resolvedNumContracts,
         maxHeight: parseInt(maxHeight, 10),
         reward: parseInt(reward, 10),
         premine: parseInt(premine, 10),
@@ -709,13 +719,16 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               maxAdjustment,
               schedule
             } = fields;
+            const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
+              ? 1
+              : parseInt(numContracts, 10);
             // Value 1 is for the dmint contracts
             return {
               value: 1,
               method: "dmint" as const,
               params: {
                 difficulty: parseInt(difficulty, 10),
-                numContracts: parseInt(numContracts, 10),
+                numContracts: resolvedNumContracts,
                 maxHeight: parseInt(maxHeight, 10),
                 reward: parseInt(reward, 10),
                 premine: parseInt(premine, 10),
@@ -1096,8 +1109,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
   const diff = parseInt(formData.difficulty, 10);
   const timeToMine = diff > 0 ? calcTimeToMine(diff) : "";
+  const effectiveNumContracts = isAdaptiveDaaMode(formData.daaMode)
+    ? 1
+    : parseInt(formData.numContracts, 10);
   const totalDmintSupply =
-    parseInt(formData.numContracts, 10) *
+    effectiveNumContracts *
       parseInt(formData.maxHeight, 10) *
       parseInt(formData.reward, 10) +
     parseInt(formData.premine, 10);
@@ -1834,16 +1850,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       <FormControl>
                         <FormLabel>{t`Number of contracts`}</FormLabel>
                         <Input
-                          defaultValue={formData.numContracts}
+                          value={isAdaptiveDaaMode(formData.daaMode) ? "1" : formData.numContracts}
                           placeholder=""
                           name="numContracts"
                           type="number"
                           onChange={onFormChange}
                           min={1}
-                          max={32}
+                          max={isAdaptiveDaaMode(formData.daaMode) ? 1 : 32}
+                          isDisabled={isAdaptiveDaaMode(formData.daaMode)}
                         />
                         <FormHelperText>
-                          {t`Multiple contracts allows parallel mining, reducing congestion for low difficulty contracts`}
+                          {isAdaptiveDaaMode(formData.daaMode)
+                            ? t`Adaptive DAA modes require a single contract.`
+                            : t`Multiple contracts allows parallel mining, reducing congestion for low difficulty contracts`}
                         </FormHelperText>
                       </FormControl>
                       <FormControl>
