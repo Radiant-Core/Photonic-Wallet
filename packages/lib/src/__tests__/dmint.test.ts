@@ -18,7 +18,19 @@ function hasNonMinimalDataPush(scriptHex: string): boolean {
 }
 
 function getPowHashOp(scriptHex: string): string | undefined {
-  return scriptHex.toLowerCase().match(/7ea87e5a7a7e(aa|ee|ef)bc01147f/)?.[1];
+  return scriptHex.toLowerCase().match(/(aa|ee|ef)bc01147f/)?.[1];
+}
+
+function getPreimageIndexWindow(scriptHex: string): string {
+  const asm = Script.fromHex(scriptHex).toASM();
+  const start = 'OP_OUTPOINTTXHASH';
+  const end = 'OP_ROLL';
+  const startIndex = asm.indexOf(start);
+  const endIndex = asm.indexOf(end, startIndex);
+  if (startIndex < 0 || endIndex < 0) {
+    return '';
+  }
+  return asm.slice(startIndex, endIndex + end.length);
 }
 
 describe('dMint Token Creation (Glyph v2)', () => {
@@ -351,6 +363,44 @@ describe('dMint Token Creation (Glyph v2)', () => {
           expect(hasNonMinimalDataPush(script)).toBe(false);
         }
       }
+    });
+
+    it('uses legacy preimage stack indices for sha256d fixed contracts', () => {
+      const script = dMintScript(
+        0,
+        contractRef,
+        tokenRef,
+        100,
+        10,
+        target,
+        'sha256d',
+        'fixed',
+        null
+      );
+
+      const indexWindow = getPreimageIndexWindow(script);
+      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_5 OP_PICK');
+      expect(indexWindow).toContain('OP_9 OP_PICK OP_9 OP_PICK');
+      expect(indexWindow).toContain('OP_10 OP_ROLL');
+    });
+
+    it('uses enhanced preimage stack indices for v2 contracts with extra state fields', () => {
+      const script = dMintScript(
+        0,
+        contractRef,
+        tokenRef,
+        100,
+        10,
+        target,
+        'blake3',
+        'asert',
+        { targetBlockTime: 60, halfLife: 1000, asymptote: 0 }
+      );
+
+      const indexWindow = getPreimageIndexWindow(script);
+      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_10 OP_PICK');
+      expect(indexWindow).toContain('OP_14 OP_PICK OP_14 OP_PICK');
+      expect(indexWindow).toContain('OP_15 OP_ROLL');
     });
   });
 });

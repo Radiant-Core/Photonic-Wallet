@@ -216,6 +216,16 @@ const formReducer = (
 
 const isAdaptiveDaaMode = (daaMode?: string) => Boolean(daaMode && daaMode !== "fixed");
 
+const MAX_DMIN_CONTRACTS = 32;
+
+const clampNumContracts = (value: string | number): number => {
+  const parsed = typeof value === "number" ? value : parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(MAX_DMIN_CONTRACTS, parsed));
+};
+
 const encodeContent = (
   mode: ContentMode,
   fileState: FileState,
@@ -371,6 +381,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     >
   ) => {
     const { name, value } = event.target;
+
+    if (name === "numContracts") {
+      setFormData({ name, value: clampNumContracts(value).toString() });
+      return;
+    }
+
     setFormData({ name, value });
 
     if (name === "daaMode" && isAdaptiveDaaMode(value)) {
@@ -633,7 +649,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       } = fields;
       const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
         ? 1
-        : parseInt(numContracts, 10);
+        : clampNumContracts(numContracts);
       
       dmintPayload = {
         algo: algorithm === 'sha256d' ? 0x00 : 
@@ -721,7 +737,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             } = fields;
             const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
               ? 1
-              : parseInt(numContracts, 10);
+              : clampNumContracts(numContracts);
             // Value 1 is for the dmint contracts
             return {
               value: 1,
@@ -1111,7 +1127,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   const timeToMine = diff > 0 ? calcTimeToMine(diff) : "";
   const effectiveNumContracts = isAdaptiveDaaMode(formData.daaMode)
     ? 1
-    : parseInt(formData.numContracts, 10);
+    : clampNumContracts(formData.numContracts);
   const totalDmintSupply =
     effectiveNumContracts *
       parseInt(formData.maxHeight, 10) *

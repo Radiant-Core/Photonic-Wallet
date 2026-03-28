@@ -26,6 +26,8 @@ interface ContractAddressesProps {
   numContracts?: number; // Number of contracts if known from metadata
 }
 
+const MAX_CONTRACTS = 32;
+
 /**
  * Generates mining contract addresses from a link ref.
  * 
@@ -107,10 +109,13 @@ function ContractRow({ contractRef, index }: { contractRef: string; index: numbe
 }
 
 export default function ContractAddresses({ linkRef, numContracts: initialCount }: ContractAddressesProps) {
-  const [count, setCount] = useState(initialCount || 1);
+  const [count, setCount] = useState(
+    Math.max(1, Math.min(MAX_CONTRACTS, initialCount || 1))
+  );
   
   const contractRefs = useMemo(() => {
-    return generateContractRefs(linkRef, count);
+    const safeCount = Math.max(1, Math.min(MAX_CONTRACTS, count));
+    return generateContractRefs(linkRef, safeCount);
   }, [linkRef, count]);
   
   if (!linkRef || linkRef.length !== 72) {
@@ -127,9 +132,11 @@ export default function ContractAddresses({ linkRef, numContracts: initialCount 
           <NumberInput 
             size="sm" 
             min={1} 
-            max={100} 
+            max={MAX_CONTRACTS}
             value={count}
-            onChange={(_, val) => setCount(val || 1)}
+            onChange={(_, val) =>
+              setCount(Math.max(1, Math.min(MAX_CONTRACTS, val || 1)))
+            }
           >
             <NumberInputField />
             <NumberInputStepper>
