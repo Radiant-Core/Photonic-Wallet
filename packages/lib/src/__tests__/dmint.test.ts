@@ -378,11 +378,12 @@ describe('dMint Token Creation (Glyph v2)', () => {
         null
       );
 
-      // V2 format: 10 state items → contractRefPick=9, ioPick=13, nonceRoll=14
+      // V2 format: 10 state items → contractRefPick=10, ioPick=14, nonceRoll=15
+      // (+1 vs. naive stateItemCount formula because OP_INPUTBYTECODE adds an extra stack item)
       const indexWindow = getPreimageIndexWindow(script);
-      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_9 OP_PICK');
-      expect(indexWindow).toContain('OP_13 OP_PICK OP_13 OP_PICK');
-      expect(indexWindow).toContain('OP_14 OP_ROLL');
+      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_10 OP_PICK');
+      expect(indexWindow).toContain('OP_14 OP_PICK OP_14 OP_PICK');
+      expect(indexWindow).toContain('OP_15 OP_ROLL');
     });
 
     it('uses same V2 preimage stack indices for blake3 asert contracts (10 state items)', () => {
@@ -399,10 +400,11 @@ describe('dMint Token Creation (Glyph v2)', () => {
       );
 
       // V2 format: 10 state items (halfLife is bytecode constant, not state)
+      // (+1 vs. naive stateItemCount formula because OP_INPUTBYTECODE adds an extra stack item)
       const indexWindow = getPreimageIndexWindow(script);
-      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_9 OP_PICK');
-      expect(indexWindow).toContain('OP_13 OP_PICK OP_13 OP_PICK');
-      expect(indexWindow).toContain('OP_14 OP_ROLL');
+      expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_10 OP_PICK');
+      expect(indexWindow).toContain('OP_14 OP_PICK OP_14 OP_PICK');
+      expect(indexWindow).toContain('OP_15 OP_ROLL');
     });
   });
 });
