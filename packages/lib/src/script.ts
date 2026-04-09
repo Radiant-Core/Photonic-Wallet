@@ -445,17 +445,16 @@ export function dMintDiffToTarget(difficulty: number) {
 }
 
 function buildDmintPreimageBytecodePartA(stateItemCount: number) {
-  // Stack at time of first PICK (after OP_OUTPOINTTXHASH + OP_INPUTBYTECODE):
-  // bottom: nonce, inputHash, outputHash, outputIndex, <stateItems>, outpointTxHash, inputBytecode :top
-  // OP_INPUTBYTECODE adds 1 extra item vs. OP_OUTPOINTTXHASH alone, so all indices are +1.
-  const contractRefPickIndex = stateItemCount;       // was stateItemCount - 1
-  const inputOutputPickIndex = stateItemCount + 4;   // was stateItemCount + 3
-  const nonceRollIndex = stateItemCount + 5;         // was stateItemCount + 4
+  // Stack at time of first PICK (after OP_OUTPOINTTXHASH = 0xc8):
+  // bottom: nonce, inputHash, outputHash, outputIndex, <stateItems>, outpointTxHash :top
+  // 0xc0 (OP_INPUTINDEX) was removed; it was a spurious extra item that broke B.2's OP_1 PICK.
+  const contractRefPickIndex = stateItemCount - 1;
+  const inputOutputPickIndex = stateItemCount + 3;
+  const nonceRollIndex = stateItemCount + 4;
 
   return [
     '51',
     '75',
-    'c0',
     'c8',
     pushMinimal(contractRefPickIndex),
     '79',
@@ -583,7 +582,6 @@ function assertDmintPreimageLayout(partAHex: string, stateItemCount: number) {
     'outputIndex',
     ...stateLabels,
     'outpointTxHash',
-    'inputBytecode',
   ];
 
   stackPick(stack, contractRefPickIndex);
