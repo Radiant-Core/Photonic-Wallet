@@ -3,6 +3,7 @@ import { t } from "@lingui/macro";
 import {
   Box,
   Button,
+  Container,
   Divider,
   FormControl,
   FormLabel,
@@ -635,6 +636,7 @@ export default function VaultPage() {
   // ────────────────────────────────────────────────────────
   return (
     <ContentContainer>
+      <Container maxW="container.md" px={4}>
       <PageHeader>{t`Vault`}</PageHeader>
 
       {/* Tabs */}
@@ -657,7 +659,7 @@ export default function VaultPage() {
 
       {/* ───────── CREATE TAB ───────── */}
       {tab === "create" && (
-        <VStack gap={4} align="stretch" maxW="600px">
+        <VStack gap={4} align="stretch">
           <FormControl>
             <FormLabel>{t`Recipient Address`}</FormLabel>
             <HStack>
@@ -1140,6 +1142,7 @@ export default function VaultPage() {
           )}
         </Box>
       )}
+      </Container>
     </ContentContainer>
   );
 }
