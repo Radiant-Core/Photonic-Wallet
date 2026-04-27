@@ -43,19 +43,54 @@ export interface SwapRpcConfig {
   password?: string;
 }
 
-// Default RPC endpoint used by Open Orders / swap views
+// Default RPC endpoint used by Open Orders / swap views.
+// This should be a CORS-enabled reverse proxy in front of a Radiant Core node
+// started with `-swapindex=1`. See `docs/deployment-guide.md` for the VPS
+// Caddy/Docker recipe used by the hosted wallet.
 const DEFAULT_RPC_CONFIG: SwapRpcConfig = {
-  url: "https://radiantcore.org:50004",
+  url: "https://swap.radiantcore.org",
 };
 
-let rpcConfig: SwapRpcConfig = DEFAULT_RPC_CONFIG;
+const STORAGE_KEY = "photonic.swap.rpcConfig";
+
+function loadStoredConfig(): SwapRpcConfig {
+  try {
+    if (typeof localStorage === "undefined") return DEFAULT_RPC_CONFIG;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_RPC_CONFIG;
+    const parsed = JSON.parse(raw) as Partial<SwapRpcConfig>;
+    if (!parsed || typeof parsed.url !== "string" || !parsed.url) {
+      return DEFAULT_RPC_CONFIG;
+    }
+    return {
+      url: parsed.url,
+      username: typeof parsed.username === "string" ? parsed.username : undefined,
+      password: typeof parsed.password === "string" ? parsed.password : undefined,
+    };
+  } catch {
+    return DEFAULT_RPC_CONFIG;
+  }
+}
+
+let rpcConfig: SwapRpcConfig = loadStoredConfig();
 
 export function setSwapRpcConfig(config: SwapRpcConfig) {
   rpcConfig = config;
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    }
+  } catch {
+    // Ignore quota / privacy-mode failures; in-memory config still works.
+  }
 }
 
 export function getSwapRpcConfig(): SwapRpcConfig {
   return rpcConfig;
+}
+
+export function getDefaultSwapRpcConfig(): SwapRpcConfig {
+  return DEFAULT_RPC_CONFIG;
 }
 
 /**

@@ -87,6 +87,28 @@ body :not(:hover, :focus, :focus-within)::-webkit-scrollbar-thumb {
   }
 }
 
+/* Strength Meter Styles */
+.strength-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.strength-bar {
+  height: 4px;
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+  width: var(--strength-width, 0%);
+  background-color: var(--strength-color, #e2e8f0);
+}
+
+.strength-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: color 0.3s ease;
+  color: var(--strength-color, #e2e8f0);
+}
+
 /* days-one-latin-400-normal */
 @font-face {
   font-family: "Days One";

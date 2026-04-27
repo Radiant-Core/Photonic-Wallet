@@ -1,12 +1,12 @@
 import { wallet } from "./signals";
 import { SavedWallet, WalletState } from "./types";
 
-export function unlockWallet(wif: string, swapWif: string) {
-  wallet.value = { ...wallet.value, wif, swapWif, locked: false };
+export function unlockWallet(mnemonic: string, wif: string, swapWif: string) {
+  wallet.value = { ...wallet.value, mnemonic, wif, swapWif, locked: false };
 }
 
 export function lockWallet() {
-  wallet.value = { ...wallet.value, wif: undefined, locked: true };
+  wallet.value = { ...wallet.value, mnemonic: undefined, wif: undefined, locked: true };
 }
 
 export function loadWalletFromSaved(savedWallet?: SavedWallet) {

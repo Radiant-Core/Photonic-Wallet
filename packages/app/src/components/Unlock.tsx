@@ -23,14 +23,14 @@ export default function Unlock() {
 
   useModalSignal(openModal, "unlock", open);
 
-  const onSuccess = (_: string, wif: string, swapWif: string) => {
+  const onSuccess = (mnemonic: string, wif: string, swapWif: string) => {
     toast({
       title: t`Wallet unlocked`,
       status: "success",
     });
 
     if (wif) {
-      unlockWallet(wif, swapWif);
+      unlockWallet(mnemonic, wif, swapWif);
     }
 
     disclosure.onClose();

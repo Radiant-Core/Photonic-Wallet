@@ -25,6 +25,11 @@ export * from "./authority";
 export * from "./wavenaming";
 export * from "./crypto";
 export * from "./encryption";
+export * from "./timelock";
+export * from "./reveal";
+
+// Storage (Phase 2: Off-Chain Storage)
+export * from "./storage";
 
 // Utilities
 export * from "./difficulty";

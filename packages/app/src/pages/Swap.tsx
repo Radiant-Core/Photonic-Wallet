@@ -9,6 +9,7 @@ import {
   Grid,
   GridItem,
   Heading,
+  HStack,
   Icon,
   IconButton,
   Image,
@@ -59,6 +60,7 @@ import {
   encodePriceTermsOutputs,
   getSwapRpcConfig,
   isSwapIndexAvailable,
+  setSwapRpcConfig,
 } from "@app/swapBroadcast";
 import rjs from "@radiant-core/radiantjs";
 import { buildTx } from "@lib/tx";
@@ -406,6 +408,22 @@ function Swap() {
   const [psrt, setPsrt] = useState("");
   const [mode, setMode] = useState<SwapMode>(SwapMode.PRIVATE);
   const [broadcastTxid, setBroadcastTxid] = useState("");
+  const [rpcUrl, setRpcUrl] = useState(getSwapRpcConfig().url);
+  const [preparing, setPreparing] = useState(false);
+
+  const saveRpcUrl = () => {
+    const trimmed = rpcUrl.trim();
+    if (!trimmed) {
+      toast({ status: "error", title: "RPC URL cannot be empty" });
+      return;
+    }
+    setSwapRpcConfig({ url: trimmed });
+    toast({
+      status: "success",
+      title: "Swap RPC endpoint saved",
+      description: trimmed,
+    });
+  };
 
   const validateSwap = () => {
     const sendIsRxd = !send;
@@ -441,6 +459,7 @@ function Swap() {
   };
 
   const prepareTransaction = async () => {
+    if (preparing) return;
     if (wallet.value.locked || !wallet.value.swapWif) {
       openModal.value = {
         modal: "unlock",
@@ -452,6 +471,15 @@ function Swap() {
       // TODO error handling
       return;
     }
+    setPreparing(true);
+    try {
+      await runPrepareTransaction();
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const runPrepareTransaction = async () => {
 
     const coins: SelectableInput[] = await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
@@ -585,72 +613,111 @@ function Swap() {
       wallet.value.swapAddress,
       input,
       psrtOutput,
-      wallet.value.swapWif
+      wallet.value.swapWif as string
     ).toString();
 
     let advertisementTxid: string | undefined;
     if (mode === SwapMode.BROADCAST) {
-      const rpcConfig = getSwapRpcConfig();
-      const indexAvailable = await isSwapIndexAvailable();
-      if (!indexAvailable) {
-        throw new SwapPrepareError(
-          `Swap index not available at ${rpcConfig.url}. Connect to a Radiant Core node with -swapindex=1 enabled.`
+      try {
+        const rpcConfig = getSwapRpcConfig();
+        let indexAvailable = false;
+        try {
+          indexAvailable = await isSwapIndexAvailable();
+        } catch {
+          indexAvailable = false;
+        }
+        if (!indexAvailable) {
+          throw new SwapPrepareError(
+            `Swap index not available at ${rpcConfig.url}. Update the Swap RPC endpoint below or connect to a Radiant Core node started with -swapindex=1.`
+          );
+        }
+
+        const walletRxdScript = p2pkhScript(wallet.value.address);
+        const fundingCoins = await db.txo
+          .where({ contractType: ContractType.RXD, spent: 0 })
+          .toArray();
+        const spendableCoins = fundingCoins.filter(
+          (coin) =>
+            coin.script === walletRxdScript &&
+            !(coin.txid === input.txid && coin.vout === input.vout)
         );
+
+        const offeredTokenId = assetToSwapTokenId(from, send?.glyph?.ref);
+        const wantTokenId = assetToSwapTokenId(to, receive?.glyph?.ref);
+        const makerOutputs = [{ script: psrtOutput.script, value: psrtOutput.value }];
+        const advertisementScript = buildSwapAdvertisementScript({
+          offeredType: from,
+          offeredTokenId,
+          wantTokenId,
+          offeredTxid: input.txid,
+          offeredVout: input.vout,
+          priceTerms: encodePriceTermsOutputs(makerOutputs),
+          signature: new rjs.Transaction(rawPsrt).inputs[0].script.toHex(),
+        }).toHex();
+
+        const funded = fundTx(
+          wallet.value.address,
+          spendableCoins,
+          [],
+          [{ script: advertisementScript, value: 0 }],
+          walletRxdScript,
+          feeRate.value
+        );
+
+        if (!funded.funded) {
+          throw new SwapPrepareError(
+            "Insufficient RXD to publish the public swap offer"
+          );
+        }
+
+        const advertisementTx = buildTx(
+          wallet.value.address,
+          wallet.value.wif as string,
+          funded.funding,
+          [{ script: advertisementScript, value: 0 }, ...funded.change],
+          false
+        );
+
+        advertisementTxid = await electrumWorker.value.broadcast(
+          advertisementTx.toString()
+        );
+        setBroadcastTxid(advertisementTxid);
+        await db.broadcast.put({
+          txid: advertisementTxid,
+          date: Date.now(),
+          description: "swap_advertisement",
+        });
+      } catch (error) {
+        const message =
+          error instanceof SwapPrepareError
+            ? error.message
+            : error instanceof Error
+            ? error.message
+            : "Failed to broadcast swap advertisement";
+        toast({
+          status: "error",
+          title: "Broadcast failed",
+          description: message,
+        });
+        console.debug("Broadcast swap failed", error);
+        // Private swap was already prepared above; keep it usable instead of
+        // losing the signed PSRT. User can retry broadcast or share privately.
+        setPsrt(rawPsrt);
+        db.swap.put({
+          txid: tx.id,
+          tx: rawPsrt,
+          from,
+          fromGlyph: send?.glyph?.ref || null,
+          fromValue,
+          to,
+          toGlyph: receive?.glyph?.ref || null,
+          toValue,
+          status: SwapStatus.PENDING,
+          date: Date.now(),
+          mode: SwapMode.PRIVATE,
+        });
+        return;
       }
-
-      const walletRxdScript = p2pkhScript(wallet.value.address);
-      const fundingCoins = await db.txo
-        .where({ contractType: ContractType.RXD, spent: 0 })
-        .toArray();
-      const spendableCoins = fundingCoins.filter(
-        (coin) =>
-          coin.script === walletRxdScript &&
-          !(coin.txid === input.txid && coin.vout === input.vout)
-      );
-
-      const offeredTokenId = assetToSwapTokenId(from, send?.glyph?.ref);
-      const wantTokenId = assetToSwapTokenId(to, receive?.glyph?.ref);
-      const makerOutputs = [{ script: psrtOutput.script, value: psrtOutput.value }];
-      const advertisementScript = buildSwapAdvertisementScript({
-        offeredType: from,
-        offeredTokenId,
-        wantTokenId,
-        offeredTxid: input.txid,
-        offeredVout: input.vout,
-        priceTerms: encodePriceTermsOutputs(makerOutputs),
-        signature: new rjs.Transaction(rawPsrt).inputs[0].script.toHex(),
-      }).toHex();
-
-      const funded = fundTx(
-        wallet.value.address,
-        spendableCoins,
-        [],
-        [{ script: advertisementScript, value: 0 }],
-        walletRxdScript,
-        feeRate.value
-      );
-
-      if (!funded.funded) {
-        throw new SwapPrepareError("Insufficient RXD to publish the public swap offer");
-      }
-
-      const advertisementTx = buildTx(
-        wallet.value.address,
-        wallet.value.wif as string,
-        funded.funding,
-        [{ script: advertisementScript, value: 0 }, ...funded.change],
-        false
-      );
-
-      advertisementTxid = await electrumWorker.value.broadcast(
-        advertisementTx.toString()
-      );
-      setBroadcastTxid(advertisementTxid);
-      await db.broadcast.put({
-        txid: advertisementTxid,
-        date: Date.now(),
-        description: "swap_advertisement",
-      });
     }
 
     setPsrt(rawPsrt);
@@ -742,6 +809,32 @@ function Swap() {
             <Radio value="broadcast">Public (Swap Index)</Radio>
           </Stack>
         </RadioGroup>
+        {mode === SwapMode.BROADCAST && (
+          <Stack pt={6} spacing={3}>
+            <Heading size="xs">Swap RPC endpoint</Heading>
+            <Alert status="info" fontSize="sm">
+              <AlertIcon />
+              Public offers require a CORS-enabled Radiant Core node with
+              <Box as="code" mx={1}>
+                -swapindex=1
+              </Box>
+              . The default hosted endpoint is{" "}
+              <Box as="code">https://swap.radiantcore.org</Box>. Override below
+              to use your own node.
+            </Alert>
+            <HStack>
+              <Input
+                placeholder="https://swap.radiantcore.org"
+                value={rpcUrl}
+                onChange={(e) => setRpcUrl(e.target.value)}
+                size="sm"
+              />
+              <Button size="sm" onClick={saveRpcUrl}>
+                Save
+              </Button>
+            </HStack>
+          </Stack>
+        )}
       </Card>
       <Flex
         justifyContent="center"
@@ -749,7 +842,16 @@ function Swap() {
         gap={4}
         flexDir={{ base: "column", md: "row" }}
       >
-        <Button shadow="dark-md" onClick={prepareTransaction}>
+        <Button
+          shadow="dark-md"
+          onClick={prepareTransaction}
+          isLoading={preparing}
+          loadingText={
+            mode === SwapMode.BROADCAST
+              ? "Broadcasting offer…"
+              : "Preparing…"
+          }
+        >
           Prepare Transaction
         </Button>
       </Flex>

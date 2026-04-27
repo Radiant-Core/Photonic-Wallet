@@ -2,7 +2,7 @@ import React, { useCallback, useReducer, useRef, useState } from "react";
 import mime from "mime";
 import { t, Trans } from "@lingui/macro";
 import { Link } from "react-router-dom";
-import { GLYPH_DMINT, GLYPH_FT, GLYPH_MUT, GLYPH_NFT } from "@lib/protocols";
+import { GLYPH_DMINT, GLYPH_ENCRYPTED, GLYPH_FT, GLYPH_MUT, GLYPH_NFT, GLYPH_TIMELOCK } from "@lib/protocols";
 import {
   Alert,
   AlertIcon,
@@ -73,6 +73,22 @@ import { electrumWorker } from "@app/electrum/Electrum";
 import { PromiseExtended } from "dexie";
 import { mintEmbedMaxBytes } from "@app/config.json";
 import { updateRxdBalances } from "@app/utxos";
+import {
+  EncryptionSection,
+  initialEncryptionState,
+  type EncryptionSectionState,
+} from "@app/components/encryption";
+import { encryptContent, storeEncryptedContent } from "@app/encryptionService";
+import { StorageManager } from "@lib/storage";
+import { TimelockSection } from "@app/components/TimelockSection";
+import {
+  initialTimelockState,
+  resolveTimelockParams,
+  validateTimelockState,
+  type TimelockSectionState,
+} from "@app/timelockHelpers";
+import { saveReveal } from "@lib/timelock";
+import { bytesToHex } from "@noble/hashes/utils";
 
 // IPFS uploading is currently disabled until an alternative to nft.storage can be found
 //const MAX_IPFS_BYTES = 5_000_000;
@@ -327,6 +343,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   const [dualFileState, setDualFileState] = reset(useState<DualFileState>({ ...noDualFile }));
   const [enableHashstamp, setEnableHashstamp] = reset(useState(true));
   const [hashStamp, setHashstamp] = reset(useState<Uint8Array | undefined>());
+  const [encState, setEncState] = reset(
+    useState<EncryptionSectionState>(initialEncryptionState)
+  );
+  const [timelockState, setTimelockState] = reset(
+    useState<TimelockSectionState>(initialTimelockState)
+  );
   const attrName = useRef<HTMLInputElement>(null);
   const attrValue = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = reset(
@@ -423,6 +445,56 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       toast({
         status: "error",
         title: t`No NFT.Storage API key provided`,
+      });
+      return;
+    }
+
+    // Validate encryption state if enabled
+    if (encState.enabled) {
+      if (encState.mode === "passphrase" && encState.passphrase.length < 8) {
+        toast({
+          status: "error",
+          title: t`Invalid encryption passphrase`,
+          description: t`Passphrase must be at least 8 characters`,
+        });
+        return;
+      }
+      if (encState.mode === "recipient" && encState.recipientKeys.length === 0) {
+        toast({
+          status: "error",
+          title: t`No recipients`,
+          description: t`Add at least one recipient for encryption`,
+        });
+        return;
+      }
+
+      // Validate timelock if enabled
+      if (timelockState.enabled) {
+        const tlError = validateTimelockState(timelockState);
+        if (tlError) {
+          toast({
+            status: "error",
+            title: t`Invalid timelock`,
+            description: tlError,
+          });
+          return;
+        }
+        const resolved = resolveTimelockParams(timelockState);
+        if (!resolved) {
+          toast({
+            status: "error",
+            title: t`Invalid timelock`,
+            description: t`Could not resolve timelock parameters`,
+          });
+          return;
+        }
+      }
+    } else if (timelockState.enabled) {
+      // Timelock without encryption is not allowed
+      toast({
+        status: "error",
+        title: t`Timelock requires encryption`,
+        description: t`Enable encryption before adding a timelock`,
       });
       return;
     }
@@ -539,6 +611,50 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       (content as SmartTokenRemoteFile).h = fileState.hash;
     }
 
+    // ----------------------------------------------------------------
+    // Phase 6: Encrypt file content before building payload
+    // ----------------------------------------------------------------
+    let encryptionResult: Awaited<ReturnType<typeof encryptContent>> | null = null;
+    if (encState.enabled && mode === "file" && fileState.file?.data) {
+      const tlParams = timelockState.enabled
+        ? resolveTimelockParams(timelockState)
+        : null;
+
+      encryptionResult = await encryptContent(
+        new Uint8Array(fileState.file.data),
+        {
+          mode: encState.mode,
+          passphrase: encState.mode === "passphrase" ? encState.passphrase : undefined,
+          recipientPublicKeys:
+            encState.mode === "recipient"
+              ? encState.recipientKeys.map((k) => new Uint8Array(Buffer.from(k, "hex")))
+              : undefined,
+          contentType: fileState.file.type || "application/octet-stream",
+          name: fields.name || payloadFilename || "file",
+          protocolIds: [GLYPH_NFT, GLYPH_ENCRYPTED],
+        }
+      );
+
+      // Inject timelock commitment into crypto metadata if needed
+      if (tlParams) {
+        encryptionResult = {
+          ...encryptionResult,
+          metadata: {
+            ...encryptionResult.metadata,
+            crypto: {
+              ...encryptionResult.metadata.crypto,
+              timelock: {
+                mode: tlParams.mode,
+                unlock_at: tlParams.unlockAt,
+                cek_hash: `sha256:${Buffer.from(sha256(encryptionResult.cek)).toString("hex")}`,
+                ...(tlParams.hint ? { hint: tlParams.hint } : {}),
+              },
+            },
+          },
+        };
+      }
+    }
+
     const userIndex =
       authorId !== "" && authorId !== undefined
         ? parseInt(authorId, 10)
@@ -623,6 +739,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       protocols.push(GLYPH_MUT);
     }
 
+    if (encryptionResult) {
+      protocols.push(GLYPH_ENCRYPTED);
+      if (timelockState.enabled) {
+        protocols.push(GLYPH_TIMELOCK);
+      }
+    }
+
     const args: { [key: string]: unknown } = {};
     if (tokenType === "fungible") {
       args.ticker = ticker;
@@ -691,12 +814,48 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       }
     }
 
+    // When encrypted: upload blob to Arweave (permanent) in production,
+    // fall back to localStorage in development/test environments.
+    let encryptedLocator: Uint8Array | undefined;
+    let locatorNonce: Uint8Array | undefined;
+    if (encryptionResult) {
+      const isDev = import.meta.env.DEV;
+      const storageManager = new StorageManager(
+        isDev
+          ? { defaultAdapter: "local", local: { maxSize: 10 * 1024 * 1024 } }
+          : { defaultAdapter: "arweave" }
+      );
+      const stored = await storeEncryptedContent(
+        encryptionResult.encryptedContent,
+        encryptionResult.contentHash,
+        encryptionResult.locatorKey,
+        storageManager
+      );
+      encryptedLocator = stored.encryptedLocator;
+      locatorNonce = stored.locatorNonce;
+    }
+
+    const encryptedFileObj = encryptionResult
+      ? {
+          main: encryptionResult.metadata.main,
+          crypto: {
+            ...encryptionResult.metadata.crypto,
+            ...(encryptedLocator && locatorNonce
+              ? {
+                  locator: Buffer.from(encryptedLocator).toString("base64"),
+                  locator_nonce: Buffer.from(locatorNonce).toString("base64"),
+                }
+              : {}),
+          },
+        }
+      : undefined;
+
     const payload: SmartTokenPayload = {
       v: 2, // Glyph v2 version
       p: protocols,
       ...(Object.keys(args).length ? args : undefined),
       ...meta,
-      ...fileObj,
+      ...(encryptedFileObj ?? fileObj),
       ...(dmintPayload ? { dmint: dmintPayload } : undefined),
     };
 
@@ -846,6 +1005,28 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           date: Date.now(),
           description: `${shortTokenType}_mint`,
         });
+
+        // If this mint had a timelock, persist the CEK locally so the owner
+        // can later publish the reveal transaction (Phase 5, REP-3009).
+        if (
+          encryptionResult &&
+          timelockState.enabled &&
+          encryptionResult.metadata.crypto?.timelock
+        ) {
+          const tl = encryptionResult.metadata.crypto.timelock;
+          const cekHashHex = tl.cek_hash.replace(/^sha256:/i, "");
+          // Token ref convention used elsewhere in the wallet: <txid>:<vout>
+          // Glyph v2 NFT output is at vout 0 of the reveal tx.
+          const tokenRef = `${revealTxId}:0`;
+          saveReveal({
+            tokenRef,
+            cek: bytesToHex(encryptionResult.cek),
+            cekHash: cekHashHex,
+            mode: tl.mode,
+            unlockAt: tl.unlock_at,
+            createdAt: Math.floor(Date.now() / 1000),
+          });
+        }
 
         try {
           await electrumWorker.value.manualSync();
@@ -1282,6 +1463,22 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     )}
                   </FormControl>
                 </>
+              )}
+              {mode === "file" && fileState.file?.data && (
+                <EncryptionSection
+                  state={encState}
+                  onChange={setEncState}
+                  fileSize={fileState.file.size}
+                  disabled={loading}
+                />
+              )}
+              {mode === "file" && fileState.file?.data && encState.enabled && (
+                <TimelockSection
+                  state={timelockState}
+                  onChange={setTimelockState}
+                  encryptionEnabled={encState.enabled}
+                  disabled={loading}
+                />
               )}
               {mode === "file" && fileState.file?.data && !fileState.ipfs && (
                 <>

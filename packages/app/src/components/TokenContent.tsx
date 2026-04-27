@@ -1,4 +1,5 @@
-import { Box, Icon, Image } from "@chakra-ui/react";
+import { useState, useEffect, useRef } from "react";
+import { Box, Icon, Image, Text, HStack, Badge } from "@chakra-ui/react";
 import { QRCodeSVG } from "qrcode.react";
 import { SmartToken } from "@app/types";
 import { TbLink } from "react-icons/tb";
@@ -13,6 +14,10 @@ import Identifier from "./Identifier";
 import useIpfsUrl from "@app/hooks/useIpfsUrl";
 import UnsafeImage from "./UnsafeImage";
 import { IconBaseProps, IconType } from "react-icons/lib";
+import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
+import { formatTimeRemaining, getUnlockRemaining } from "@lib/timelock";
+import { MdTimer, MdLockOpen } from "react-icons/md";
+import EncryptedContentUnlock from "./EncryptedContentUnlock";
 
 export default function TokenContent({
   glyph,
@@ -23,7 +28,103 @@ export default function TokenContent({
   thumbnail?: boolean;
   defaultIcon?: ((props: IconBaseProps) => JSX.Element) | IconType;
 }) {
-  const { embed, remote } = glyph || {};
+  const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(null);
+  const [decryptedMime, setDecryptedMime] = useState<string>("application/octet-stream");
+  const [, forceUpdate] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
+  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
+
+  // Start a 1-second interval while content is timelocked and not yet decrypted
+  useEffect(() => {
+    if (!isTimelocked || decryptedBytes) return;
+    timerRef.current = setInterval(() => forceUpdate((n) => n + 1), 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isTimelocked, decryptedBytes]);
+
+  if (isEncrypted && !decryptedBytes) {
+    const rawPayload = glyph as unknown as Record<string, unknown>;
+    const stub = rawPayload?.crypto as any;
+    const locator = rawPayload?.locator as string | undefined;
+    const locatorNonce = rawPayload?.locator_nonce as string | undefined;
+    const contentType = (rawPayload?.main as any)?.type as string | undefined;
+
+    const unlockAt: number | undefined = stub?.timelock?.unlock_at;
+    const remaining = isTimelocked && unlockAt
+      ? getUnlockRemaining(
+          // Minimal shape accepted by getUnlockRemaining
+          { p: glyph!.p, main: stub?.main ?? {}, crypto: stub ?? {} } as any
+        )
+      : 0;
+    const stillLocked = remaining > 0;
+
+    if (thumbnail) {
+      return (
+        <Box position="relative" width="100%" height="100%">
+          <Icon as={stillLocked ? MdTimer : MdLockOpen} width="100%" height="100%" color={stillLocked ? "orange.400" : "blue.400"} />
+          {stillLocked && (
+            <Badge
+              position="absolute"
+              bottom={0}
+              right={0}
+              colorScheme="orange"
+              fontSize="0.55em"
+              px={1}
+            >
+              {formatTimeRemaining(remaining)}
+            </Badge>
+          )}
+        </Box>
+      );
+    }
+
+    const handleDecrypted = (plaintext: Uint8Array) => {
+      setDecryptedBytes(plaintext);
+      setDecryptedMime(contentType || "application/octet-stream");
+    };
+
+    return (
+      <Box>
+        {isTimelocked && stillLocked && (
+          <HStack
+            bg="orange.900"
+            borderRadius="md"
+            px={3}
+            py={2}
+            mb={3}
+            spacing={2}
+          >
+            <Icon as={MdTimer} color="orange.300" fontSize="lg" />
+            <Box>
+              <Text fontSize="sm" fontWeight="bold" color="orange.200">
+                Timelocked — unlocks in {formatTimeRemaining(remaining)}
+              </Text>
+              {unlockAt && (
+                <Text fontSize="xs" color="orange.400">
+                  {new Date(unlockAt * 1000).toLocaleString()}
+                </Text>
+              )}
+            </Box>
+          </HStack>
+        )}
+        <EncryptedContentUnlock
+          stub={stub || { main: {}, crypto: {} }}
+          locator={locator}
+          locatorNonce={locatorNonce}
+          tokenRef={glyph?.ref}
+          onDecrypted={handleDecrypted}
+        />
+      </Box>
+    );
+  }
+
+  const embed = decryptedBytes
+    ? { t: decryptedMime, b: decryptedBytes }
+    : glyph?.embed;
+  const { remote } = glyph || {};
   const maxLen = 1000;
 
   // Image URL

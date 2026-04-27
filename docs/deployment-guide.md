@@ -153,6 +153,123 @@ docker compose up -d
 
 ---
 
+## Hosted Swap RPC Proxy (Public Broadcast Offers)
+
+"Public (Swap Index)" offers in the wallet require a Radiant Core node started
+with `-swapindex=1` and a **CORS-enabled JSON-RPC endpoint** reachable from
+the browser. Out of the box the wallet defaults to
+`https://swap.radiantcore.org`; the recipe below is the reference setup.
+
+### 1. Enable the swap index on `radiantd`
+
+In the Radiant Core docker-compose service (e.g.
+`docker/full-stack/docker-compose.yaml` → `radiantd.command`), add:
+
+```
+-swapindex=1
+-rpcwhitelist=swapreader:getswapindexinfo,getopenorders,getopenordersbywant,getswaphistory,getswaphistorybywant,getswapcount,getswapcountbywant
+```
+
+The `rpcwhitelist` line restricts the `swapreader` user to read-only swap RPCs
+so even if the proxy is abused it cannot touch wallets/mining/etc.
+
+Generate the `swapreader` credentials with `share/rpcauth/rpcauth.py` (or reuse
+the existing `rpcuser`/`rpcpassword`). Add the generated `rpcauth=` line next
+to the other RPC args.
+
+Restart the daemon and confirm:
+```bash
+docker exec radiantd radiant-cli -rpcuser=swapreader -rpcpassword=… getswapindexinfo
+```
+
+### 2. Add a Caddy site for the proxy
+
+Point `swap.radiantcore.org` (or your own DNS name) at the VPS and add to
+the `Caddyfile`:
+
+```caddy
+swap.radiantcore.org {
+    encode gzip
+
+    # CORS preflight
+    @options method OPTIONS
+    handle @options {
+        header Access-Control-Allow-Origin "*"
+        header Access-Control-Allow-Methods "POST, OPTIONS"
+        header Access-Control-Allow-Headers "Content-Type, Authorization"
+        header Access-Control-Max-Age "86400"
+        respond 204
+    }
+
+    # JSON-RPC
+    handle {
+        header Access-Control-Allow-Origin "*"
+        header Access-Control-Expose-Headers "Content-Type"
+
+        # Inject Basic auth so browser clients never see the password
+        request_header Authorization "Basic {$SWAP_RPC_BASIC_AUTH}"
+
+        reverse_proxy radiantd:7332 {
+            header_up Host {upstream_hostport}
+        }
+    }
+}
+```
+
+Set `SWAP_RPC_BASIC_AUTH` in the Caddy container's environment to
+`base64("swapreader:<password>")`, e.g.:
+
+```bash
+echo -n 'swapreader:YOUR_PASSWORD' | base64
+```
+
+### 3. Shared Docker network
+
+Caddy and `radiantd` must share a Docker network so Caddy can resolve
+`radiantd:7332`. Either:
+
+- add Caddy to the `radiantd` compose network via `networks.external`, or
+- add `radiantd` to Caddy's network, or
+- put both in a named bridge network.
+
+Example:
+```yaml
+# in photonic-wallet/docker-compose.yml
+services:
+  caddy:
+    networks:
+      - photonic
+      - radiant
+    environment:
+      - SWAP_RPC_BASIC_AUTH=${SWAP_RPC_BASIC_AUTH}
+
+networks:
+  radiant:
+    external: true
+    name: rxindexer_default   # match the network the radiantd compose creates
+```
+
+### 4. Verify end-to-end
+
+```bash
+# From outside the VPS
+curl -X POST https://swap.radiantcore.org \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getswapindexinfo","params":[]}'
+# => {"result":{"enabled":true, ...}}
+
+# CORS preflight
+curl -i -X OPTIONS https://swap.radiantcore.org \
+  -H "Origin: https://photonic-wallet.com" \
+  -H "Access-Control-Request-Method: POST"
+# => HTTP/2 204 with Access-Control-Allow-Origin: *
+```
+
+If both succeed, Photonic Wallet's "Public (Swap Index)" broadcast flow will
+work against the default endpoint with no configuration from the user.
+
+---
+
 ## V2 Hard Fork Support
 
 Photonic Wallet fully supports the V2 hard fork (activation block 410,000):

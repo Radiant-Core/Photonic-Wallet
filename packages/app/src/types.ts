@@ -160,6 +160,8 @@ export interface WalletState {
   address: string;
   swapWif?: string;
   swapAddress: string;
+  /** BIP-39 mnemonic; available while wallet is unlocked, cleared on lock */
+  mnemonic?: string;
 }
 
 export enum ElectrumStatus {
