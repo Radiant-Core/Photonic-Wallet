@@ -1,4 +1,4 @@
-import { createHashRouter, RouterProvider } from "react-router-dom";
+import { createHashRouter, RouterProvider, useRouteError } from "react-router-dom";
 import {
   ChakraProvider,
   extendTheme,
@@ -331,11 +331,27 @@ const theme = extendTheme({
   },
 });
 
+function ErrorPage() {
+  const error = useRouteError() as Error & { statusText?: string };
+  console.error("[ErrorPage]", error);
+  return (
+    <div style={{ padding: 24, color: "#fff", fontFamily: "monospace" }}>
+      <h1>Something went wrong</h1>
+      <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>
+        {error?.message || error?.statusText || JSON.stringify(error)}
+      </pre>
+      <pre style={{ whiteSpace: "pre-wrap", marginTop: 12, opacity: 0.6 }}>
+        {error?.stack}
+      </pre>
+    </div>
+  );
+}
+
 const router = createHashRouter([
   {
     path: "/",
     element: <App />,
-    errorElement: <div>Error</div>, // TODO
+    errorElement: <ErrorPage />,
     children: [
       {
         path: "",

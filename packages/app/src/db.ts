@@ -121,6 +121,12 @@ export class Database extends Dexie {
       vault:
         "++id, &[txid+vout], [claimed], [recipientAddress+claimed], [senderAddress+claimed], locktime, assetType",
     });
+
+    // Fix vault indexes: 'claimed' as simple index + add 'date' index
+    this.version(11).stores({
+      vault:
+        "++id, &[txid+vout], claimed, [recipientAddress+claimed], [senderAddress+claimed], locktime, assetType, date",
+    });
   }
 }
 
