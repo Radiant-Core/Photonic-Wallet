@@ -100,6 +100,60 @@ type Tranche = {
 
 type VestingInputMode = "manual" | "percentage";
 
+type PresetId = "linear-6" | "linear-12" | "cliff-linear" | "back-loaded" | "custom";
+
+interface PresetDef {
+  id: PresetId;
+  label: string;
+  description: string;
+  params: { months?: number; cliffMonths?: number };
+  build: (count: number) => number[];
+}
+
+const PRESETS: PresetDef[] = [
+  {
+    id: "linear-6",
+    label: "Linear 6-month",
+    description: "Equal portions every month for 6 months",
+    params: { months: 6 },
+    build: () => Array(6).fill(100 / 6),
+  },
+  {
+    id: "linear-12",
+    label: "Linear 12-month",
+    description: "Equal portions every month for 12 months",
+    params: { months: 12 },
+    build: () => Array(12).fill(100 / 12),
+  },
+  {
+    id: "cliff-linear",
+    label: "Cliff + Linear",
+    description: "25% cliff at month 3, then equal monthly over 9 months",
+    params: { cliffMonths: 3, months: 12 },
+    build: () => {
+      const pcts: number[] = [];
+      pcts.push(25); // cliff
+      const remaining = 75;
+      const monthlyCount = 9;
+      for (let i = 0; i < monthlyCount; i++) pcts.push(remaining / monthlyCount);
+      return pcts; // 10 tranches
+    },
+  },
+  {
+    id: "back-loaded",
+    label: "Back-loaded",
+    description: "10% for first 6 months, 40% in final 2 months",
+    params: { months: 8 },
+    build: () => {
+      const pcts: number[] = [];
+      for (let i = 0; i < 6; i++) pcts.push(10 / 6);
+      pcts.push(45);
+      pcts.push(45);
+      return pcts; // 8 tranches
+    },
+  },
+];
+
 export default function VaultPage() {
   const toast = useToast();
 
@@ -133,6 +187,12 @@ export default function VaultPage() {
   const [intervalStart, setIntervalStart] = useState("");
   const [intervalStep, setIntervalStep] = useState("");
   const [intervalStartDate, setIntervalStartDate] = useState("");
+
+  // Preset state
+  const [selectedPreset, setSelectedPreset] = useState<PresetId>("custom");
+
+  // List filter state
+  const [showClaimed, setShowClaimed] = useState(false);
 
   // ────────────────────────────────────────────────────────
   // Vault list from DB (live query)
@@ -259,6 +319,49 @@ export default function VaultPage() {
       value: Math.round(parseFloat(tr.value || "0") * 1e8),
     }));
   }, [tranches, vestingInputMode, totalVestingAmount]);
+
+  // ────────────────────────────────────────────────────────
+  // Apply a vesting preset
+  // ────────────────────────────────────────────────────────
+  const applyPreset = (presetId: PresetId) => {
+    setSelectedPreset(presetId);
+    if (presetId === "custom") return;
+
+    const preset = PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+
+    const pcts = preset.build(0);
+    const count = pcts.length;
+
+    // Switch to percentage mode
+    setVestingInputMode("percentage");
+
+    // Build tranches with percentages, locktimes left for interval auto-fill
+    const newTranches: Tranche[] = pcts.map((pct) => ({
+      locktime: "",
+      value: "",
+      pct: pct.toFixed(2),
+    }));
+    setTranches(newTranches);
+
+    // Auto-set interval step to ~1 month worth of blocks or seconds
+    if (mode === "block") {
+      const monthBlocks = Math.round((30 * 86400) / AVG_BLOCK_TIME_SEC);
+      setIntervalStep(String(monthBlocks));
+      if (currentHeight) setIntervalStart(String(currentHeight));
+    } else {
+      const monthSecs = 30 * 86400;
+      setIntervalStep(String(monthSecs));
+      setIntervalStartDate(unixToDateInput(currentTimestamp));
+    }
+
+    toast({
+      title: preset.label,
+      description: `${count} ${t`tranches generated`}`,
+      status: "info",
+      duration: 2000,
+    });
+  };
 
   // ────────────────────────────────────────────────────────
   // Interval auto-fill: generate tranche locktimes
@@ -656,6 +759,35 @@ export default function VaultPage() {
                 </HStack>
               </HStack>
 
+              {/* Preset templates */}
+              <Box
+                p={3}
+                borderWidth="1px"
+                borderColor="whiteAlpha.200"
+                borderRadius="md"
+              >
+                <Text fontSize="xs" fontWeight="bold" mb={2}>{t`Preset Templates`}</Text>
+                <SimpleGrid columns={2} gap={2}>
+                  {PRESETS.map((p) => (
+                    <Button
+                      key={p.id}
+                      size="xs"
+                      variant={selectedPreset === p.id ? "solid" : "outline"}
+                      onClick={() => applyPreset(p.id)}
+                      whiteSpace="normal"
+                      textAlign="left"
+                      h="auto"
+                      py={2}
+                    >
+                      <VStack align="start" gap={0}>
+                        <Text fontSize="xs" fontWeight="bold">{p.label}</Text>
+                        <Text fontSize="2xs" opacity={0.7}>{p.description}</Text>
+                      </VStack>
+                    </Button>
+                  ))}
+                </SimpleGrid>
+              </Box>
+
               {vestingInputMode === "percentage" && (
                 <FormControl>
                   <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
@@ -853,9 +985,31 @@ export default function VaultPage() {
       {/* ───────── LIST TAB ───────── */}
       {tab === "list" && (
         <Box overflowX="auto">
+          {/* Filter controls */}
+          {vaults && vaults.length > 0 && (
+            <HStack mb={3} gap={3}>
+              <FormControl display="flex" alignItems="center" gap={2} w="auto">
+                <Switch
+                  size="sm"
+                  isChecked={showClaimed}
+                  onChange={(e) => setShowClaimed(e.target.checked)}
+                />
+                <FormLabel mb={0} fontSize="xs">{t`Show Claimed`}</FormLabel>
+              </FormControl>
+              <Text fontSize="xs" color="whiteAlpha.500">
+                {vaults.filter((v) => !v.claimed).length} {t`active`}
+                {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${t`claimed`}`}
+              </Text>
+            </HStack>
+          )}
+
           {!vaults || vaults.length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
               {t`No vaults yet. Create one to get started.`}
+            </Text>
+          ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
+            <Text color="whiteAlpha.500" py={8} textAlign="center">
+              {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
             </Text>
           ) : (
             <Table size="sm" variant="simple">
@@ -871,7 +1025,7 @@ export default function VaultPage() {
                 </Tr>
               </Thead>
               <Tbody fontFamily="mono">
-                {vaults.map((v) => {
+                {vaults.filter((v) => showClaimed || !v.claimed).map((v) => {
                   const unlockable = isVaultUnlockable(
                     v.locktime,
                     v.mode,
