@@ -814,30 +814,62 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       }
     }
 
-    // When encrypted: upload blob to Arweave (permanent) in production,
-    // fall back to localStorage in development/test environments.
+    // When encrypted: store blob according to user's selected backend
+    // Options: on-chain (glyph), IPFS, Arweave, or Wallet Backend
     let encryptedLocator: Uint8Array | undefined;
     let locatorNonce: Uint8Array | undefined;
+    let storedPointer: string | undefined;
     if (encryptionResult) {
-      const isDev = import.meta.env.DEV;
-      const storageManager = new StorageManager(
-        isDev
-          ? { defaultAdapter: "local", local: { maxSize: 10 * 1024 * 1024 } }
-          : { defaultAdapter: "arweave" }
-      );
-      const stored = await storeEncryptedContent(
-        encryptionResult.encryptedContent,
-        encryptionResult.contentHash,
-        encryptionResult.locatorKey,
-        storageManager
-      );
-      encryptedLocator = stored.encryptedLocator;
-      locatorNonce = stored.locatorNonce;
+      const backend = encState.storageBackend || "arweave";
+      const storageManager = new StorageManager({
+        defaultAdapter: backend,
+        // Configure all backends - some may not be used but available
+        local: { maxSize: 10 * 1024 * 1024 },
+        backend: { baseUrl: import.meta.env.VITE_BACKEND_URL || "" },
+        ipfs: { apiKey: import.meta.env.VITE_NFT_STORAGE_TOKEN || "" },
+        glyph: { maxSizeBytes: 512 * 1024 }, // 512KB on-chain limit
+      });
+
+      // For on-chain storage (glyph), data goes directly in main.b
+      // For external storage, we get a pointer to store in the locator
+      if (backend === "glyph") {
+        // On-chain: use adapter directly to get hex pointer
+        const glyphAdapter = storageManager.getAdapter("glyph");
+        const contentHash = sha256(encryptionResult.encryptedContent);
+        storedPointer = await glyphAdapter.upload(
+          encryptionResult.encryptedContent,
+          contentHash
+        );
+        // Returns "glyph:hexdata" - we'll strip prefix when building metadata
+        // No separate locator needed - data is in the NFT itself
+        encryptedLocator = undefined;
+        locatorNonce = undefined;
+      } else {
+        // External storage: upload and get encrypted locator
+        const stored = await storeEncryptedContent(
+          encryptionResult.encryptedContent,
+          encryptionResult.contentHash,
+          encryptionResult.locatorKey,
+          storageManager
+        );
+        encryptedLocator = stored.encryptedLocator;
+        locatorNonce = stored.locatorNonce;
+      }
     }
 
     const encryptedFileObj = encryptionResult
       ? {
-          main: encryptionResult.metadata.main,
+          main:
+            encState.storageBackend === "glyph" && storedPointer
+              ? {
+                  // On-chain storage: encrypted data is in main.b as hex
+                  type: encryptionResult.metadata.main.type,
+                  b: storedPointer.replace("glyph:", ""), // Remove prefix, store hex
+                  enc: "xchacha20poly1305",
+                  size: encryptionResult.metadata.main.size,
+                  chunks: encryptionResult.metadata.main.chunks,
+                }
+              : encryptionResult.metadata.main,
           crypto: {
             ...encryptionResult.metadata.crypto,
             ...(encryptedLocator && locatorNonce
