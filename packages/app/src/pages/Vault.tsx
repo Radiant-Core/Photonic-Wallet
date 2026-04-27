@@ -203,20 +203,51 @@ export default function VaultPage() {
   );
 
   // ────────────────────────────────────────────────────────
-  // Current blockchain height (approximated from header)
+  // Current blockchain height (reactive live query + poll)
   // ────────────────────────────────────────────────────────
-  const [currentHeight, setCurrentHeight] = useState(0);
+  const latestHeader = useLiveQuery(
+    () => db.header.orderBy("height").reverse().first(),
+    []
+  );
+  const [polledHeight, setPolledHeight] = useState(0);
+
+  // Polling fallback: if liveQuery hasn't returned yet, retry every 3s
   useEffect(() => {
+    if (latestHeader?.height) return;
+    const id = setInterval(() => {
+      db.header
+        .orderBy("height")
+        .reverse()
+        .first()
+        .then((h) => {
+          if (h?.height) setPolledHeight(h.height);
+        });
+    }, 3000);
+    // also try immediately
     db.header
       .orderBy("height")
       .reverse()
       .first()
       .then((h) => {
-        if (h?.height) setCurrentHeight(h.height);
+        if (h?.height) setPolledHeight(h.height);
       });
-  }, [vaults]);
+    return () => clearInterval(id);
+  }, [latestHeader]);
 
+  const currentHeight = latestHeader?.height || polledHeight;
   const currentTimestamp = Math.floor(Date.now() / 1000);
+
+  // ────────────────────────────────────────────────────────
+  // Locktime validation
+  // ────────────────────────────────────────────────────────
+  const locktimeInvalid = useMemo(() => {
+    const lt = parseInt(locktime, 10);
+    if (!lt) return false;
+    if (mode === "block") {
+      return currentHeight > 0 && lt <= currentHeight;
+    }
+    return lt <= currentTimestamp;
+  }, [locktime, mode, currentHeight, currentTimestamp]);
 
   // ────────────────────────────────────────────────────────
   // Locktime hint text
@@ -227,13 +258,13 @@ export default function VaultPage() {
       if (!currentHeight) return t`Waiting for block data…`;
       if (!lt) return `${t`Current block`}: ${currentHeight.toLocaleString()}`;
       const diff = lt - currentHeight;
-      if (diff <= 0) return `${t`Current block`}: ${currentHeight.toLocaleString()} — ${t`already unlockable`}`;
+      if (diff <= 0) return `⚠ ${t`Must be greater than current block`} (${currentHeight.toLocaleString()})`;
       return `${t`Current block`}: ${currentHeight.toLocaleString()} — ${t`locks for`} ${blocksToDuration(diff)}`;
     }
     const lt = parseInt(locktime, 10);
     if (!lt) return `${t`Current time`}: ${new Date().toLocaleString()}`;
     const diff = lt - currentTimestamp;
-    if (diff <= 0) return `${t`Current time`}: ${new Date().toLocaleString()} — ${t`already unlockable`}`;
+    if (diff <= 0) return `⚠ ${t`Must be in the future`}`;
     return `${t`Current time`}: ${new Date().toLocaleString()} — ${t`locks for`} ${secsToDuration(diff)}`;
   }, [mode, locktime, currentHeight, currentTimestamp]);
 
@@ -423,6 +454,12 @@ export default function VaultPage() {
         const val = Math.round(parseFloat(amount) * 1e8);
         if (!lt || !val || !recipient) {
           throw new Error("Fill in all fields");
+        }
+        if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
+          throw new Error(`Block must be greater than current height (${currentHeight})`);
+        }
+        if (mode === "time" && lt <= currentTimestamp) {
+          throw new Error("Timestamp must be in the future");
         }
 
         const params: VaultParams = {
@@ -691,7 +728,7 @@ export default function VaultPage() {
             /* ───── Simple vault locktime + amount ───── */
             <VStack gap={4} align="stretch">
               <SimpleGrid columns={2} gap={4}>
-                <FormControl>
+                <FormControl isInvalid={locktimeInvalid}>
                   <FormLabel>
                     {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
                   </FormLabel>
@@ -701,11 +738,13 @@ export default function VaultPage() {
                     onChange={(e) => handleLocktimeChange(e.target.value)}
                     placeholder={
                       mode === "block"
-                        ? `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`
+                        ? (currentHeight ? `e.g. ${currentHeight + 8640}` : `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
                         : "Unix timestamp"
                     }
+                    min={mode === "block" ? (currentHeight + 1) : (currentTimestamp + 1)}
+                    type="number"
                   />
-                  <FormHelperText fontSize="xs" color="whiteAlpha.500">
+                  <FormHelperText fontSize="xs" color={locktimeInvalid ? "red.300" : "whiteAlpha.500"}>
                     {locktimeHint}
                   </FormHelperText>
                 </FormControl>
