@@ -129,7 +129,7 @@ msgstr ""
 msgid "Add Split"
 msgstr ""
 
-#: src/pages/Vault.tsx:497
+#: src/pages/Vault.tsx:793
 msgid "Add Tranche"
 msgstr ""
 
@@ -162,13 +162,23 @@ msgstr ""
 msgid "alice"
 msgstr ""
 
+#: src/pages/Vault.tsx:802
+msgid "Allocated"
+msgstr ""
+
+#: src/pages/Vault.tsx:170
+#: src/pages/Vault.tsx:176
+msgid "already unlockable"
+msgstr ""
+
 #: src/components/SendDigitalObject.tsx:202
 #: src/components/SendFungible.tsx:210
 #: src/components/SendRXD.tsx:206
 msgid "Amount"
 msgstr ""
 
-#: src/pages/Vault.tsx:445
+#: src/pages/Vault.tsx:610
+#: src/pages/Vault.tsx:752
 msgid "Amount (RXD)"
 msgstr ""
 
@@ -196,7 +206,7 @@ msgstr ""
 msgid "ASERT Half Life (blocks)"
 msgstr ""
 
-#: src/pages/Vault.tsx:379
+#: src/pages/Vault.tsx:539
 msgid "Asset Type"
 msgstr ""
 
@@ -241,6 +251,14 @@ msgstr ""
 msgid "Authority: {name}"
 msgstr ""
 
+#: src/pages/Vault.tsx:810
+msgid "Auto-fill"
+msgstr ""
+
+#: src/pages/Vault.tsx:680
+msgid "Auto-fill Schedule"
+msgstr ""
+
 #: src/components/BurnTokenModal.tsx:216
 msgid "Available: {0} tokens"
 msgstr ""
@@ -261,7 +279,7 @@ msgid "Block"
 msgstr ""
 
 #: src/components/TimelockSection.tsx:143
-#: src/pages/Vault.tsx:400
+#: src/pages/Vault.tsx:560
 msgid "Block Height"
 msgstr ""
 
@@ -328,15 +346,15 @@ msgstr ""
 msgid "Checking availability..."
 msgstr ""
 
-#: src/pages/Vault.tsx:609
+#: src/pages/Vault.tsx:938
 msgid "Claim"
 msgstr ""
 
-#: src/pages/Vault.tsx:326
+#: src/pages/Vault.tsx:486
 msgid "Claim Failed"
 msgstr ""
 
-#: src/pages/Vault.tsx:569
+#: src/pages/Vault.tsx:898
 msgid "Claimed"
 msgstr ""
 
@@ -525,11 +543,11 @@ msgstr ""
 msgid "Create Authority Token"
 msgstr ""
 
-#: src/pages/Vault.tsx:354
+#: src/pages/Vault.tsx:514
 msgid "Create Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:519
+#: src/pages/Vault.tsx:848
 msgid "Create Vesting Schedule"
 msgstr ""
 
@@ -561,8 +579,20 @@ msgstr ""
 msgid "Cryptographically sign this token"
 msgstr ""
 
+#: src/pages/Vault.tsx:168
+#: src/pages/Vault.tsx:170
+#: src/pages/Vault.tsx:171
+msgid "Current block"
+msgstr ""
+
 #: src/components/TimelockSection.tsx:172
 msgid "Current block: {currentBlock}"
+msgstr ""
+
+#: src/pages/Vault.tsx:174
+#: src/pages/Vault.tsx:176
+#: src/pages/Vault.tsx:177
+msgid "Current time"
 msgstr ""
 
 #: src/pages/WaveRegister.tsx:297
@@ -763,7 +793,8 @@ msgstr ""
 #: src/pages/AuthorityManager.tsx:68
 #: src/pages/Mint.tsx:435
 #: src/pages/Mint.tsx:1087
-#: src/pages/Vault.tsx:281
+#: src/pages/Vault.tsx:280
+#: src/pages/Vault.tsx:441
 #: src/pages/WaveRegister.tsx:82
 msgid "Error"
 msgstr ""
@@ -808,6 +839,10 @@ msgstr ""
 msgid "Files may be unsafe and result in loss of funds"
 msgstr ""
 
+#: src/pages/Vault.tsx:280
+msgid "Fill in start and interval"
+msgstr ""
+
 #: src/pages/Wallet.tsx:195
 #: src/pages/Wallet.tsx:199
 msgid "Filter"
@@ -828,6 +863,10 @@ msgstr ""
 
 #: src/pages/IpfsSettings.tsx:80
 msgid "Gateway"
+msgstr ""
+
+#: src/pages/Vault.tsx:724
+msgid "Generate"
 msgstr ""
 
 #: src/components/TokenDetails.tsx:179
@@ -896,6 +935,19 @@ msgstr ""
 #~ msgid "Insufficient token balance"
 #~ msgstr ""
 
+#: src/pages/Vault.tsx:709
+#: src/pages/Vault.tsx:714
+msgid "Interval"
+msgstr ""
+
+#: src/pages/Vault.tsx:703
+msgid "Interval (blocks)"
+msgstr ""
+
+#: src/pages/Vault.tsx:703
+msgid "Interval (seconds)"
+msgstr ""
+
 #: src/components/AirdropFungible.tsx:99
 #: src/components/SendDigitalObject.tsx:78
 #: src/components/SendFungible.tsx:88
@@ -960,11 +1012,11 @@ msgstr ""
 msgid "IPFS Gateway URL"
 msgstr ""
 
-#: src/pages/Vault.tsx:540
+#: src/pages/Vault.tsx:869
 msgid "Label"
 msgstr ""
 
-#: src/pages/Vault.tsx:504
+#: src/pages/Vault.tsx:833
 msgid "Label (optional)"
 msgstr ""
 
@@ -1013,11 +1065,11 @@ msgstr ""
 msgid "Lock content until a block height or date"
 msgstr ""
 
-#: src/pages/Vault.tsx:519
+#: src/pages/Vault.tsx:848
 msgid "Lock in Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:394
+#: src/pages/Vault.tsx:554
 msgid "Lock Mode"
 msgstr ""
 
@@ -1025,17 +1077,22 @@ msgstr ""
 msgid "Lock until"
 msgstr ""
 
-#: src/pages/Vault.tsx:431
+#: src/pages/Vault.tsx:593
 msgid "Lock Until (Unix)"
 msgstr ""
 
-#: src/pages/Vault.tsx:431
+#: src/pages/Vault.tsx:593
 msgid "Lock Until Block"
 msgstr ""
 
 #: src/components/StatusBar.tsx:40
-#: src/pages/Vault.tsx:579
+#: src/pages/Vault.tsx:908
 msgid "Locked"
+msgstr ""
+
+#: src/pages/Vault.tsx:171
+#: src/pages/Vault.tsx:177
+msgid "locks for"
 msgstr ""
 
 #: src/layouts/SettingsLayout.tsx:41
@@ -1050,6 +1107,10 @@ msgstr ""
 
 #: src/pages/Mint.tsx:2006
 msgid "LWMA Window Size (blocks)"
+msgstr ""
+
+#: src/pages/Vault.tsx:647
+msgid "Manual"
 msgstr ""
 
 #: src/pages/WalletSettings.tsx:123
@@ -1172,7 +1233,7 @@ msgstr ""
 msgid "My primary Radiant address"
 msgstr ""
 
-#: src/pages/Vault.tsx:347
+#: src/pages/Vault.tsx:507
 msgid "My Vaults"
 msgstr ""
 
@@ -1257,7 +1318,7 @@ msgstr ""
 msgid "No servers defined"
 msgstr ""
 
-#: src/pages/Vault.tsx:529
+#: src/pages/Vault.tsx:858
 msgid "No vaults yet. Create one to get started."
 msgstr ""
 
@@ -1287,7 +1348,11 @@ msgstr ""
 msgid "Not connected to server. Check your network connection."
 msgstr ""
 
-#: src/pages/Vault.tsx:592
+#: src/pages/Vault.tsx:688
+msgid "now"
+msgstr ""
+
+#: src/pages/Vault.tsx:921
 msgid "Now"
 msgstr ""
 
@@ -1310,6 +1375,10 @@ msgstr ""
 
 #: src/pages/Wallet.tsx:208
 msgid "Object"
+msgstr ""
+
+#: src/pages/Vault.tsx:762
+msgid "of total"
 msgstr ""
 
 #: src/pages/OpenOrders.tsx:757
@@ -1374,6 +1443,10 @@ msgstr ""
 msgid "Pending"
 msgstr ""
 
+#: src/pages/Vault.tsx:654
+msgid "Percentage"
+msgstr ""
+
 #: src/pages/AuthorityManager.tsx:208
 msgid "Permissions"
 msgstr ""
@@ -1388,6 +1461,10 @@ msgstr ""
 
 #: src/components/BurnTokenModal.tsx:239
 msgid "Photons to be returned:"
+msgstr ""
+
+#: src/pages/Vault.tsx:623
+msgid "Pick a Date"
 msgstr ""
 
 #: src/pages/Exit.tsx:7
@@ -1473,7 +1550,7 @@ msgstr ""
 msgid "Receive"
 msgstr ""
 
-#: src/pages/Vault.tsx:362
+#: src/pages/Vault.tsx:522
 msgid "Recipient Address"
 msgstr ""
 
@@ -1515,7 +1592,8 @@ msgstr ""
 msgid "Registration Failed"
 msgstr ""
 
-#: src/pages/Vault.tsx:539
+#: src/pages/Vault.tsx:806
+#: src/pages/Vault.tsx:868
 msgid "Remaining"
 msgstr ""
 
@@ -1606,7 +1684,7 @@ msgstr ""
 msgid "Select a valid network"
 msgstr ""
 
-#: src/pages/Vault.tsx:372
+#: src/pages/Vault.tsx:532
 msgid "Self"
 msgstr ""
 
@@ -1685,11 +1763,15 @@ msgstr ""
 msgid "Split percentages must sum to {0}% (currently {1}%)"
 msgstr ""
 
+#: src/pages/Vault.tsx:688
+msgid "Start block"
+msgstr ""
+
 #: src/components/ConsolidationModal.tsx:283
 msgid "Start consolidation process"
 msgstr ""
 
-#: src/pages/Vault.tsx:535
+#: src/pages/Vault.tsx:864
 msgid "Status"
 msgstr ""
 
@@ -1818,7 +1900,7 @@ msgstr ""
 msgid "Token Name"
 msgstr ""
 
-#: src/pages/Vault.tsx:408
+#: src/pages/Vault.tsx:568
 msgid "Token Ref (LE hex)"
 msgstr ""
 
@@ -1846,7 +1928,11 @@ msgstr ""
 msgid "Total number of mints"
 msgstr ""
 
-#: src/pages/Vault.tsx:456
+#: src/pages/Vault.tsx:661
+msgid "Total Vesting Amount (RXD)"
+msgstr ""
+
+#: src/pages/Vault.tsx:639
 msgid "Tranches"
 msgstr ""
 
@@ -1889,7 +1975,7 @@ msgid "TX ID"
 msgstr ""
 
 #: src/components/ViewDigitalObject.tsx:311
-#: src/pages/Vault.tsx:536
+#: src/pages/Vault.tsx:865
 #: src/pages/Wallet.tsx:203
 msgid "Type"
 msgstr ""
@@ -1906,7 +1992,7 @@ msgstr ""
 #~ msgid "Universal Names"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:401
+#: src/pages/Vault.tsx:561
 msgid "Unix Timestamp"
 msgstr ""
 
@@ -1922,7 +2008,7 @@ msgstr ""
 msgid "Unlock"
 msgstr ""
 
-#: src/pages/Vault.tsx:538
+#: src/pages/Vault.tsx:867
 msgid "Unlock At"
 msgstr ""
 
@@ -1942,7 +2028,7 @@ msgstr ""
 msgid "Unlock your wallet to use your encryption key"
 msgstr ""
 
-#: src/pages/Vault.tsx:574
+#: src/pages/Vault.tsx:903
 msgid "Unlockable"
 msgstr ""
 
@@ -2019,20 +2105,20 @@ msgstr ""
 #: src/pages/Coins.tsx:50
 #: src/pages/Mint.tsx:1823
 #: src/pages/SwapMissing.tsx:168
-#: src/pages/Vault.tsx:537
+#: src/pages/Vault.tsx:866
 msgid "Value"
 msgstr ""
 
 #: src/components/SideBar.tsx:113
-#: src/pages/Vault.tsx:338
+#: src/pages/Vault.tsx:498
 msgid "Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:320
+#: src/pages/Vault.tsx:480
 msgid "Vault Claimed"
 msgstr ""
 
-#: src/pages/Vault.tsx:213
+#: src/pages/Vault.tsx:367
 msgid "Vault Created"
 msgstr ""
 
@@ -2044,11 +2130,11 @@ msgstr ""
 msgid "Version:"
 msgstr ""
 
-#: src/pages/Vault.tsx:424
+#: src/pages/Vault.tsx:584
 msgid "Vesting Schedule"
 msgstr ""
 
-#: src/pages/Vault.tsx:269
+#: src/pages/Vault.tsx:428
 msgid "Vesting Schedule Created"
 msgstr ""
 
@@ -2064,6 +2150,10 @@ msgstr ""
 #: src/components/ContractAddresses.tsx:95
 #: src/components/ContractAddresses.tsx:103
 msgid "View on explorer"
+msgstr ""
+
+#: src/pages/Vault.tsx:167
+msgid "Waiting for block data…"
 msgstr ""
 
 #: src/layouts/SettingsLayout.tsx:15

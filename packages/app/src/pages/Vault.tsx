@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { t } from "@lingui/macro";
 import {
   Box,
   Button,
+  Divider,
   FormControl,
   FormLabel,
+  FormHelperText,
   Heading,
   HStack,
   Icon,
   IconButton,
   Input,
+  Progress,
   Select,
   SimpleGrid,
   Switch,
@@ -24,7 +27,7 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react";
-import { TbLock, TbLockOpen, TbPlus, TbTrash } from "react-icons/tb";
+import { TbLock, TbLockOpen, TbPlus, TbTrash, TbWand } from "react-icons/tb";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import Photons from "@app/components/Photons";
@@ -49,10 +52,53 @@ import {
   type VestingTranche,
 } from "@lib/vault";
 
+// ── Constants ──────────────────────────────────────────────
+const AVG_BLOCK_TIME_SEC = 300; // ~5 min per block
+
+// ── Helpers ────────────────────────────────────────────────
+
+/** Convert a local datetime-local string to UNIX timestamp */
+function dateInputToUnix(val: string): number {
+  if (!val) return 0;
+  return Math.floor(new Date(val).getTime() / 1000);
+}
+
+/** Convert a UNIX timestamp to a datetime-local input string */
+function unixToDateInput(ts: number): string {
+  if (!ts || ts <= 0) return "";
+  const d = new Date(ts * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Estimate duration in human-readable form from block count */
+function blocksToDuration(blocks: number): string {
+  if (blocks <= 0) return "";
+  const secs = blocks * AVG_BLOCK_TIME_SEC;
+  if (secs < 3600) return `~${Math.ceil(secs / 60)} min`;
+  if (secs < 86400) return `~${(secs / 3600).toFixed(1)}h`;
+  if (secs < 86400 * 365) return `~${(secs / 86400).toFixed(1)} days`;
+  return `~${(secs / (86400 * 365)).toFixed(1)} years`;
+}
+
+/** Estimate duration from seconds */
+function secsToDuration(secs: number): string {
+  if (secs <= 0) return "";
+  if (secs < 3600) return `~${Math.ceil(secs / 60)} min`;
+  if (secs < 86400) return `~${(secs / 3600).toFixed(1)}h`;
+  if (secs < 86400 * 365) return `~${(secs / 86400).toFixed(1)} days`;
+  return `~${(secs / (86400 * 365)).toFixed(1)} years`;
+}
+
+// ── Types ──────────────────────────────────────────────────
+
 type Tranche = {
   locktime: string;
   value: string;
+  pct: string;
 };
+
+type VestingInputMode = "manual" | "percentage";
 
 export default function VaultPage() {
   const toast = useToast();
@@ -69,14 +115,24 @@ export default function VaultPage() {
   const [mode, setMode] = useState<VaultMode>("block");
   const [recipient, setRecipient] = useState("");
   const [locktime, setLocktime] = useState("");
+  const [datePickerValue, setDatePickerValue] = useState("");
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
   const [ref, setRef] = useState("");
   const [vesting, setVesting] = useState(false);
   const [tranches, setTranches] = useState<Tranche[]>([
-    { locktime: "", value: "" },
+    { locktime: "", value: "", pct: "" },
   ]);
   const [loading, setLoading] = useState(false);
+
+  // Vesting-specific state
+  const [vestingInputMode, setVestingInputMode] = useState<VestingInputMode>("manual");
+  const [totalVestingAmount, setTotalVestingAmount] = useState("");
+
+  // Interval auto-fill state
+  const [intervalStart, setIntervalStart] = useState("");
+  const [intervalStep, setIntervalStep] = useState("");
+  const [intervalStartDate, setIntervalStartDate] = useState("");
 
   // ────────────────────────────────────────────────────────
   // Vault list from DB (live query)
@@ -103,6 +159,42 @@ export default function VaultPage() {
   const currentTimestamp = Math.floor(Date.now() / 1000);
 
   // ────────────────────────────────────────────────────────
+  // Locktime hint text
+  // ────────────────────────────────────────────────────────
+  const locktimeHint = useMemo(() => {
+    if (mode === "block") {
+      const lt = parseInt(locktime, 10);
+      if (!currentHeight) return t`Waiting for block data…`;
+      if (!lt) return `${t`Current block`}: ${currentHeight.toLocaleString()}`;
+      const diff = lt - currentHeight;
+      if (diff <= 0) return `${t`Current block`}: ${currentHeight.toLocaleString()} — ${t`already unlockable`}`;
+      return `${t`Current block`}: ${currentHeight.toLocaleString()} — ${t`locks for`} ${blocksToDuration(diff)}`;
+    }
+    const lt = parseInt(locktime, 10);
+    if (!lt) return `${t`Current time`}: ${new Date().toLocaleString()}`;
+    const diff = lt - currentTimestamp;
+    if (diff <= 0) return `${t`Current time`}: ${new Date().toLocaleString()} — ${t`already unlockable`}`;
+    return `${t`Current time`}: ${new Date().toLocaleString()} — ${t`locks for`} ${secsToDuration(diff)}`;
+  }, [mode, locktime, currentHeight, currentTimestamp]);
+
+  // ────────────────────────────────────────────────────────
+  // Date picker <-> UNIX timestamp sync
+  // ────────────────────────────────────────────────────────
+  const handleLocktimeChange = (val: string) => {
+    setLocktime(val);
+    if (mode === "time") {
+      const ts = parseInt(val, 10);
+      setDatePickerValue(ts > 0 ? unixToDateInput(ts) : "");
+    }
+  };
+
+  const handleDatePickerChange = (val: string) => {
+    setDatePickerValue(val);
+    const ts = dateInputToUnix(val);
+    if (ts > 0) setLocktime(String(ts));
+  };
+
+  // ────────────────────────────────────────────────────────
   // Self-fill recipient
   // ────────────────────────────────────────────────────────
   const fillSelf = useCallback(() => {
@@ -114,7 +206,7 @@ export default function VaultPage() {
   // ────────────────────────────────────────────────────────
   const addTranche = () => {
     if (tranches.length < VAULT_MAX_TRANCHES) {
-      setTranches([...tranches, { locktime: "", value: "" }]);
+      setTranches([...tranches, { locktime: "", value: "", pct: "" }]);
     }
   };
 
@@ -131,6 +223,68 @@ export default function VaultPage() {
   ) => {
     const updated = [...tranches];
     updated[index] = { ...updated[index], [field]: val };
+    setTranches(updated);
+  };
+
+  // ────────────────────────────────────────────────────────
+  // Percentage mode: compute amounts from total + pct
+  // ────────────────────────────────────────────────────────
+  const pctAllocated = useMemo(() => {
+    return tranches.reduce((sum, tr) => sum + (parseFloat(tr.pct) || 0), 0);
+  }, [tranches]);
+
+  const pctRemaining = Math.max(0, 100 - pctAllocated);
+
+  const autoFillLastPct = () => {
+    if (tranches.length === 0 || pctRemaining <= 0) return;
+    const updated = [...tranches];
+    updated[updated.length - 1] = {
+      ...updated[updated.length - 1],
+      pct: String(parseFloat(updated[updated.length - 1].pct || "0") + pctRemaining),
+    };
+    setTranches(updated);
+  };
+
+  // Resolve tranche amounts: in percentage mode, compute from total
+  const resolvedTranches = useMemo((): { locktime: number; value: number }[] => {
+    if (vestingInputMode === "percentage") {
+      const total = Math.round(parseFloat(totalVestingAmount || "0") * 1e8);
+      return tranches.map((tr) => ({
+        locktime: parseInt(tr.locktime, 10) || 0,
+        value: Math.round(total * ((parseFloat(tr.pct) || 0) / 100)),
+      }));
+    }
+    return tranches.map((tr) => ({
+      locktime: parseInt(tr.locktime, 10) || 0,
+      value: Math.round(parseFloat(tr.value || "0") * 1e8),
+    }));
+  }, [tranches, vestingInputMode, totalVestingAmount]);
+
+  // ────────────────────────────────────────────────────────
+  // Interval auto-fill: generate tranche locktimes
+  // ────────────────────────────────────────────────────────
+  const generateIntervalTranches = () => {
+    const count = tranches.length;
+    if (count === 0) return;
+
+    let start: number;
+    const step = parseInt(intervalStep, 10);
+
+    if (mode === "block") {
+      start = parseInt(intervalStart, 10);
+    } else {
+      start = dateInputToUnix(intervalStartDate);
+    }
+
+    if (!start || !step || step <= 0) {
+      toast({ title: t`Error`, description: t`Fill in start and interval`, status: "error" });
+      return;
+    }
+
+    const updated = tranches.map((tr, i) => ({
+      ...tr,
+      locktime: String(start + step * (i + 1)),
+    }));
     setTranches(updated);
   };
 
@@ -217,19 +371,24 @@ export default function VaultPage() {
 
         // Reset form
         setLocktime("");
+        setDatePickerValue("");
         setAmount("");
         setLabel("");
         setRef("");
         setTab("list");
       } else {
         // Vesting schedule
-        const vestingTranches: VestingTranche[] = tranches.map((tr) => ({
+        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.01) {
+          throw new Error("Percentages must sum to 100%");
+        }
+
+        const vestingTranches: VestingTranche[] = resolvedTranches.map((rt) => ({
           mode,
-          locktime: parseInt(tr.locktime, 10),
+          locktime: rt.locktime,
           assetType,
           recipientAddress: recipient,
           ref: assetType !== "rxd" ? ref : undefined,
-          value: Math.round(parseFloat(tr.value) * 1e8),
+          value: rt.value,
           label: label || undefined,
         }));
 
@@ -271,7 +430,8 @@ export default function VaultPage() {
           status: "success",
         });
 
-        setTranches([{ locktime: "", value: "" }]);
+        setTranches([{ locktime: "", value: "", pct: "" }]);
+        setTotalVestingAmount("");
         setLabel("");
         setRef("");
         setTab("list");
@@ -425,35 +585,149 @@ export default function VaultPage() {
           </FormControl>
 
           {!vesting ? (
-            <SimpleGrid columns={2} gap={4}>
-              <FormControl>
-                <FormLabel>
-                  {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
-                </FormLabel>
-                <Input
-                  size="sm"
-                  value={locktime}
-                  onChange={(e) => setLocktime(e.target.value)}
-                  placeholder={
-                    mode === "block"
-                      ? `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`
-                      : "Unix timestamp"
-                  }
-                />
-              </FormControl>
-              <FormControl>
-                <FormLabel>{t`Amount (RXD)`}</FormLabel>
-                <Input
-                  size="sm"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0.00"
-                />
-              </FormControl>
-            </SimpleGrid>
+            /* ───── Simple vault locktime + amount ───── */
+            <VStack gap={4} align="stretch">
+              <SimpleGrid columns={2} gap={4}>
+                <FormControl>
+                  <FormLabel>
+                    {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
+                  </FormLabel>
+                  <Input
+                    size="sm"
+                    value={locktime}
+                    onChange={(e) => handleLocktimeChange(e.target.value)}
+                    placeholder={
+                      mode === "block"
+                        ? `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`
+                        : "Unix timestamp"
+                    }
+                  />
+                  <FormHelperText fontSize="xs" color="whiteAlpha.500">
+                    {locktimeHint}
+                  </FormHelperText>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>{t`Amount (RXD)`}</FormLabel>
+                  <Input
+                    size="sm"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </FormControl>
+              </SimpleGrid>
+
+              {/* Date picker for timestamp mode */}
+              {mode === "time" && (
+                <FormControl>
+                  <FormLabel>{t`Pick a Date`}</FormLabel>
+                  <Input
+                    type="datetime-local"
+                    size="sm"
+                    value={datePickerValue}
+                    onChange={(e) => handleDatePickerChange(e.target.value)}
+                  />
+                </FormControl>
+              )}
+            </VStack>
           ) : (
-            <VStack gap={2} align="stretch">
-              <Heading size="xs">{t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})</Heading>
+            /* ───── Vesting tranches ───── */
+            <VStack gap={3} align="stretch">
+              {/* Mode toggle + total amount (percentage mode) */}
+              <HStack justify="space-between" align="center">
+                <Heading size="xs">
+                  {t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})
+                </Heading>
+                <HStack gap={1}>
+                  <Button
+                    size="xs"
+                    variant={vestingInputMode === "manual" ? "solid" : "ghost"}
+                    onClick={() => setVestingInputMode("manual")}
+                  >
+                    {t`Manual`}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={vestingInputMode === "percentage" ? "solid" : "ghost"}
+                    onClick={() => setVestingInputMode("percentage")}
+                  >
+                    {t`Percentage`}
+                  </Button>
+                </HStack>
+              </HStack>
+
+              {vestingInputMode === "percentage" && (
+                <FormControl>
+                  <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
+                  <Input
+                    size="sm"
+                    value={totalVestingAmount}
+                    onChange={(e) => setTotalVestingAmount(e.target.value)}
+                    placeholder="e.g. 10000"
+                  />
+                </FormControl>
+              )}
+
+              {/* Interval auto-fill */}
+              <Box
+                p={3}
+                borderWidth="1px"
+                borderColor="whiteAlpha.200"
+                borderRadius="md"
+              >
+                <HStack mb={2}>
+                  <Icon as={TbWand} />
+                  <Text fontSize="xs" fontWeight="bold">{t`Auto-fill Schedule`}</Text>
+                </HStack>
+                <SimpleGrid columns={2} gap={2}>
+                  {mode === "block" ? (
+                    <Input
+                      size="xs"
+                      value={intervalStart}
+                      onChange={(e) => setIntervalStart(e.target.value)}
+                      placeholder={t`Start block` + (currentHeight ? ` (${t`now`}: ${currentHeight})` : "")}
+                    />
+                  ) : (
+                    <Input
+                      type="datetime-local"
+                      size="xs"
+                      value={intervalStartDate}
+                      onChange={(e) => setIntervalStartDate(e.target.value)}
+                    />
+                  )}
+                  <Input
+                    size="xs"
+                    value={intervalStep}
+                    onChange={(e) => setIntervalStep(e.target.value)}
+                    placeholder={
+                      mode === "block" ? t`Interval (blocks)` : t`Interval (seconds)`
+                    }
+                  />
+                </SimpleGrid>
+                {mode === "block" && intervalStep && (
+                  <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
+                    {t`Interval`}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
+                  </Text>
+                )}
+                {mode === "time" && intervalStep && (
+                  <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
+                    {t`Interval`}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
+                  </Text>
+                )}
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  leftIcon={<TbWand />}
+                  onClick={generateIntervalTranches}
+                  mt={2}
+                >
+                  {t`Generate`}
+                </Button>
+              </Box>
+
+              <Divider borderColor="whiteAlpha.200" />
+
+              {/* Tranche rows */}
               {tranches.map((tr, i) => (
                 <HStack key={i} gap={2}>
                   <Input
@@ -467,15 +741,35 @@ export default function VaultPage() {
                       mode === "block" ? `Block #${i + 1}` : `Timestamp #${i + 1}`
                     }
                   />
-                  <Input
-                    flex={1}
-                    size="sm"
-                    value={tr.value}
-                    onChange={(e) =>
-                      updateTranche(i, "value", e.target.value)
-                    }
-                    placeholder="Amount (RXD)"
-                  />
+                  {vestingInputMode === "manual" ? (
+                    <Input
+                      flex={1}
+                      size="sm"
+                      value={tr.value}
+                      onChange={(e) =>
+                        updateTranche(i, "value", e.target.value)
+                      }
+                      placeholder={t`Amount (RXD)`}
+                    />
+                  ) : (
+                    <Input
+                      flex={1}
+                      size="sm"
+                      value={tr.pct}
+                      onChange={(e) =>
+                        updateTranche(i, "pct", e.target.value)
+                      }
+                      placeholder={`% ${t`of total`}`}
+                    />
+                  )}
+                  {vestingInputMode === "percentage" && (
+                    <Text fontSize="xs" color="whiteAlpha.500" minW="60px" textAlign="right">
+                      {resolvedTranches[i]
+                        ? (resolvedTranches[i].value / 1e8).toFixed(2)
+                        : "0.00"}{" "}
+                      RXD
+                    </Text>
+                  )}
                   <IconButton
                     aria-label="Remove"
                     icon={<TbTrash />}
@@ -486,6 +780,8 @@ export default function VaultPage() {
                   />
                 </HStack>
               ))}
+
+              {/* Add tranche button */}
               {tranches.length < VAULT_MAX_TRANCHES && (
                 <Button
                   size="xs"
@@ -496,6 +792,39 @@ export default function VaultPage() {
                 >
                   {t`Add Tranche`}
                 </Button>
+              )}
+
+              {/* Percentage allocation bar */}
+              {vestingInputMode === "percentage" && (
+                <Box>
+                  <HStack justify="space-between" mb={1}>
+                    <Text fontSize="xs" color="whiteAlpha.600">
+                      {t`Allocated`}: {pctAllocated.toFixed(1)}%
+                    </Text>
+                    <HStack gap={2}>
+                      <Text fontSize="xs" color="whiteAlpha.600">
+                        {t`Remaining`}: {pctRemaining.toFixed(1)}%
+                      </Text>
+                      {pctRemaining > 0 && (
+                        <Button size="xs" variant="ghost" onClick={autoFillLastPct}>
+                          {t`Auto-fill`}
+                        </Button>
+                      )}
+                    </HStack>
+                  </HStack>
+                  <Progress
+                    value={pctAllocated}
+                    size="xs"
+                    colorScheme={
+                      Math.abs(pctAllocated - 100) < 0.01
+                        ? "green"
+                        : pctAllocated > 100
+                        ? "red"
+                        : "blue"
+                    }
+                    borderRadius="full"
+                  />
+                </Box>
               )}
             </VStack>
           )}
