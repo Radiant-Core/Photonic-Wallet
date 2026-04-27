@@ -7,6 +7,7 @@ import {
   ContractBalance,
   BroadcastResult,
   TokenSwap,
+  VaultRecord,
 } from "./types";
 import config from "@app/config.json";
 import { shuffle } from "@lib/util";
@@ -22,6 +23,7 @@ export class Database extends Dexie {
   balance!: Table<ContractBalance>;
   broadcast!: Table<BroadcastResult>;
   swap!: Table<TokenSwap>;
+  vault!: Table<VaultRecord>;
 
   constructor() {
     super("photonic");
@@ -112,6 +114,12 @@ export class Database extends Dexie {
       transaction
         .table("kvp")
         .put({ mainnet: shuffle(mainnet), testnet }, "servers");
+    });
+
+    // Add vault table for Radiant Vault (CLTV timelocking)
+    this.version(10).stores({
+      vault:
+        "++id, &[txid+vout], [claimed], [recipientAddress+claimed], [senderAddress+claimed], locktime, assetType",
     });
   }
 }

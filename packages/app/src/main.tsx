@@ -38,6 +38,7 @@ import SwapCompleted from "./pages/SwapCompleted";
 import SwapLoad from "./pages/SwapLoad";
 import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
+import VaultPage from "./pages/Vault";
 
 dayjs.extend(localizedFormat);
 
@@ -387,6 +388,10 @@ const router = createHashRouter([
           {
             path: "/coins",
             element: <Coins />,
+          },
+          {
+            path: "/vault",
+            element: <VaultPage />,
           },
           {
             path: "/history",

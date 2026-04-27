@@ -11,6 +11,7 @@ export enum ContractType {
   RXD,
   NFT,
   FT,
+  VAULT,
 }
 
 // Type of radiant smart token (mint operation)
@@ -195,6 +196,41 @@ export class SwapError extends Error {
     this.name = "SwapError";
     Object.setPrototypeOf(this, SwapError.prototype);
   }
+}
+
+// Radiant Vault record — stored in IndexedDB for recovery and UI display
+export interface VaultRecord {
+  id?: number;
+  /** Vault creation txid */
+  txid: string;
+  /** Output index of the vault P2SH UTXO */
+  vout: number;
+  /** Amount locked (photons) */
+  value: number;
+  /** Asset type: rxd, nft, or ft */
+  assetType: "rxd" | "nft" | "ft";
+  /** Lock mode */
+  mode: "block" | "time";
+  /** Locktime value (block height or UNIX timestamp) */
+  locktime: number;
+  /** Recipient P2PKH address */
+  recipientAddress: string;
+  /** Sender P2PKH address */
+  senderAddress: string;
+  /** Token ref (for NFT/FT) in LE hex */
+  ref?: string;
+  /** Optional label */
+  label?: string;
+  /** Full redeem script hex (needed to spend) */
+  redeemScriptHex: string;
+  /** P2SH output script hex */
+  p2shScriptHex: string;
+  /** Whether this vault has been claimed (spent) */
+  claimed: 0 | 1;
+  /** Block height when vault tx was confirmed */
+  height?: number;
+  /** Creation timestamp */
+  date: number;
 }
 
 export {};

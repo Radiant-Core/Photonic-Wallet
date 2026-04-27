@@ -31,6 +31,9 @@ export * from "./reveal";
 // Storage (Phase 2: Off-Chain Storage)
 export * from "./storage";
 
+// Radiant Vault (CLTV timelocking)
+export * from "./vault";
+
 // Utilities
 export * from "./difficulty";
 export * from "./util";

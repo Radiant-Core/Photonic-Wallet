@@ -15,7 +15,7 @@ import { RiSwap2Line } from "react-icons/ri";
 import { t } from "@lingui/macro";
 import { HiOutlineAtSymbol } from "react-icons/hi";
 import { MdHome } from "react-icons/md";
-import { TbTriangleSquareCircle, TbCoins, TbStack2 } from "react-icons/tb";
+import { TbTriangleSquareCircle, TbCoins, TbStack2, TbLock } from "react-icons/tb";
 import MenuButton from "./MenuButton";
 import SyncBar from "./SyncBar";
 
@@ -105,6 +105,12 @@ export default function SideBar({ ...rest }: GridProps) {
           leftIcon={<Icon as={RiSwap2Line} boxSize={5} />}
         >
           {t`Swap`}
+        </MenuButton>
+        <MenuButton
+          to="/vault"
+          leftIcon={<Icon as={TbLock} boxSize={5} />}
+        >
+          {t`Vault`}
         </MenuButton>
       </SimpleGrid>
       <Box />

@@ -24,7 +24,7 @@ export default async function setSubscriptionStatus(
       const count = await db.subscriptionStatus
         .filter((status) => status.sync.done)
         .count();
-      if (count === 3) {
+      if (count === 4) {
         const maxId = (await db.txo.orderBy("id").reverse().first())?.id || 0;
         db.kvp.put(maxId, "lastNotification");
         init = true;

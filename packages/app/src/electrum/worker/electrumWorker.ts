@@ -1,7 +1,7 @@
 import "./polyfill";
 import { expose } from "comlink";
 import ElectrumManager from "../ElectrumManager";
-import { FTWorker, NFTWorker, RXDWorker } from "./index";
+import { FTWorker, NFTWorker, RXDWorker, VaultWorker } from "./index";
 import db from "@app/db";
 import { ElectrumStatus } from "@app/types";
 import { ElectrumRefResponse } from "@lib/types";
@@ -123,11 +123,13 @@ const worker = {
     await rxd.syncPending();
     await ft.syncPending();
     await nft.syncPending();
+    await vault.syncPending();
   },
   async manualSync() {
     await rxd.manualSync();
     await ft.manualSync();
     await nft.manualSync();
+    await vault.manualSync();
   },
   setActive(active: boolean) {
     this.active = active;
@@ -149,6 +151,7 @@ const worker = {
 const rxd = new RXDWorker(worker, electrum);
 const nft = new NFTWorker(worker, electrum);
 const ft = new FTWorker(worker, electrum);
+const vault = new VaultWorker(worker, electrum);
 
 export type Worker = typeof worker;
 
@@ -192,6 +195,7 @@ electrum.addEvent("connected", () => {
     rxd.register(address);
     nft.register(address);
     ft.register(address);
+    vault.register(address);
   }
 });
 

@@ -9,5 +9,6 @@ export default function ContractName({
     [ContractType.FT]: "Fungible tokens",
     [ContractType.NFT]: "Non-fungible tokens",
     [ContractType.RXD]: "RXD",
+    [ContractType.VAULT]: "Vault",
   }[contractType];
 }
