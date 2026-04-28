@@ -397,7 +397,7 @@ export const initialEncryptionState: EncryptionSectionState = {
   mode: "passphrase",
   passphrase: "",
   recipientKeys: [],
-  storageBackend: "ipfs",
+  storageBackend: "arweave",
 };
 
 /**

@@ -79,6 +79,7 @@ import {
   type EncryptionSectionState,
 } from "@app/components/encryption";
 import { encryptContent, storeEncryptedContent } from "@app/encryptionService";
+import { deriveEncryptionKeypair } from "@app/keys";
 import { StorageManager } from "@lib/storage";
 import { TimelockSection } from "@app/components/TimelockSection";
 import {
@@ -620,6 +621,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         ? resolveTimelockParams(timelockState)
         : null;
 
+      // Derive self keypair for backup recipient slot — ensures the minter can
+      // always decrypt their own NFT even after transferring it to someone else.
+      const selfKeypair = wallet.value.mnemonic
+        ? deriveEncryptionKeypair(wallet.value.mnemonic)
+        : undefined;
+
       encryptionResult = await encryptContent(
         new Uint8Array(fileState.file.data),
         {
@@ -632,6 +639,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           contentType: fileState.file.type || "application/octet-stream",
           name: fields.name || payloadFilename || "file",
           protocolIds: [GLYPH_NFT, GLYPH_ENCRYPTED],
+          selfKeypair,
         }
       );
 

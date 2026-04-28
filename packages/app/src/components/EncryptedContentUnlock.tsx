@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { EncryptionProgress } from "./EncryptionProgress";
+import type { EncryptionProgress as ProgressType } from "@app/encryptionService";
 import {
   Box,
   VStack,
@@ -84,6 +86,7 @@ export default function EncryptedContentUnlock({
   const [password, setPassword] = useState("");
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isRevealing, setIsRevealing] = useState(false);
+  const [decryptProgress, setDecryptProgress] = useState<ProgressType | null>(null);
   // Local reveal record (CEK saved at mint time) — only the original minter has this
   const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(() =>
     tokenRef ? getReveal(tokenRef) : undefined
@@ -136,7 +139,9 @@ export default function EncryptedContentUnlock({
       storageManager
     );
 
-    const plaintext = await decryptContent(encryptedBlob, decryptOptions);
+    const plaintext = await decryptContent(encryptedBlob, decryptOptions, (p) =>
+      setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+    );
 
     toast({
       title: t`Content Decrypted!`,
@@ -167,7 +172,9 @@ export default function EncryptedContentUnlock({
       throw new Error("On-chain ciphertext hash mismatch — data may be corrupted");
     }
 
-    const plaintext = await decryptContent(encryptedBlob, decryptOptions);
+    const plaintext = await decryptContent(encryptedBlob, decryptOptions, (p) =>
+      setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+    );
 
     toast({
       title: t`Content Decrypted!`,
@@ -180,13 +187,13 @@ export default function EncryptedContentUnlock({
 
   /** Dispatch to the correct fetch+decrypt path based on storage type */
   const fetchAndDecrypt = async (
-    locatorKey: Uint8Array,
+    locatorKey: Uint8Array | undefined,
     decryptOptions: Parameters<typeof decryptContent>[1]
   ): Promise<void> => {
     if (isOnChain) {
       await fetchAndDecryptOnChain(decryptOptions);
     } else {
-      await fetchAndDecryptOffChain(locatorKey, decryptOptions);
+      await fetchAndDecryptOffChain(locatorKey!, decryptOptions);
     }
   };
 
@@ -203,9 +210,10 @@ export default function EncryptedContentUnlock({
     if (!assertStorageAvailable()) return;
 
     setIsDecrypting(true);
+    setDecryptProgress(null);
     try {
       const locatorKey = isOnChain
-        ? new Uint8Array(0) // unused for on-chain path
+        ? undefined // unused for on-chain path
         : deriveLocatorKeyFromPassphrase(password, stub);
       await fetchAndDecrypt(locatorKey, { metadata: stub, passphrase: password });
     } catch (error) {
@@ -234,16 +242,19 @@ export default function EncryptedContentUnlock({
     }
 
     setIsDecrypting(true);
+    setDecryptProgress(null);
     try {
       const keypair = deriveEncryptionKeypair(walletMnemonic);
 
       // Derive locatorKey from the wallet's X25519 private key (recipient mode)
-      const locatorKey = deriveKeyHKDF(
-        keypair.x25519PrivateKey,
-        new Uint8Array(0),
-        new TextEncoder().encode("glyph-locator-recipient-v1"),
-        32
-      );
+      const locatorKey = isOnChain
+        ? undefined
+        : deriveKeyHKDF(
+            keypair.x25519PrivateKey,
+            new Uint8Array(0),
+            new TextEncoder().encode("glyph-locator-recipient-v1"),
+            32
+          );
 
       await fetchAndDecrypt(locatorKey, {
         metadata: stub,
@@ -416,6 +427,13 @@ export default function EncryptedContentUnlock({
                     </Text>
                   )}
 
+                  {isDecrypting && decryptProgress && (
+                    <EncryptionProgress
+                      progress={decryptProgress}
+                      operation="decrypting"
+                    />
+                  )}
+
                   <Button
                     colorScheme="blue"
                     onClick={handlePassphraseDecrypt}
@@ -446,6 +464,13 @@ export default function EncryptedContentUnlock({
                       </AlertDescription>
                     </Alert>
                   )}
+                  {isDecrypting && decryptProgress && (
+                    <EncryptionProgress
+                      progress={decryptProgress}
+                      operation="decrypting"
+                    />
+                  )}
+
                   <Button
                     colorScheme="blue"
                     onClick={handleWalletKeyDecrypt}

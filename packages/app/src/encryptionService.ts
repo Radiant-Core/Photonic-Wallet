@@ -349,55 +349,90 @@ export async function decryptContent(
   // Get encrypted chunks from content
   const chunks = parseEncryptedContent(encryptedContent, metadata.main.chunks);
 
-  // Unwrap CEK
-  let cek: Uint8Array;
+  // Unwrap CEK — assigned inside conditional branches, guarded by unwrapped flag
+  let cek!: Uint8Array;
+
+  const recipients = metadata.crypto.recipients;
+  if (!recipients?.length) {
+    throw new Error("No recipients found in metadata");
+  }
 
   if (options.passphrase) {
-    // Passphrase mode: derive KEK from passphrase via scrypt + HKDF, then XChaCha20-Poly1305 unwrap
-    const recipient = metadata.crypto.recipients?.[0];
-    if (!recipient) {
-      throw new Error("No recipients found in metadata");
+    // Passphrase mode: passphrase recipients use an all-zeros ephemeral_x25519 sentinel.
+    // Iterate to find the matching passphrase recipient (there may be multiple recipients
+    // in mixed mode, e.g. passphrase + self-as-recipient backup).
+    const PASSPHRASE_SENTINEL = new Uint8Array(32); // all zeros
+    let unwrapped = false;
+
+    for (const recipient of recipients) {
+      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.ephemeral_x25519, "base64"));
+      // Only try recipients marked as passphrase-mode (sentinel ephemeral key)
+      if (!ephemeralBytes.every((b, i) => b === PASSPHRASE_SENTINEL[i])) continue;
+
+      try {
+        // wrappedCEK layout: salt (32) || nonce (24) || ciphertext
+        const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.kek, "base64"));
+        const passphraseSalt = wrappedCEKBuf.slice(0, 32);
+        const nonce = wrappedCEKBuf.slice(32, 56);
+        const ciphertext = wrappedCEKBuf.slice(56);
+
+        const { key: passphraseKey } = deriveKeyScrypt(options.passphrase, passphraseSalt);
+        const kek = deriveKeyHKDF(
+          passphraseKey,
+          passphraseSalt,
+          new TextEncoder().encode("glyph-kek-passphrase-v1"),
+          XCHACHA20_KEY_SIZE
+        );
+
+        cek = decryptXChaCha20Poly1305(ciphertext, kek, nonce);
+        unwrapped = true;
+        break;
+      } catch {
+        // Wrong passphrase or corrupted — keep trying remaining passphrase recipients
+      }
     }
 
-    // wrappedCEK layout: salt (32) || nonce (24) || ciphertext
-    const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.kek, "base64"));
-    const passphraseSalt = wrappedCEKBuf.slice(0, 32);
-    const nonce = wrappedCEKBuf.slice(32, 56);
-    const ciphertext = wrappedCEKBuf.slice(56);
-
-    const { key: passphraseKey } = deriveKeyScrypt(options.passphrase, passphraseSalt);
-    const kek = deriveKeyHKDF(
-      passphraseKey,
-      passphraseSalt,
-      new TextEncoder().encode("glyph-kek-passphrase-v1"),
-      XCHACHA20_KEY_SIZE
-    );
-
-    cek = decryptXChaCha20Poly1305(ciphertext, kek, nonce);
+    if (!unwrapped) {
+      throw new Error("Invalid passphrase or no matching passphrase recipient found");
+    }
   } else if (options.privateKey) {
-    // Recipient mode: unwrap using private key
-    const recipient = metadata.crypto.recipients?.[0];
-    if (!recipient) {
-      throw new Error("No recipients found in metadata");
-    }
-
-    const ephemeral = {
-      x25519EphemeralPublicKey: new Uint8Array(Buffer.from(recipient.ephemeral_x25519, "base64")),
-      ...(recipient.ephemeral_pq
-        ? { mlkemCiphertext: new Uint8Array(Buffer.from(recipient.ephemeral_pq, "base64")) }
-        : {}),
-    };
+    // Recipient mode: iterate all recipients until unwrapCEK succeeds for this private key.
+    // Needed because a token may have multiple recipients (e.g. sender + receiver + self-backup).
+    let unwrapped = false;
 
     const recipientKeyPair = {
       x25519PrivateKey: options.privateKey,
       x25519PublicKey: new Uint8Array(32), // Not needed for decryption
     };
 
-    cek = unwrapCEK(
-      new Uint8Array(Buffer.from(recipient.kek, "base64")),
-      ephemeral,
-      recipientKeyPair
-    );
+    for (const recipient of recipients) {
+      // Skip passphrase-sentinel recipients
+      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.ephemeral_x25519, "base64"));
+      if (ephemeralBytes.every((b) => b === 0)) continue;
+
+      try {
+        const ephemeral = {
+          x25519EphemeralPublicKey: ephemeralBytes,
+          ...(recipient.ephemeral_pq
+            ? { mlkemCiphertext: new Uint8Array(Buffer.from(recipient.ephemeral_pq, "base64")) }
+            : {}),
+        };
+
+        cek = unwrapCEK(
+          new Uint8Array(Buffer.from(recipient.kek, "base64")),
+          ephemeral,
+          recipientKeyPair
+        );
+        unwrapped = true;
+        break;
+      } catch {
+        // Not this recipient — try next
+      }
+    }
+
+    if (!unwrapped) {
+      throw new Error("Private key is not a recipient for this content");
+    }
   } else {
     throw new Error("Must provide passphrase or privateKey");
   }
