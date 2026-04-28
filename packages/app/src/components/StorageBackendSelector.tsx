@@ -10,6 +10,8 @@
 
 import { useState } from "react";
 
+const HAS_IPFS_KEY = !!(import.meta.env.VITE_NFT_STORAGE_TOKEN as string | undefined);
+
 export type StorageBackend = "glyph" | "ipfs" | "arweave" | "backend";
 
 export type StorageBackendSelectorProps = {
@@ -31,6 +33,7 @@ const BACKEND_OPTIONS: {
   icon: string;
   description: string;
   sizeLimit?: number;
+  requiresApiKey?: boolean;
 }[] = [
   {
     id: "glyph",
@@ -44,6 +47,7 @@ const BACKEND_OPTIONS: {
     label: "IPFS",
     icon: "🌐",
     description: "Content-addressed decentralized storage. Requires NFT.Storage API key for pinning.",
+    requiresApiKey: true,
   },
   {
     id: "arweave",
@@ -74,6 +78,9 @@ export function StorageBackendSelector({
     if (!fileSize || !sizeLimit) return false;
     return fileSize > sizeLimit;
   };
+
+  const isApiKeyMissing = (requiresApiKey?: boolean): boolean =>
+    !!requiresApiKey && !HAS_IPFS_KEY;
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -107,15 +114,18 @@ export function StorageBackendSelector({
       <div className="backend-options">
         {BACKEND_OPTIONS.map((option) => {
           const overLimit = isOverLimit(option.sizeLimit);
+          const missingKey = isApiKeyMissing(option.requiresApiKey);
+          const isUnavailable = overLimit || missingKey;
           const isSelected = backend === option.id;
 
           return (
             <button
               key={option.id}
-              className={`backend-option ${isSelected ? "selected" : ""} ${overLimit ? "disabled" : ""}`}
-              onClick={() => !overLimit && !disabled && onChange(option.id)}
-              disabled={disabled || overLimit}
+              className={`backend-option ${isSelected ? "selected" : ""} ${isUnavailable ? "disabled" : ""}`}
+              onClick={() => !isUnavailable && !disabled && onChange(option.id)}
+              disabled={disabled || isUnavailable}
               type="button"
+              title={missingKey ? "VITE_NFT_STORAGE_TOKEN env var not set — IPFS unavailable" : undefined}
             >
               <span className="option-icon">{option.icon}</span>
               <div className="option-details">
@@ -126,6 +136,9 @@ export function StorageBackendSelector({
                     Limit: {formatSize(option.sizeLimit)}
                     {overLimit && ` (your file is ${formatSize(fileSize!)})`}
                   </span>
+                )}
+                {missingKey && (
+                  <span className="size-limit exceeded">API key not configured</span>
                 )}
               </div>
               {isSelected && <span className="checkmark">✓</span>}

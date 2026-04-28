@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { EncryptionProgress } from "./EncryptionProgress";
 import type { EncryptionProgress as ProgressType } from "@app/encryptionService";
 import {
@@ -42,7 +42,7 @@ import {
 import { StorageManager } from "@lib/storage";
 import { wallet, feeRate } from "@app/signals";
 import { deriveEncryptionKeypair } from "@app/keys";
-import { deriveKeyHKDF } from "@lib/encryption";
+import { deriveKeyHKDF, unwrapCEK } from "@lib/encryption";
 import db from "@app/db";
 import { ContractType } from "@app/types";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -102,7 +102,49 @@ export default function EncryptedContentUnlock({
   const scheme = stub.main?.scheme || "xchacha20poly1305";
 
   const walletMnemonic = wallet.value.mnemonic;
-  const canUseWalletKey = !!walletMnemonic && !wallet.value.locked;
+
+  /**
+   * Pre-check: probe whether the wallet's X25519 key can unwrap any recipient slot.
+   * unwrapCEK is synchronous (X25519 DH + HKDF) — no scrypt, no network.
+   * Result is memoized so it only re-runs when the wallet mnemonic or stub changes.
+   */
+  const isWalletKeyRecipient = useMemo((): boolean => {
+    if (!walletMnemonic) return false;
+    const recipients = stub.crypto?.recipients;
+    if (!recipients?.length) return false;
+    try {
+      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const recipientKeyPair = {
+        x25519PrivateKey: keypair.x25519PrivateKey,
+        x25519PublicKey: keypair.x25519PublicKey,
+      };
+      for (const r of recipients) {
+        const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+        if (ephemeralBytes.every((b) => b === 0)) continue; // passphrase sentinel
+        try {
+          const ephemeral = {
+            x25519EphemeralPublicKey: ephemeralBytes,
+            ...(r.ephemeral_pq
+              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+              : {}),
+          };
+          unwrapCEK(
+            new Uint8Array(Buffer.from(r.kek, "base64")),
+            ephemeral,
+            recipientKeyPair
+          );
+          return true; // unwrap succeeded — this wallet is a recipient
+        } catch {
+          // not this recipient slot, keep trying
+        }
+      }
+    } catch {
+      // keypair derivation failed (shouldn't happen with valid mnemonic)
+    }
+    return false;
+  }, [walletMnemonic, stub]);
+
+  const canUseWalletKey = !!walletMnemonic && !wallet.value.locked && isWalletKeyRecipient;
 
   /** True when content is stored on-chain (main.b present, no locator needed) */
   const isOnChain = !!mainB && !locator;
@@ -398,7 +440,7 @@ export default function EncryptedContentUnlock({
           <Tabs variant="soft-rounded" colorScheme="blue" size="sm">
             <TabList>
               <Tab><Icon as={MdLockOpen} mr={1} /><Trans>Passphrase</Trans></Tab>
-              <Tab isDisabled={!canUseWalletKey}>
+              <Tab isDisabled={!walletMnemonic || !isWalletKeyRecipient}>
                 <Icon as={MdKey} mr={1} />
                 <Trans>Wallet Key</Trans>
               </Tab>
@@ -456,11 +498,19 @@ export default function EncryptedContentUnlock({
                       decrypt content you were added as a recipient for.
                     </Trans>
                   </Text>
-                  {!canUseWalletKey && (
+                  {!walletMnemonic && (
                     <Alert status="info" borderRadius="md">
                       <AlertIcon />
                       <AlertDescription fontSize="sm">
                         <Trans>Unlock your wallet to use your encryption key</Trans>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {walletMnemonic && !isWalletKeyRecipient && (
+                    <Alert status="warning" borderRadius="md">
+                      <AlertIcon />
+                      <AlertDescription fontSize="sm">
+                        <Trans>Your wallet key is not a recipient for this content</Trans>
                       </AlertDescription>
                     </Alert>
                   )}
