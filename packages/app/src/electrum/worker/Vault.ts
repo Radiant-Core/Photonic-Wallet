@@ -1,16 +1,13 @@
 import {
   Subscription,
-  ContractType,
   ElectrumCallback,
-  ElectrumStatusUpdate,
   VaultRecord,
 } from "@app/types";
-import { buildUpdateTXOs } from "./updateTxos";
 import db from "@app/db";
 import ElectrumManager from "@app/electrum/ElectrumManager";
-import setSubscriptionStatus from "./setSubscriptionStatus";
 import { Worker } from "./electrumWorker";
-import { vaultScriptHash, p2shOutputScript } from "@lib/vault";
+import { vaultScriptHash } from "@lib/vault";
+import { ElectrumUtxo } from "@lib/types";
 
 /**
  * VaultWorker monitors vault P2SH UTXOs via ElectrumX subscriptions.
@@ -30,7 +27,6 @@ export class VaultWorker implements Subscription {
   protected electrum: ElectrumManager;
   protected address = "";
   protected subscriptions = new Map<string, string>(); // scriptHash → redeemScriptHex
-  protected ready = true;
 
   constructor(worker: Worker, electrum: ElectrumManager) {
     this.worker = worker;
@@ -38,14 +34,15 @@ export class VaultWorker implements Subscription {
   }
 
   async syncPending() {
-    // Re-check all vault subscriptions
-    if (this.ready && this.address) {
+    if (this.address) {
+      await this.revalidateClaimed();
       await this.subscribeToAllVaults();
     }
   }
 
   async manualSync() {
-    if (this.ready && this.address) {
+    if (this.address) {
+      await this.revalidateClaimed();
       await this.subscribeToAllVaults();
     }
   }
@@ -54,9 +51,48 @@ export class VaultWorker implements Subscription {
     this.address = address;
 
     try {
+      await this.revalidateClaimed();
       await this.subscribeToAllVaults();
     } catch (error) {
       console.warn("[Vault] Registration failed:", error);
+    }
+  }
+
+  /**
+   * Scan ALL claimed vaults and un-claim any whose P2SH UTXO is still
+   * present on-chain. Repairs false positives from the old updateTxos bug.
+   */
+  async revalidateClaimed() {
+    const claimed = await db.vault.where({ claimed: 1 }).toArray();
+    const relevant = claimed.filter(
+      (v) =>
+        v.recipientAddress === this.address ||
+        v.senderAddress === this.address
+    );
+
+    for (const vault of relevant) {
+      try {
+        const scriptHash = vaultScriptHash(vault.redeemScriptHex);
+        const utxos = (await this.electrum.client?.request(
+          "blockchain.scripthash.listunspent",
+          scriptHash
+        )) as ElectrumUtxo[];
+
+        const isStillUnspent = utxos?.some(
+          (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
+        );
+
+        if (isStillUnspent) {
+          // Was incorrectly marked claimed — restore it
+          await db.vault
+            .where("[txid+vout]")
+            .equals([vault.txid, vault.vout])
+            .modify({ claimed: 0 });
+          console.debug(`[Vault] Restored incorrectly claimed: ${vault.txid}:${vault.vout}`);
+        }
+      } catch (error) {
+        console.warn(`[Vault] revalidateClaimed error for ${vault.txid}:${vault.vout}:`, error);
+      }
     }
   }
 
@@ -87,78 +123,58 @@ export class VaultWorker implements Subscription {
 
       this.subscriptions.set(scriptHash, vault.redeemScriptHex);
 
-      const p2sh = p2shOutputScript(vault.redeemScriptHex);
-      const updateTXOs = buildUpdateTXOs(
-        this.electrum,
-        ContractType.VAULT,
-        () => p2sh
-      );
-
       try {
         await this.electrum.client?.subscribe(
           "blockchain.scripthash",
-          (async (sh: string, status: string) => {
-            await this.onSubscriptionReceived(sh, status, updateTXOs);
+          (async (_sh: string, _status: string) => {
+            await this.checkVaultSpent(vault);
           }) as ElectrumCallback,
           scriptHash
         );
+
+        // Also do an immediate check on subscribe
+        await this.checkVaultSpent(vault);
       } catch (error) {
         console.warn(`[Vault] Subscription failed for ${scriptHash}:`, error);
-        // Fall back to manual check
         try {
-          await this.onSubscriptionReceived(
-            scriptHash,
-            "manual-fallback",
-            updateTXOs
-          );
+          await this.checkVaultSpent(vault);
         } catch (fallbackError) {
-          console.warn("[Vault] Manual fallback also failed:", fallbackError);
+          console.warn("[Vault] Fallback check failed:", fallbackError);
         }
       }
     }
-
-    // Use the first vault's scriptHash for the subscription status record,
-    // or a synthetic one if no vaults exist
-    const statusHash = relevant.length > 0
-      ? vaultScriptHash(relevant[0].redeemScriptHex)
-      : `vault_${this.address}`;
-
-    setSubscriptionStatus(statusHash, "", false, ContractType.VAULT);
   }
 
-  async onSubscriptionReceived(
-    scriptHash: string,
-    status: string,
-    updateTXOs: ElectrumStatusUpdate
-  ) {
-    if (!this.ready) return;
-    this.ready = false;
-
+  /**
+   * Check if a specific vault UTXO has been spent by querying listunspent
+   * for its exact P2SH script hash. If the result is empty, the vault
+   * has been claimed and we mark it as such.
+   *
+   * This is intentionally scoped to ONE vault — never touches other records.
+   */
+  async checkVaultSpent(vault: VaultRecord) {
     try {
-      const { added, spent } = await updateTXOs(scriptHash, status, false);
+      const scriptHash = vaultScriptHash(vault.redeemScriptHex);
+      const utxos = (await this.electrum.client?.request(
+        "blockchain.scripthash.listunspent",
+        scriptHash
+      )) as ElectrumUtxo[];
 
-      // Add new vault TXOs to the database
-      for (const txo of added) {
-        await db.txo.put(txo).catch();
+      const isStillUnspent = utxos?.some(
+        (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
+      );
+
+      if (!isStillUnspent && utxos !== undefined) {
+        // UTXO is gone — vault has been claimed on-chain
+        await db.vault
+          .where("[txid+vout]")
+          .equals([vault.txid, vault.vout])
+          .modify({ claimed: 1 });
+        console.debug(`[Vault] Marked claimed: ${vault.txid}:${vault.vout}`);
       }
-
-      // Mark spent vault records as claimed
-      for (const { id } of spent) {
-        const txo = await db.txo.get(id);
-        if (txo) {
-          await db.vault
-            .where({ txid: txo.txid, vout: txo.vout })
-            .modify({ claimed: 1 });
-        }
-      }
-
-      setSubscriptionStatus(scriptHash, status, false, ContractType.VAULT);
     } catch (error) {
-      console.warn("[Vault] Subscription update error:", error);
-      setSubscriptionStatus(scriptHash, status, true, ContractType.VAULT);
+      console.warn(`[Vault] checkVaultSpent error for ${vault.txid}:${vault.vout}:`, error);
     }
-
-    this.ready = true;
   }
 
   /**
