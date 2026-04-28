@@ -664,7 +664,7 @@ export function parseVaultOpReturn(
  * @param fromAddress Sender's P2PKH address
  * @param wif Sender's private key (WIF)
  * @param params Vault parameters
- * @param feeRate Fee rate in sat/KB
+ * @param feeRate Fee rate in photons/byte
  * @param tokenUtxos For NFT/FT: the token UTXOs to lock (required inputs)
  * @returns Built transaction and selection info
  */
@@ -738,7 +738,7 @@ export function buildVaultTx(
   // Change
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
-  tx.fee(Math.max(1000, Math.ceil(tx._estimateSize() * feeRate / 1000)));
+  tx.fee(Math.max(20000, Math.ceil(tx._estimateSize() * feeRate)));
   tx.sign(privKey);
   tx.seal();
 
@@ -866,7 +866,7 @@ export function buildVestingTx(
   // Change
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
-  tx.fee(Math.max(1000, Math.ceil(tx._estimateSize() * feeRate / 1000)));
+  tx.fee(Math.max(20000, Math.ceil(tx._estimateSize() * feeRate)));
   tx.sign(privKey);
   tx.seal();
 
@@ -972,7 +972,7 @@ export function claimVaultTx(
   // Calculate fee
   // Estimate: base tx + P2SH input (~250 bytes for redeem script + sig) + output
   const estimatedSize = 200 + vaultUtxo.redeemScriptHex.length / 2 + 107 + 34;
-  const fee = Math.max(1000, Math.ceil(estimatedSize * feeRate / 1000));
+  const fee = Math.max(20000, Math.ceil(estimatedSize * feeRate));
 
   const outputValue = vaultUtxo.value - fee;
   if (outputValue <= 0) {
