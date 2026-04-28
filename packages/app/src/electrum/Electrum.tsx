@@ -59,6 +59,7 @@ const wrapped = wrap<{
     address: string
   ): { contractType: ContractType; utxo: ElectrumUtxo }[];
   isUtxoUnspent: (txid: string, vout: number, scriptHash: string) => boolean;
+  getBlockHeight: () => number;
 }>(worker);
 export const electrumWorker = signal<typeof wrapped>(wrapped);
 

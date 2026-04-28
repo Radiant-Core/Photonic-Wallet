@@ -146,6 +146,16 @@ const worker = {
   async isUtxoUnspent(txid: string, vout: number, scriptHash: string) {
     return isUtxoUnspent(electrum, txid, vout, scriptHash);
   },
+  async getBlockHeight(): Promise<number> {
+    try {
+      const result = await electrum.client?.request(
+        "blockchain.headers.subscribe"
+      ) as { height: number; hex: string } | undefined;
+      return result?.height ?? 0;
+    } catch {
+      return 0;
+    }
+  },
 };
 
 const rxd = new RXDWorker(worker, electrum);

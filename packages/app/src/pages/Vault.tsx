@@ -205,7 +205,7 @@ export default function VaultPage() {
 
   // ────────────────────────────────────────────────────────
   // Current blockchain height
-  // Primary: radiantexplorer.com API  |  Fallback: local DB header table
+  // Primary: ElectrumX blockchain.headers.subscribe  |  Fallback: local DB header table
   // ────────────────────────────────────────────────────────
   const latestHeader = useLiveQuery(
     () => db.header.orderBy("height").reverse().first(),
@@ -214,21 +214,37 @@ export default function VaultPage() {
   const [apiHeight, setApiHeight] = useState(0);
 
   useEffect(() => {
-    const fetchHeight = async () => {
+    let cancelled = false;
+    let retryId: ReturnType<typeof setTimeout>;
+    let pollId: ReturnType<typeof setInterval>;
+
+    const tryFetch = async () => {
       try {
-        const res = await fetch("https://radiantexplorer.com/api/getblockcount");
-        if (res.ok) {
-          const text = await res.text();
-          const h = parseInt(text.trim(), 10);
-          if (h > 0) setApiHeight(h);
+        const h = await electrumWorker.value.getBlockHeight();
+        if (!cancelled && h > 0) {
+          setApiHeight(h);
+          // Got a valid height — now just refresh every 60s
+          pollId = setInterval(async () => {
+            try {
+              const next = await electrumWorker.value.getBlockHeight();
+              if (!cancelled && next > 0) setApiHeight(next);
+            } catch { /* ignore */ }
+          }, 60_000);
+        } else if (!cancelled) {
+          // Worker not ready yet — retry in 5s
+          retryId = setTimeout(tryFetch, 5_000);
         }
       } catch {
-        // silently fall through to DB value
+        if (!cancelled) retryId = setTimeout(tryFetch, 5_000);
       }
     };
-    fetchHeight();
-    const id = setInterval(fetchHeight, 60_000);
-    return () => clearInterval(id);
+
+    tryFetch();
+    return () => {
+      cancelled = true;
+      clearTimeout(retryId);
+      clearInterval(pollId);
+    };
   }, []);
 
   const currentHeight = apiHeight || latestHeader?.height || 0;
