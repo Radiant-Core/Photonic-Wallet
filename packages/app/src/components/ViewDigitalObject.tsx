@@ -1,6 +1,7 @@
 import {
   Alert,
   AlertIcon,
+  Badge,
   Box,
   BoxProps,
   Button,
@@ -9,9 +10,11 @@ import {
   GridItem,
   GridProps,
   Heading,
+  HStack,
   Icon,
   IconButton,
   SimpleGrid,
+  Tooltip,
   useClipboard,
   useDisclosure,
 } from "@chakra-ui/react";
@@ -28,7 +31,7 @@ import {
 import Outpoint from "@lib/Outpoint";
 import Identifier from "@app/components/Identifier";
 import SendDigitalObject from "@app/components/SendDigitalObject";
-import { PropsWithChildren, ReactNode, useRef } from "react";
+import { PropsWithChildren, ReactNode, useRef, useState } from "react";
 import Card from "@app/components/Card";
 import Photons from "@app/components/Photons";
 import ContentContainer from "@app/components/ContentContainer";
@@ -45,9 +48,10 @@ import createExplorerUrl from "@app/network/createExplorerUrl";
 import { RiContractRightLine, RiExpandLeftLine } from "react-icons/ri";
 import { useViewPanelContext } from "@app/layouts/ViewPanelLayout";
 import ActionIcon from "./ActionIcon";
-import { MdDeleteForever } from "react-icons/md";
+import { MdDeleteForever, MdLock, MdTimer } from "react-icons/md";
 import { TbArrowUpRight, TbBox } from "react-icons/tb";
 import mime from "mime";
+import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
 // import FetchTokenTest from "./FetchMutableTest";
 // import EditTokenTest from "./EditTokenTest";
 
@@ -121,6 +125,8 @@ export default function ViewDigitalObject({
   );
   const txid = useRef("");
   const { onCopy: onLinkCopy } = useClipboard(nft?.remote?.u || "");
+  const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(null);
+  const [decryptedMime, setDecryptedMime] = useState<string>("application/octet-stream");
 
   // TODO show loading or 404
   if (!txo || !nft) {
@@ -151,6 +157,8 @@ export default function ViewDigitalObject({
     successDisclosure.onOpen();
   };
 
+  const isEncrypted = !!(nft.p?.includes(GLYPH_ENCRYPTED));
+  const isTimelocked = !!(nft.p?.includes(GLYPH_TIMELOCK));
   const isIPFS = nft.remote?.u?.startsWith("ipfs://");
   const isKnownEmbed = [
     "text/plain",
@@ -186,7 +194,29 @@ export default function ViewDigitalObject({
             />
           }
         >
-          {nft.name || t`Unnamed token`}
+          <HStack spacing={2} flexWrap="wrap" align="center">
+            <span>{nft.name || t`Unnamed token`}</span>
+            {isEncrypted && !decryptedBytes && (
+              <Tooltip label={isTimelocked ? t`Timelocked encrypted content` : t`Contains encrypted content`}>
+                <Badge
+                  colorScheme={isTimelocked ? "orange" : "blue"}
+                  display="flex"
+                  alignItems="center"
+                  gap={1}
+                  fontSize="xs"
+                >
+                  <Icon as={isTimelocked ? MdTimer : MdLock} />
+                  {isTimelocked ? t`Timelocked` : t`Encrypted`}
+                </Badge>
+              </Tooltip>
+            )}
+            {isEncrypted && decryptedBytes && (
+              <Badge colorScheme="green" display="flex" alignItems="center" gap={1} fontSize="xs">
+                <Icon as={MdLock} />
+                {t`Decrypted`}
+              </Badge>
+            )}
+          </HStack>
         </PageHeader>
         <Container maxW="container.xl" overflowY="auto" pb={4}>
           <Grid
@@ -225,7 +255,15 @@ export default function ViewDigitalObject({
                     <LinkIcon boxSize={8} />
                   </Box>
                 )}
-                <TokenContent glyph={nft} />
+                <TokenContent
+                  glyph={nft}
+                  decryptedBytes={decryptedBytes}
+                  decryptedMime={decryptedMime}
+                  onDecrypted={(bytes, mime) => {
+                    setDecryptedBytes(bytes);
+                    setDecryptedMime(mime);
+                  }}
+                />
               </GridItem>
               {nft.embed && !isKnownEmbed && (
                 <Warning>{t`Files may be unsafe and result in loss of funds`}</Warning>
@@ -246,11 +284,24 @@ export default function ViewDigitalObject({
                   {t`URLs may be unsafe and result in loss of funds`}
                 </Warning>
               )}
+              {isEncrypted && decryptedBytes && (
+                <GridItem
+                  as={DownloadLink}
+                  data={decryptedBytes}
+                  filename={`decrypted.${mime.getExtension(decryptedMime) || "dat"}`}
+                  mimeType={decryptedMime}
+                  leftIcon={<ActionIcon as={DownloadIcon} />}
+                  colSpan={2}
+                >
+                  {t`Download Decrypted File`}
+                </GridItem>
+              )}
               {nft.embed && (
                 <GridItem
                   as={DownloadLink}
                   data={nft.embed.b}
                   filename={`main.${mime.getExtension(nft.embed.t) || "dat"}`}
+                  mimeType={nft.embed.t || "application/octet-stream"}
                   leftIcon={<ActionIcon as={DownloadIcon} />}
                   colSpan={2}
                 >

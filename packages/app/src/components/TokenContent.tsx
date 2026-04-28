@@ -23,13 +23,25 @@ export default function TokenContent({
   glyph,
   thumbnail = false,
   defaultIcon = BsFillFileXFill,
+  decryptedBytes: controlledBytes,
+  decryptedMime: controlledMime,
+  onDecrypted: controlledOnDecrypted,
 }: {
   glyph?: SmartToken;
   thumbnail?: boolean;
   defaultIcon?: ((props: IconBaseProps) => JSX.Element) | IconType;
+  /** Controlled: decrypted bytes from parent (ViewDigitalObject) */
+  decryptedBytes?: Uint8Array | null;
+  /** Controlled: decrypted MIME type from parent */
+  decryptedMime?: string;
+  /** Controlled: callback to parent when decryption succeeds */
+  onDecrypted?: (bytes: Uint8Array, mime: string) => void;
 }) {
-  const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(null);
-  const [decryptedMime, setDecryptedMime] = useState<string>("application/octet-stream");
+  const [internalBytes, setInternalBytes] = useState<Uint8Array | null>(null);
+  const [internalMime, setInternalMime] = useState<string>("application/octet-stream");
+  // Use controlled state when parent provides it, otherwise fall back to internal
+  const decryptedBytes = controlledBytes !== undefined ? controlledBytes : internalBytes;
+  const decryptedMime = controlledMime !== undefined ? controlledMime : internalMime;
   const [, forceUpdate] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,8 +96,13 @@ export default function TokenContent({
     }
 
     const handleDecrypted = (plaintext: Uint8Array) => {
-      setDecryptedBytes(plaintext);
-      setDecryptedMime(contentType || "application/octet-stream");
+      const resolvedMime = contentType || "application/octet-stream";
+      if (controlledOnDecrypted) {
+        controlledOnDecrypted(plaintext, resolvedMime);
+      } else {
+        setInternalBytes(plaintext);
+        setInternalMime(resolvedMime);
+      }
     };
 
     return (
