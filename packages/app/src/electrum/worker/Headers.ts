@@ -16,10 +16,10 @@ type BlockData = {
 };
 
 const checkpoint: BlockData = {
-  hash: "00000000895f1da227e7f61d59bb8d55240e506ba950d876ff3dc98602ebd594",
-  height: 54974,
-  timestamp: 1693625458,
-  bits: 486604799,
+  hash: "000000000000000e7fbf20f83b1b0ac4881b95da9248f746ba9d82e24ca78f05",
+  height: 412000,
+  timestamp: 1773685184,
+  bits: 436241129,
 };
 
 export class HeadersSubscription implements Subscription {

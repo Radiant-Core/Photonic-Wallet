@@ -13,6 +13,7 @@ import {
   Icon,
   IconButton,
   Input,
+  Link,
   Progress,
   Select,
   SimpleGrid,
@@ -24,15 +25,18 @@ import {
   Text,
   Th,
   Thead,
+  Tooltip,
   Tr,
   useToast,
   VStack,
 } from "@chakra-ui/react";
 import { TbLock, TbLockOpen, TbPlus, TbTrash, TbWand } from "react-icons/tb";
+import { ExternalLinkIcon } from "@chakra-ui/icons";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import Photons from "@app/components/Photons";
 import { wallet, feeRate, openModal } from "@app/signals";
+import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import { ContractType, VaultRecord } from "@app/types";
@@ -518,11 +522,13 @@ export default function VaultPage() {
 
         toast({
           title: t`Vault Created`,
-          description: `${txid.slice(0, 8)}…`,
+          description: txid,
           status: "success",
+          duration: 8000,
+          isClosable: true,
         });
 
-        // Reset form
+        // Reset form and go to list
         setLocktime("");
         setDatePickerValue("");
         setAmount("");
@@ -579,8 +585,10 @@ export default function VaultPage() {
 
         toast({
           title: t`Vesting Schedule Created`,
-          description: `${vestingTranches.length} tranches`,
+          description: `${txid} — ${vestingTranches.length} tranches`,
           status: "success",
+          duration: 8000,
+          isClosable: true,
         });
 
         setTranches([{ locktime: "", value: "", pct: "" }]);
@@ -631,8 +639,10 @@ export default function VaultPage() {
 
       toast({
         title: t`Vault Claimed`,
-        description: `${txid.slice(0, 8)}…`,
+        description: txid,
         status: "success",
+        duration: 8000,
+        isClosable: true,
       });
     } catch (err: unknown) {
       toast({
@@ -1122,13 +1132,22 @@ export default function VaultPage() {
                       </Td>
                       <Td>{formatLocktime(v.locktime, v.mode)}</Td>
                       <Td>
-                        {v.claimed
-                          ? "—"
-                          : remaining.value === 0
-                          ? t`Now`
-                          : remaining.unit === "blocks"
-                          ? `${remaining.value.toLocaleString()} blocks`
-                          : `${Math.ceil(remaining.value / 3600)}h`}
+                        {v.claimed ? (
+                          "—"
+                        ) : remaining.value === 0 ? (
+                          t`Now`
+                        ) : remaining.unit === "blocks" ? (
+                          <Tooltip
+                            label={`${remaining.value.toLocaleString()} blocks`}
+                            placement="top"
+                          >
+                            <Text as="span" cursor="default">
+                              {blocksToDuration(remaining.value)}
+                            </Text>
+                          </Tooltip>
+                        ) : (
+                          secsToDuration(remaining.value)
+                        )}
                       </Td>
                       <Td>
                         <Text fontSize="xs" noOfLines={1} maxW="120px">
@@ -1136,15 +1155,49 @@ export default function VaultPage() {
                         </Text>
                       </Td>
                       <Td>
-                        {!v.claimed && unlockable && isRecipient && (
-                          <Button
-                            size="xs"
-                            variant="primary"
-                            onClick={() => handleClaim(v)}
-                          >
-                            {t`Claim`}
-                          </Button>
-                        )}
+                        <HStack gap={2}>
+                          {!v.claimed && (
+                            <Link
+                              href={createExplorerUrl(v.txid)}
+                              isExternal
+                              fontSize="xs"
+                              color="whiteAlpha.400"
+                              _hover={{ color: "whiteAlpha.700" }}
+                            >
+                              <ExternalLinkIcon />
+                            </Link>
+                          )}
+                          {!v.claimed && unlockable && (
+                            isRecipient ? (
+                              <Button
+                                size="xs"
+                                variant="primary"
+                                onClick={() => handleClaim(v)}
+                              >
+                                {t`Claim`}
+                              </Button>
+                            ) : (
+                              <Tooltip label={t`You are not the recipient`} placement="top">
+                                <Button size="xs" variant="outline" isDisabled>
+                                  {t`Claim`}
+                                </Button>
+                              </Tooltip>
+                            )
+                          )}
+                          {!v.claimed && !unlockable && currentHeight > 0 && (
+                            <Tooltip
+                              label={v.mode === "block"
+                                ? `${t`Unlocks at block`} ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} ${t`remaining`}`
+                                : `${t`Unlocks`} ${new Date(v.locktime * 1000).toLocaleString()}`
+                              }
+                              placement="top"
+                            >
+                              <Box cursor="default">
+                                <Icon as={TbLock} color="whiteAlpha.300" boxSize={3.5} />
+                              </Box>
+                            </Tooltip>
+                          )}
+                        </HStack>
                       </Td>
                     </Tr>
                   );
