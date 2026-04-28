@@ -204,38 +204,34 @@ export default function VaultPage() {
   );
 
   // ────────────────────────────────────────────────────────
-  // Current blockchain height (reactive live query + poll)
+  // Current blockchain height
+  // Primary: radiantexplorer.com API  |  Fallback: local DB header table
   // ────────────────────────────────────────────────────────
   const latestHeader = useLiveQuery(
     () => db.header.orderBy("height").reverse().first(),
     []
   );
-  const [polledHeight, setPolledHeight] = useState(0);
+  const [apiHeight, setApiHeight] = useState(0);
 
-  // Polling fallback: if liveQuery hasn't returned yet, retry every 3s
   useEffect(() => {
-    if (latestHeader?.height) return;
-    const id = setInterval(() => {
-      db.header
-        .orderBy("height")
-        .reverse()
-        .first()
-        .then((h) => {
-          if (h?.height) setPolledHeight(h.height);
-        });
-    }, 3000);
-    // also try immediately
-    db.header
-      .orderBy("height")
-      .reverse()
-      .first()
-      .then((h) => {
-        if (h?.height) setPolledHeight(h.height);
-      });
+    const fetchHeight = async () => {
+      try {
+        const res = await fetch("https://radiantexplorer.com/api/getblockcount");
+        if (res.ok) {
+          const text = await res.text();
+          const h = parseInt(text.trim(), 10);
+          if (h > 0) setApiHeight(h);
+        }
+      } catch {
+        // silently fall through to DB value
+      }
+    };
+    fetchHeight();
+    const id = setInterval(fetchHeight, 60_000);
     return () => clearInterval(id);
-  }, [latestHeader]);
+  }, []);
 
-  const currentHeight = latestHeader?.height || polledHeight;
+  const currentHeight = apiHeight || latestHeader?.height || 0;
   const currentTimestamp = Math.floor(Date.now() / 1000);
 
   // ────────────────────────────────────────────────────────
