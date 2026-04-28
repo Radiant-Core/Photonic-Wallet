@@ -199,10 +199,26 @@ export default function VaultPage() {
   // List filter state
   const [showClaimed, setShowClaimed] = useState(false);
 
+  // Sort state
+  type SortCol = "status" | "type" | "value" | "locktime" | "remaining" | "label";
+  const [sortCol, setSortCol] = useState<SortCol>("locktime");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const handleSort = useCallback((col: SortCol) => {
+    setSortCol((prev) => {
+      if (prev === col) {
+        setSortAsc((a) => !a);
+        return prev;
+      }
+      setSortAsc(true);
+      return col;
+    });
+  }, []);
+
   // ────────────────────────────────────────────────────────
   // Vault list from DB (live query)
   // ────────────────────────────────────────────────────────
-  const vaults = useLiveQuery(
+  const vaultsRaw = useLiveQuery(
     () => db.vault.orderBy("date").reverse().toArray(),
     []
   );
@@ -253,6 +269,34 @@ export default function VaultPage() {
 
   const currentHeight = apiHeight || latestHeader?.height || 0;
   const currentTimestamp = Math.floor(Date.now() / 1000);
+
+  const vaults = useMemo(() => {
+    if (!vaultsRaw) return vaultsRaw;
+    const dir = sortAsc ? 1 : -1;
+    return [...vaultsRaw].sort((a, b) => {
+      switch (sortCol) {
+        case "status": {
+          const rank = (v: typeof a) => (v.claimed ? 2 : isVaultUnlockable(v.locktime, v.mode, currentHeight, currentTimestamp) ? 0 : 1);
+          return dir * (rank(a) - rank(b));
+        }
+        case "type":
+          return dir * a.assetType.localeCompare(b.assetType);
+        case "value":
+          return dir * (a.value - b.value);
+        case "locktime":
+          return dir * (a.locktime - b.locktime);
+        case "remaining": {
+          const ra = vaultTimeRemaining(a.locktime, a.mode, currentHeight, currentTimestamp);
+          const rb = vaultTimeRemaining(b.locktime, b.mode, currentHeight, currentTimestamp);
+          return dir * (ra.value - rb.value);
+        }
+        case "label":
+          return dir * (a.label ?? "").localeCompare(b.label ?? "");
+        default:
+          return 0;
+      }
+    });
+  }, [vaultsRaw, sortCol, sortAsc, currentHeight, currentTimestamp]);
 
   // ────────────────────────────────────────────────────────
   // Locktime validation
@@ -1078,12 +1122,26 @@ export default function VaultPage() {
             <Table size="sm" variant="simple">
               <Thead>
                 <Tr>
-                  <Th>{t`Status`}</Th>
-                  <Th>{t`Type`}</Th>
-                  <Th>{t`Value`}</Th>
-                  <Th>{t`Unlock At`}</Th>
-                  <Th>{t`Remaining`}</Th>
-                  <Th>{t`Label`}</Th>
+                  {([
+                    ["status",    t`Status`],
+                    ["type",      t`Type`],
+                    ["value",     t`Value`],
+                    ["locktime",  t`Unlock At`],
+                    ["remaining", t`Remaining`],
+                    ["label",     t`Label`],
+                  ] as [SortCol, string][]).map(([col, label]) => (
+                    <Th
+                      key={col}
+                      cursor="pointer"
+                      userSelect="none"
+                      onClick={() => handleSort(col)}
+                      _hover={{ color: "whiteAlpha.800" }}
+                      whiteSpace="nowrap"
+                    >
+                      {label}
+                      {sortCol === col ? (sortAsc ? " ↑" : " ↓") : ""}
+                    </Th>
+                  ))}
                   <Th />
                 </Tr>
               </Thead>
