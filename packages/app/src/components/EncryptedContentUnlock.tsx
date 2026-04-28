@@ -29,7 +29,7 @@ import {
   type TimelockReveal,
 } from "@lib/timelock";
 import { buildRevealTx } from "@lib/reveal";
-import { hexToBytes } from "@noble/hashes/utils";
+import { hexToBytes, bytesToHex } from "@noble/hashes/utils";
 import { GLYPH_TIMELOCK } from "@lib/protocols";
 import {
   type EncryptedContentStub,
@@ -48,29 +48,36 @@ import { electrumWorker } from "@app/electrum/Electrum";
 type EncryptedContentUnlockProps = {
   /** On-chain encrypted metadata stub (from token's crypto field) */
   stub: EncryptedContentStub;
-  /** Encrypted locator (base64) from payload.crypto.locator */
+  /** Encrypted locator (base64) from payload.crypto.locator — present for off-chain backends */
   locator?: string;
-  /** Locator nonce (base64) from payload.crypto.locator_nonce */
+  /** Locator nonce (base64) from payload.crypto.locator_nonce — present for off-chain backends */
   locatorNonce?: string;
+  /** Hex-encoded ciphertext from main.b — present for on-chain (glyph) storage */
+  mainB?: string;
   /** Token ref ("txid:vout") — required for the publish-reveal flow */
   tokenRef?: string;
   onDecrypted: (plaintext: Uint8Array) => void;
 };
 
-/** Build a StorageManager using Arweave in production, localStorage in dev */
+/**
+ * Build a StorageManager with all adapters registered so downloadEncrypted
+ * can route to whichever backend the locator specifies.
+ */
 function makeStorageManager(): StorageManager {
-  const isDev = import.meta.env.DEV;
-  return new StorageManager(
-    isDev
-      ? { defaultAdapter: "local", local: { maxSize: 10 * 1024 * 1024 } }
-      : { defaultAdapter: "arweave" }
-  );
+  return new StorageManager({
+    defaultAdapter: "arweave",
+    local: { maxSize: 10 * 1024 * 1024 },
+    backend: { baseUrl: import.meta.env.VITE_BACKEND_URL || "" },
+    ipfs: { apiKey: import.meta.env.VITE_NFT_STORAGE_TOKEN || "" },
+    glyph: { maxSizeBytes: 512 * 1024 },
+  });
 }
 
 export default function EncryptedContentUnlock({
   stub,
   locator,
   locatorNonce,
+  mainB,
   tokenRef,
   onDecrypted,
 }: EncryptedContentUnlockProps) {
@@ -94,8 +101,11 @@ export default function EncryptedContentUnlock({
   const walletMnemonic = wallet.value.mnemonic;
   const canUseWalletKey = !!walletMnemonic && !wallet.value.locked;
 
-  const assertLocator = (): boolean => {
-    if (!locator || !locatorNonce) {
+  /** True when content is stored on-chain (main.b present, no locator needed) */
+  const isOnChain = !!mainB && !locator;
+
+  const assertStorageAvailable = (): boolean => {
+    if (!isOnChain && (!locator || !locatorNonce)) {
       toast({
         title: t`Storage Locator Missing`,
         description: t`Cannot retrieve encrypted blob — locator not found in token metadata`,
@@ -107,7 +117,11 @@ export default function EncryptedContentUnlock({
     return true;
   };
 
-  const fetchAndDecrypt = async (
+  /**
+   * Fetch and decrypt content from off-chain storage (IPFS / Arweave / Wallet Backend).
+   * The StorageManager decrypts the locator to discover which adapter to use.
+   */
+  const fetchAndDecryptOffChain = async (
     locatorKey: Uint8Array,
     decryptOptions: Parameters<typeof decryptContent>[1]
   ): Promise<void> => {
@@ -133,6 +147,49 @@ export default function EncryptedContentUnlock({
     setPassword("");
   };
 
+  /**
+   * Fetch and decrypt content stored on-chain in main.b (glyph backend).
+   * The hex ciphertext is embedded directly in the NFT metadata — no network
+   * fetch required.
+   */
+  const fetchAndDecryptOnChain = async (
+    decryptOptions: Parameters<typeof decryptContent>[1]
+  ): Promise<void> => {
+    if (!mainB) throw new Error("On-chain ciphertext (main.b) is missing");
+
+    const encryptedBlob = hexToBytes(mainB);
+
+    // Verify hash matches expected before decrypting
+    const { sha256: sha256fn } = await import("@noble/hashes/sha256");
+    const actualHash = sha256fn(encryptedBlob);
+    const expectedHashHex = stub.main?.hash?.replace("sha256:", "");
+    if (expectedHashHex && bytesToHex(actualHash) !== expectedHashHex) {
+      throw new Error("On-chain ciphertext hash mismatch — data may be corrupted");
+    }
+
+    const plaintext = await decryptContent(encryptedBlob, decryptOptions);
+
+    toast({
+      title: t`Content Decrypted!`,
+      description: t`Successfully unlocked encrypted content`,
+      status: "success",
+    });
+    onDecrypted(plaintext);
+    setPassword("");
+  };
+
+  /** Dispatch to the correct fetch+decrypt path based on storage type */
+  const fetchAndDecrypt = async (
+    locatorKey: Uint8Array,
+    decryptOptions: Parameters<typeof decryptContent>[1]
+  ): Promise<void> => {
+    if (isOnChain) {
+      await fetchAndDecryptOnChain(decryptOptions);
+    } else {
+      await fetchAndDecryptOffChain(locatorKey, decryptOptions);
+    }
+  };
+
   /** Passphrase mode: user types password */
   const handlePassphraseDecrypt = async () => {
     if (!password) {
@@ -143,11 +200,13 @@ export default function EncryptedContentUnlock({
       });
       return;
     }
-    if (!assertLocator()) return;
+    if (!assertStorageAvailable()) return;
 
     setIsDecrypting(true);
     try {
-      const locatorKey = deriveLocatorKeyFromPassphrase(password, stub);
+      const locatorKey = isOnChain
+        ? new Uint8Array(0) // unused for on-chain path
+        : deriveLocatorKeyFromPassphrase(password, stub);
       await fetchAndDecrypt(locatorKey, { metadata: stub, passphrase: password });
     } catch (error) {
       console.error("Passphrase decryption error:", error);
@@ -164,7 +223,7 @@ export default function EncryptedContentUnlock({
 
   /** Wallet key mode: derive X25519 keypair from HD wallet (m/44'/0'/0'/2/0) */
   const handleWalletKeyDecrypt = async () => {
-    if (!assertLocator()) return;
+    if (!assertStorageAvailable()) return;
     if (!walletMnemonic) {
       toast({
         title: t`Wallet Locked`,

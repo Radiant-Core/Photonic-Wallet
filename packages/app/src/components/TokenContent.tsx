@@ -50,7 +50,9 @@ export default function TokenContent({
     const stub = rawPayload?.crypto as any;
     const locator = rawPayload?.locator as string | undefined;
     const locatorNonce = rawPayload?.locator_nonce as string | undefined;
-    const contentType = (rawPayload?.main as any)?.type as string | undefined;
+    const mainObj = rawPayload?.main as any;
+    const mainB = mainObj?.b as string | undefined; // hex ciphertext for on-chain (glyph) storage
+    const contentType = mainObj?.type as string | undefined;
 
     const unlockAt: number | undefined = stub?.timelock?.unlock_at;
     const remaining = isTimelocked && unlockAt
@@ -114,6 +116,7 @@ export default function TokenContent({
           stub={stub || { main: {}, crypto: {} }}
           locator={locator}
           locatorNonce={locatorNonce}
+          mainB={mainB}
           tokenRef={glyph?.ref}
           onDecrypted={handleDecrypted}
         />
