@@ -16,7 +16,7 @@ import UnsafeImage from "./UnsafeImage";
 import { IconBaseProps, IconType } from "react-icons/lib";
 import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
 import { formatTimeRemaining, getUnlockRemaining } from "@lib/timelock";
-import { MdTimer, MdLockOpen } from "react-icons/md";
+import { MdTimer, MdLock, MdLockOpen } from "react-icons/md";
 import EncryptedContentUnlock from "./EncryptedContentUnlock";
 
 export default function TokenContent({
@@ -76,9 +76,18 @@ export default function TokenContent({
     const stillLocked = remaining > 0;
 
     if (thumbnail) {
+      // Three distinct lock states:
+      // 1. stillLocked  — timelock unexpired (MdTimer, orange)
+      // 2. wrapped mode — recipient key required (MdLock, purple)
+      // 3. passphrase   — password can be entered (MdLockOpen, blue)
+      const cryptoMode = stub?.mode as string | undefined;
+      const isRecipientMode = !stillLocked && cryptoMode === "wrapped";
+      const iconAs = stillLocked ? MdTimer : isRecipientMode ? MdLock : MdLockOpen;
+      const iconColor = stillLocked ? "orange.400" : isRecipientMode ? "purple.400" : "blue.400";
+
       return (
         <Box position="relative" width="100%" height="100%">
-          <Icon as={stillLocked ? MdTimer : MdLockOpen} width="100%" height="100%" color={stillLocked ? "orange.400" : "blue.400"} />
+          <Icon as={iconAs} width="100%" height="100%" color={iconColor} />
           {stillLocked && (
             <Badge
               position="absolute"
@@ -89,6 +98,18 @@ export default function TokenContent({
               px={1}
             >
               {formatTimeRemaining(remaining)}
+            </Badge>
+          )}
+          {!stillLocked && isRecipientMode && (
+            <Badge
+              position="absolute"
+              bottom={0}
+              right={0}
+              colorScheme="purple"
+              fontSize="0.55em"
+              px={1}
+            >
+              KEY
             </Badge>
           )}
         </Box>

@@ -44,6 +44,7 @@ import { wallet, feeRate } from "@app/signals";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { deriveKeyHKDF, unwrapCEK } from "@lib/encryption";
 import db from "@app/db";
+import { useLiveQuery } from "dexie-react-hooks";
 import { ContractType } from "@app/types";
 import { electrumWorker } from "@app/electrum/Electrum";
 
@@ -91,6 +92,24 @@ export default function EncryptedContentUnlock({
   const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(() =>
     tokenRef ? getReveal(tokenRef) : undefined
   );
+
+  // Crash-safe broadcast check: if the app crashed after broadcasting but before
+  // deleteReveal ran, the txid is in db.broadcast with description 'timelock_reveal'.
+  // When found, clean up the stale localStorage entry proactively.
+  const revealAlreadyBroadcast = useLiveQuery(async () => {
+    if (!savedReveal || !tokenRef) return false;
+    const rows = await db.broadcast
+      .where("txid")
+      .above("")
+      .filter((r) => r.description === "timelock_reveal")
+      .toArray();
+    const found = rows.length > 0;
+    if (found && getReveal(tokenRef)) {
+      deleteReveal(tokenRef);
+      setSavedReveal(undefined);
+    }
+    return found;
+  }, [savedReveal, tokenRef], false);
   const toast = useToast();
 
   const isTimelocked = stub.crypto?.timelock !== undefined && stub.p?.includes(GLYPH_TIMELOCK);
@@ -538,7 +557,7 @@ export default function EncryptedContentUnlock({
         )}
 
         {/* ── Publish Reveal (owner-only, after timelock expires) ── */}
-        {timelockExpired && savedReveal && tokenRef && (
+        {timelockExpired && savedReveal && tokenRef && !revealAlreadyBroadcast && (
           <>
             <Divider />
             <VStack spacing={3} align="stretch">
