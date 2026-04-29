@@ -442,7 +442,7 @@ export default function EncryptedContentUnlock({
         const encryptedBlob = hexToBytes(mainB!);
         const plaintext = await decryptContent(
           encryptedBlob,
-          { metadata: patchedStub, privateKey: keypair.x25519PrivateKey },
+          { metadata: patchedStub, privateKey: keypair },
           (p) => setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
         );
         toast({ title: t`Content Decrypted!`, status: "success" });
@@ -450,7 +450,7 @@ export default function EncryptedContentUnlock({
       } else {
         await fetchAndDecryptOffChain(locatorKey!, {
           metadata: patchedStub,
-          privateKey: keypair.x25519PrivateKey,
+          privateKey: keypair,
         });
       }
 
@@ -529,7 +529,7 @@ export default function EncryptedContentUnlock({
 
       await fetchAndDecrypt(locatorKey, {
         metadata: stub,
-        privateKey: keypair.x25519PrivateKey,
+        privateKey: keypair,
       });
     } catch (error) {
       console.error("Wallet key decryption error:", error);

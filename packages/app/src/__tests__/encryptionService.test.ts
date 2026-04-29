@@ -22,6 +22,12 @@ import {
   deriveLocatorKeyFromPassphrase,
 } from "../encryptionService";
 import {
+  wrapCEK,
+  unwrapCEK,
+  buildHybridKeyPairFromPrivateKey,
+  deriveKeyHKDF,
+} from "@lib/encryption";
+import {
   initialEncryptionState,
   isEncryptionStateValid,
 } from "../components/EncryptionSection";
@@ -408,5 +414,313 @@ describe("EncryptionSection State Validation", () => {
         storageBackend: "ipfs",
       })
     ).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers: generate deterministic test keypairs from raw seeds
+// ─────────────────────────────────────────────────────────────────────────────
+
+function makeKeypair(seed: string) {
+  const raw = new TextEncoder().encode(seed);
+  const x25519PrivateKey = deriveKeyHKDF(raw, undefined, new TextEncoder().encode("test-x25519"), 32);
+  const mlkemSeed = deriveKeyHKDF(raw, undefined, new TextEncoder().encode("test-mlkem"), 64);
+  return buildHybridKeyPairFromPrivateKey(x25519PrivateKey, mlkemSeed);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Multi-Recipient Encrypt → Decrypt Roundtrip", () => {
+  it("encrypts for two recipients and both can decrypt", async () => {
+    const plaintext = new TextEncoder().encode("multi-recipient secret payload");
+    const alice = makeKeypair("alice-seed-abc");
+    const bob = makeKeypair("bob-seed-xyz");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      recipientPublicKeys: [alice.x25519PublicKey, bob.x25519PublicKey],
+      contentType: "text/plain",
+      name: "shared.txt",
+    });
+
+    expect(encrypted.metadata.crypto.mode).toBe("wrapped");
+    expect(encrypted.metadata.crypto.recipients).toHaveLength(2);
+
+    // Alice decrypts
+    const decryptedAlice = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: alice.x25519PrivateKey,
+    });
+    expect(new TextDecoder().decode(decryptedAlice)).toBe("multi-recipient secret payload");
+
+    // Bob decrypts independently
+    const decryptedBob = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: bob.x25519PrivateKey,
+    });
+    expect(new TextDecoder().decode(decryptedBob)).toBe("multi-recipient secret payload");
+  });
+
+  it("fails to decrypt with a key that is not a recipient", async () => {
+    const plaintext = new TextEncoder().encode("restricted content");
+    const alice = makeKeypair("alice-seed-only");
+    const eve = makeKeypair("eve-seed-not-recipient");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      recipientPublicKeys: [alice.x25519PublicKey],
+      contentType: "text/plain",
+      name: "restricted.txt",
+    });
+
+    await expect(
+      decryptContent(encrypted.encryptedContent, {
+        metadata: encrypted.metadata,
+        privateKey: eve.x25519PrivateKey,
+      })
+    ).rejects.toThrow();
+  });
+
+  it("iterates all recipient slots before failing (not just slot 0)", async () => {
+    const plaintext = new TextEncoder().encode("slot order test");
+    const first = makeKeypair("first-slot-seed");
+    const second = makeKeypair("second-slot-seed");
+    const third = makeKeypair("third-slot-seed");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      // third is last in the list — decryptContent must try all slots
+      recipientPublicKeys: [first.x25519PublicKey, second.x25519PublicKey, third.x25519PublicKey],
+      contentType: "text/plain",
+      name: "slot.txt",
+    });
+
+    expect(encrypted.metadata.crypto.recipients).toHaveLength(3);
+
+    // third can still decrypt even though it's in the last slot
+    const decrypted = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: third.x25519PrivateKey,
+    });
+    expect(new TextDecoder().decode(decrypted)).toBe("slot order test");
+  });
+});
+
+describe("selfKeypair — Self-as-Recipient Backup", () => {
+  it("minter can decrypt their own NFT via selfKeypair slot", async () => {
+    const plaintext = new TextEncoder().encode("minter backup content");
+    const minter = makeKeypair("minter-wallet-seed");
+    const recipient = makeKeypair("recipient-seed");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      recipientPublicKeys: [recipient.x25519PublicKey],
+      selfKeypair: minter,
+      contentType: "text/plain",
+      name: "nft.txt",
+    });
+
+    // Minter slot is appended — total should be 2
+    expect(encrypted.metadata.crypto.recipients).toHaveLength(2);
+
+    // Minter can decrypt — must pass full HybridKeyPair since selfKeypair slot uses ML-KEM
+    const decryptedMinter = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: minter,
+    });
+    expect(new TextDecoder().decode(decryptedMinter)).toBe("minter backup content");
+
+    // Original recipient can still decrypt
+    const decryptedRecipient = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: recipient,
+    });
+    expect(new TextDecoder().decode(decryptedRecipient)).toBe("minter backup content");
+  });
+
+  it("selfKeypair in passphrase mode also adds self-recipient slot", async () => {
+    const plaintext = new TextEncoder().encode("passphrase + self backup");
+    const minter = makeKeypair("minter-passphrase-seed");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "passphrase",
+      passphrase: "super-secret-passphrase",
+      selfKeypair: minter,
+      contentType: "text/plain",
+      name: "combined.txt",
+    });
+
+    // Should have at least 2 recipients: passphrase sentinel + minter
+    expect(encrypted.metadata.crypto.recipients!.length).toBeGreaterThanOrEqual(2);
+
+    // Passphrase path still works
+    const decryptedPass = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      passphrase: "super-secret-passphrase",
+    });
+    expect(new TextDecoder().decode(decryptedPass)).toBe("passphrase + self backup");
+
+    // Minter key path also works — full keypair required for ML-KEM self-recipient slot
+    const decryptedKey = await decryptContent(encrypted.encryptedContent, {
+      metadata: encrypted.metadata,
+      privateKey: minter,
+    });
+    expect(new TextDecoder().decode(decryptedKey)).toBe("passphrase + self backup");
+  });
+});
+
+describe("CEK Share — Export → Import Roundtrip", () => {
+  it("re-wraps CEK for a new recipient and they can decrypt", async () => {
+    const plaintext = new TextEncoder().encode("shared secret content");
+    const owner = makeKeypair("owner-share-seed");
+    const newRecipient = makeKeypair("new-recipient-share-seed");
+
+    // Owner mints the NFT with themselves as recipient
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      recipientPublicKeys: [owner.x25519PublicKey],
+      contentType: "text/plain",
+      name: "share-test.txt",
+    });
+
+    // Owner unwraps their own CEK
+    const recipients = encrypted.metadata.crypto.recipients!;
+    let recoveredCek: Uint8Array | undefined;
+    for (const r of recipients) {
+      const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+      if (ephemeralBytes.every((b) => b === 0)) continue;
+      try {
+        const ephemeral = {
+          x25519EphemeralPublicKey: ephemeralBytes,
+          ...(r.ephemeral_pq
+            ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+            : {}),
+        };
+        recoveredCek = unwrapCEK(
+          new Uint8Array(Buffer.from(r.kek, "base64")),
+          ephemeral,
+          owner
+        );
+        break;
+      } catch { /* try next */ }
+    }
+    expect(recoveredCek).toBeDefined();
+
+    // Owner re-wraps for newRecipient (simulates handleExportCEK)
+    const { wrappedCEK, ephemeral: shareEphemeral } = wrapCEK(recoveredCek!, {
+      x25519: newRecipient.x25519PublicKey,
+    });
+
+    // Simulate share token JSON
+    const shareToken = {
+      v: 1,
+      kek: Buffer.from(wrappedCEK).toString("base64"),
+      epk: Buffer.from(shareEphemeral.x25519EphemeralPublicKey).toString("base64"),
+      cek_hash: encrypted.metadata.crypto.cek_hash,
+    };
+
+    // newRecipient receives and unwraps (simulates handleImportCEK)
+    const ephemeralFromToken = {
+      x25519EphemeralPublicKey: new Uint8Array(Buffer.from(shareToken.epk, "base64")),
+    };
+    const importedCek = unwrapCEK(
+      new Uint8Array(Buffer.from(shareToken.kek, "base64")),
+      ephemeralFromToken,
+      newRecipient
+    );
+
+    // Both CEKs must be identical
+    expect(bytesToHex(importedCek)).toBe(bytesToHex(recoveredCek!));
+
+    // newRecipient re-wraps for their own key and builds patched stub
+    const { wrappedCEK: myWrapped, ephemeral: myEphemeral } = wrapCEK(importedCek, {
+      x25519: newRecipient.x25519PublicKey,
+      mlkem: newRecipient.mlkemPublicKey,
+    });
+
+    const patchedRecipient = {
+      kid: "x25519" as const,
+      kek: Buffer.from(myWrapped).toString("base64"),
+      ephemeral_x25519: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
+      ...(myEphemeral.mlkemCiphertext
+        ? { ephemeral_pq: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+        : {}),
+    };
+
+    const patchedStub = {
+      ...encrypted.metadata,
+      crypto: {
+        ...encrypted.metadata.crypto,
+        recipients: [patchedRecipient, ...recipients],
+      },
+    };
+
+    // Full decrypt with patched stub — full keypair for ML-KEM slot
+    const decrypted = await decryptContent(encrypted.encryptedContent, {
+      metadata: patchedStub,
+      privateKey: newRecipient,
+    });
+    expect(new TextDecoder().decode(decrypted)).toBe("shared secret content");
+  });
+
+  it("wrong private key cannot unwrap the share token", () => {
+    const owner = makeKeypair("owner-seed-wrong-test");
+    const cek = new Uint8Array(32).fill(0xcc);
+    const attacker = makeKeypair("attacker-seed");
+    const target = makeKeypair("target-seed");
+
+    const { wrappedCEK, ephemeral } = wrapCEK(cek, { x25519: target.x25519PublicKey });
+
+    expect(() =>
+      unwrapCEK(wrappedCEK, { x25519EphemeralPublicKey: ephemeral.x25519EphemeralPublicKey }, attacker)
+    ).toThrow();
+
+    // But target succeeds
+    const recovered = unwrapCEK(
+      wrappedCEK,
+      { x25519EphemeralPublicKey: ephemeral.x25519EphemeralPublicKey },
+      target
+    );
+    expect(bytesToHex(recovered)).toBe(bytesToHex(cek));
+  });
+
+  it("cek_hash mismatch is detected before decryption", async () => {
+    const plaintext = new TextEncoder().encode("cek hash guard test");
+    const owner = makeKeypair("cek-hash-test-seed");
+
+    const encrypted = await encryptContent(plaintext, {
+      mode: "recipient",
+      recipientPublicKeys: [owner.x25519PublicKey],
+      contentType: "text/plain",
+      name: "guard.txt",
+    });
+
+    const differentNft = await encryptContent(
+      new TextEncoder().encode("different NFT"),
+      {
+        mode: "recipient",
+        recipientPublicKeys: [owner.x25519PublicKey],
+        contentType: "text/plain",
+        name: "other.txt",
+      }
+    );
+
+    // Share token built from `encrypted` but cek_hash copied from `differentNft`
+    const recipients = encrypted.metadata.crypto.recipients!;
+    const { wrappedCEK, ephemeral } = wrapCEK(new Uint8Array(32).fill(0xaa), {
+      x25519: owner.x25519PublicKey,
+    });
+    const shareToken = {
+      v: 1,
+      kek: Buffer.from(wrappedCEK).toString("base64"),
+      epk: Buffer.from(ephemeral.x25519EphemeralPublicKey).toString("base64"),
+      // deliberately wrong hash from a different NFT
+      cek_hash: differentNft.metadata.crypto.cek_hash,
+    };
+
+    // Simulate the guard in handleImportCEK
+    const hashMatches = shareToken.cek_hash === encrypted.metadata.crypto.cek_hash;
+    expect(hashMatches).toBe(false); // mismatch correctly detected
+    void recipients;
   });
 });

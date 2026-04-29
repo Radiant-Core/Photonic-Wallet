@@ -80,8 +80,13 @@ export type DecryptionOptions = {
   metadata: EncryptedContentStub;
   /** For passphrase mode */
   passphrase?: string;
-  /** For recipient mode - recipient's private key */
-  privateKey?: Uint8Array;
+  /**
+   * For recipient mode — either a raw X25519 private key (Uint8Array) or a full
+   * HybridKeyPair.  A full keypair is required when the wrapped CEK slot uses
+   * ML-KEM-768 (i.e. when selfKeypair or recipientMlkemPublicKeys were used at
+   * encryption time).  Passing only a Uint8Array falls back to X25519-only.
+   */
+  privateKey?: HybridKeyPair | Uint8Array;
 };
 
 export type FileSizeEstimate = {
@@ -400,10 +405,10 @@ export async function decryptContent(
     // Needed because a token may have multiple recipients (e.g. sender + receiver + self-backup).
     let unwrapped = false;
 
-    const recipientKeyPair = {
-      x25519PrivateKey: options.privateKey,
-      x25519PublicKey: new Uint8Array(32), // Not needed for decryption
-    };
+    const recipientKeyPair: HybridKeyPair =
+      options.privateKey instanceof Uint8Array
+        ? { x25519PrivateKey: options.privateKey, x25519PublicKey: new Uint8Array(32) }
+        : options.privateKey!;
 
     for (const recipient of recipients) {
       // Skip passphrase-sentinel recipients
