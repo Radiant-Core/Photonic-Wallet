@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
 import { t } from "@lingui/macro";
 import {
   Button,
@@ -14,7 +14,18 @@ import {
   Text,
   useDisclosure,
   useToast,
+  Code,
+  HStack,
+  Icon,
+  useClipboard,
+  Alert,
+  AlertIcon,
+  AlertDescription,
 } from "@chakra-ui/react";
+import { MdKey, MdContentCopy, MdCheck } from "react-icons/md";
+import { Trans } from "@lingui/macro";
+import { deriveEncryptionKeypair } from "@app/keys";
+import { bytesToHex } from "@noble/hashes/utils";
 import PasswordModal from "@app/components/PasswordModal";
 import RecoveryPhrase from "@app/components/RecoveryPhrase";
 import { feeRate, language, wallet } from "@app/signals";
@@ -45,6 +56,19 @@ export default function WalletSettings() {
     setShowMnemonic(true);
     disclosure.onClose();
   };
+
+  const encPubkeyHex = useMemo(() => {
+    const m = wallet.value.mnemonic;
+    if (!m) return "";
+    try {
+      const kp = deriveEncryptionKeypair(m);
+      return bytesToHex(kp.x25519PublicKey);
+    } catch {
+      return "";
+    }
+  }, [wallet.value.mnemonic]);
+
+  const { onCopy: onCopyEncKey, hasCopied: hasCopiedEncKey } = useClipboard(encPubkeyHex);
   const languageRef = useRef<HTMLSelectElement>(null);
   const feeRateRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
@@ -95,6 +119,51 @@ export default function WalletSettings() {
         <Text pt="2" fontSize="sm">
           Swap: {wallet.value.swapAddress}
         </Text>
+      </FormSection>
+
+      <FormSection>
+        <Heading size="md">{t`Encryption Public Key`}</Heading>
+        <Text pt={2} fontSize="sm" color="gray.400">
+          <Trans>
+            Share this key with anyone who wants to mint an encrypted NFT for you
+            (recipient mode). It is safe to share — it cannot be used to decrypt
+            your content.
+          </Trans>
+        </Text>
+        {encPubkeyHex ? (
+          <>
+            <Code
+              mt={3}
+              p={2}
+              borderRadius="md"
+              fontSize="xs"
+              fontFamily="mono"
+              whiteSpace="pre-wrap"
+              wordBreak="break-all"
+              display="block"
+              bg="bg.200"
+            >
+              {encPubkeyHex}
+            </Code>
+            <HStack mt={2}>
+              <Button
+                size="xs"
+                variant="outline"
+                leftIcon={<Icon as={hasCopiedEncKey ? MdCheck : MdContentCopy} />}
+                onClick={onCopyEncKey}
+              >
+                {hasCopiedEncKey ? t`Copied!` : t`Copy`}
+              </Button>
+            </HStack>
+          </>
+        ) : (
+          <Alert status="info" mt={3} borderRadius="md" fontSize="sm">
+            <AlertIcon as={MdKey} />
+            <AlertDescription>
+              <Trans>Unlock your wallet to view your encryption public key.</Trans>
+            </AlertDescription>
+          </Alert>
+        )}
       </FormSection>
 
       <FormSection>
