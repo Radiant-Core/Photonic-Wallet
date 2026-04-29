@@ -67,14 +67,24 @@ export type EncryptionMetadata = {
 };
 
 export type CryptoRecipient = {
-  kid: "x25519" | "x25519mlkem768"; // x25519 for now, hybrid when ML-KEM available
-  kek: string; // base64 wrapped CEK
-  ephemeral_x25519: string; // base64 ephemeral X25519 pubkey
-  ephemeral_pq?: string; // base64 ML-KEM-768 ciphertext (optional, for future hybrid)
+  /** Key identifier — matches REP-3006 crypto.key.wrap.recipients[].kid */
+  kid: string;
+  /** Wrap algorithm — REP-3006 crypto.key.wrap.alg */
+  alg: "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305";
+  /** Base64 wrapped CEK (nonce || ciphertext) — REP-3006 wrapped_cek */
+  wrapped_cek: string;
+  /** Base64 ephemeral X25519 public key — REP-3006 epk */
+  epk: string;
+  /** Base64 ML-KEM-768 ciphertext — REP-3006 mlkem_ct (hybrid PQ only) */
+  mlkem_ct?: string;
 };
 
 export type CryptoMetadata = {
-  mode: "wrapped" | "passphrase";
+  /** Always "encrypted" per REP-3006 §crypto.mode */
+  mode: "encrypted";
+  /** Key delivery format — REP-3006 crypto.key.format */
+  key_format: "wrapped" | "passphrase";
+  /** SHA256 of the CEK — on-chain commitment used as AAD for CEK wrapping */
   cek_hash: string; // sha256:...
   locator?: string; // base64 encrypted pointer (optional)
   locator_hash?: string; // sha256:...
@@ -427,14 +437,16 @@ export function decapsulateHybrid(
 // ============================================================================
 
 /**
- * Wrap a CEK for a recipient using hybrid X25519+ML-KEM-768 KEM + XChaCha20-Poly1305
+ * Wrap a CEK for a recipient using hybrid X25519+ML-KEM-768 KEM + XChaCha20-Poly1305.
  * @param cek Content encryption key (32 bytes)
  * @param recipientPublicKey Recipient's X25519 (and optional ML-KEM-768) public keys
+ * @param aad Additional authenticated data bound to the wrap (REP-3006: use cek_hash bytes)
  * @returns Wrapped key package including ephemeral keys for recipient
  */
 export function wrapCEK(
   cek: Uint8Array,
-  recipientPublicKey: { x25519: Uint8Array; mlkem?: Uint8Array }
+  recipientPublicKey: { x25519: Uint8Array; mlkem?: Uint8Array },
+  aad?: Uint8Array
 ): { wrappedCEK: Uint8Array; ephemeral: EncapsulatedSecret } {
   // Encapsulate shared secret (hybrid if mlkem key provided)
   const ephemeral = encapsulateHybrid(
@@ -452,9 +464,9 @@ export function wrapCEK(
     32
   );
 
-  // Wrap CEK using XChaCha20-Poly1305
+  // Wrap CEK using XChaCha20-Poly1305, binding AAD (e.g. cek_hash) to the wrap
   const nonce = randomBytes(XCHACHA20_NONCE_SIZE);
-  const { ciphertext } = encryptXChaCha20Poly1305(cek, kek, nonce);
+  const { ciphertext } = encryptXChaCha20Poly1305(cek, kek, nonce, aad);
 
   // Prepend nonce to wrapped CEK
   const wrappedCEK = concatBytes(nonce, ciphertext);
@@ -463,16 +475,18 @@ export function wrapCEK(
 }
 
 /**
- * Unwrap a CEK using recipient's private keys
+ * Unwrap a CEK using recipient's private keys.
  * @param wrappedCEK Wrapped CEK (nonce || ciphertext)
  * @param ephemeral Ephemeral public key data from sender
  * @param recipientKeyPair Recipient's private keys
+ * @param aad Additional authenticated data used during wrapping (must match wrapCEK)
  * @returns Unwrapped CEK
  */
 export function unwrapCEK(
   wrappedCEK: Uint8Array,
   ephemeral: Omit<EncapsulatedSecret, "sharedSecret">,
-  recipientKeyPair: HybridKeyPair
+  recipientKeyPair: HybridKeyPair,
+  aad?: Uint8Array
 ): Uint8Array {
   // Decapsulate shared secret
   const encaps: EncapsulatedSecret = {
@@ -489,11 +503,11 @@ export function unwrapCEK(
     32
   );
 
-  // Unwrap CEK
+  // Unwrap CEK (AAD must match what was used in wrapCEK)
   const nonce = wrappedCEK.slice(0, XCHACHA20_NONCE_SIZE);
   const ciphertext = wrappedCEK.slice(XCHACHA20_NONCE_SIZE);
 
-  return decryptXChaCha20Poly1305(ciphertext, kek, nonce);
+  return decryptXChaCha20Poly1305(ciphertext, kek, nonce, aad);
 }
 
 // ============================================================================
@@ -550,7 +564,8 @@ export function buildEncryptedMetadata(params: {
       scheme: (params.encryptionScheme as "chunked-aead-v1") ?? "chunked-aead-v1",
     },
     crypto: {
-      mode: "wrapped",
+      mode: "encrypted",
+      key_format: "wrapped",
       cek_hash: `sha256:${toHex(params.cekHash)}`,
     },
   };
@@ -575,10 +590,13 @@ export function addRecipientToMetadata(
 
   const recipient: CryptoRecipient = {
     kid: isHybrid ? "x25519mlkem768" : "x25519",
-    kek: toBase64(wrappedCEK),
-    ephemeral_x25519: toBase64(ephemeral.x25519EphemeralPublicKey),
+    alg: isHybrid
+      ? "x25519mlkem768-hkdf-xchacha20poly1305"
+      : "x25519-hkdf-xchacha20poly1305",
+    wrapped_cek: toBase64(wrappedCEK),
+    epk: toBase64(ephemeral.x25519EphemeralPublicKey),
     ...(isHybrid && ephemeral.mlkemCiphertext
-      ? { ephemeral_pq: toBase64(ephemeral.mlkemCiphertext) }
+      ? { mlkem_ct: toBase64(ephemeral.mlkemCiphertext) }
       : {}),
   };
 

@@ -14,11 +14,11 @@
 
 export type CekShareToken = {
   v: 1;
-  ref: string;       // tokenRef ("txid:vout") — for display only
-  kid: string;       // "x25519"
-  kek: string;       // base64url — wrapped CEK (nonce || ciphertext)
-  epk: string;       // base64url — ephemeral X25519 public key
-  cek_hash: string;  // "sha256:<hex>" — on-chain commitment
+  ref: string;        // tokenRef ("txid:vout") — for display only
+  kid: string;        // "x25519" | "x25519mlkem768"
+  wrapped_cek: string; // base64 — wrapped CEK (nonce || ciphertext) — REP-3006 wrapped_cek
+  epk: string;        // base64 — ephemeral X25519 public key — REP-3006 epk
+  cek_hash: string;   // "sha256:<hex>" — on-chain commitment (also used as AAD)
 };
 
 /** Encode a token into a full shareable URL using the current page location */
@@ -60,7 +60,7 @@ export function parseShareInput(input: string): CekShareToken | null {
   // (c) Raw JSON fallback
   try {
     const obj = JSON.parse(trimmed) as CekShareToken;
-    if (obj.v === 1 && obj.kek && obj.epk) return obj;
+    if (obj.v === 1 && obj.wrapped_cek && obj.epk) return obj;
   } catch { /* not JSON */ }
 
   return null;
@@ -72,7 +72,7 @@ function decodeShareB64(b64: string): CekShareToken | null {
     const padded = b64.replace(/-/g, "+").replace(/_/g, "/");
     const json = atob(padded);
     const obj = JSON.parse(json) as CekShareToken;
-    if (obj.v === 1 && obj.kek && obj.epk) return obj;
+    if (obj.v === 1 && obj.wrapped_cek && obj.epk) return obj;
   } catch { /* invalid */ }
   return null;
 }

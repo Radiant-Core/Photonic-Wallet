@@ -165,20 +165,24 @@ export default function EncryptedContentUnlock({
         x25519PrivateKey: keypair.x25519PrivateKey,
         x25519PublicKey: keypair.x25519PublicKey,
       };
+      const cekHashAad = stub.crypto.cek_hash
+        ? new TextEncoder().encode(stub.crypto.cek_hash)
+        : undefined;
       for (const r of recipients) {
-        const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+        const ephemeralBytes = new Uint8Array(Buffer.from(r.epk, "base64"));
         if (ephemeralBytes.every((b) => b === 0)) continue; // passphrase sentinel
         try {
           const ephemeral = {
             x25519EphemeralPublicKey: ephemeralBytes,
-            ...(r.ephemeral_pq
-              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+            ...(r.mlkem_ct
+              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
               : {}),
           };
           unwrapCEK(
-            new Uint8Array(Buffer.from(r.kek, "base64")),
+            new Uint8Array(Buffer.from(r.wrapped_cek, "base64")),
             ephemeral,
-            recipientKeyPair
+            recipientKeyPair,
+            cekHashAad
           );
           return true; // unwrap succeeded — this wallet is a recipient
         } catch {
@@ -309,37 +313,46 @@ export default function EncryptedContentUnlock({
       const recipients = stub.crypto?.recipients;
       if (!recipients?.length) throw new Error("No recipients in metadata");
 
+      const cekHashAad = stub.crypto.cek_hash
+        ? new TextEncoder().encode(stub.crypto.cek_hash)
+        : undefined;
+
       // Unwrap our own slot to recover the raw CEK
       let cek: Uint8Array | undefined;
       for (const r of recipients) {
-        const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+        const ephemeralBytes = new Uint8Array(Buffer.from(r.epk, "base64"));
         if (ephemeralBytes.every((b) => b === 0)) continue;
         try {
           const ephemeral = {
             x25519EphemeralPublicKey: ephemeralBytes,
-            ...(r.ephemeral_pq
-              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+            ...(r.mlkem_ct
+              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
               : {}),
           };
           cek = unwrapCEK(
-            new Uint8Array(Buffer.from(r.kek, "base64")),
+            new Uint8Array(Buffer.from(r.wrapped_cek, "base64")),
             ephemeral,
-            keypair
+            keypair,
+            cekHashAad
           );
           break;
         } catch { /* try next */ }
       }
       if (!cek) throw new Error("Could not unwrap CEK — wallet not a recipient");
 
-      // Re-wrap for the target recipient's X25519 public key
+      // Re-wrap for the target recipient's X25519 public key, binding cek_hash as AAD
       const recipientPub = new Uint8Array(Buffer.from(recipientPubHex, "hex"));
-      const { wrappedCEK, ephemeral: newEphemeral } = wrapCEK(cek, { x25519: recipientPub });
+      const { wrappedCEK, ephemeral: newEphemeral } = wrapCEK(
+        cek,
+        { x25519: recipientPub },
+        cekHashAad
+      );
 
       const tokenPayload: CekShareToken = {
         v: 1,
         ref: tokenRef ?? "",
         kid: "x25519",
-        kek: Buffer.from(wrappedCEK).toString("base64"),
+        wrapped_cek: Buffer.from(wrappedCEK).toString("base64"),
         epk: Buffer.from(newEphemeral.x25519EphemeralPublicKey).toString("base64"),
         cek_hash: stub.crypto.cek_hash,
       };
@@ -392,28 +405,42 @@ export default function EncryptedContentUnlock({
       }
 
       const keypair = deriveEncryptionKeypair(walletMnemonic);
+      // cek_hash from the share token is the binding AAD used when it was wrapped
+      const tokenCekHashAad = token.cek_hash
+        ? new TextEncoder().encode(token.cek_hash)
+        : undefined;
       const ephemeral = {
         x25519EphemeralPublicKey: new Uint8Array(Buffer.from(token.epk, "base64")),
       };
       const cek = unwrapCEK(
-        new Uint8Array(Buffer.from(token.kek, "base64")),
+        new Uint8Array(Buffer.from(token.wrapped_cek, "base64")),
         ephemeral,
-        keypair
+        keypair,
+        tokenCekHashAad
       );
 
-      // Re-wrap the recovered CEK for our own wallet key and build a patched
-      // stub so decryptContent can unwrap it via the normal privateKey path.
-      const { wrappedCEK: myWrappedCEK, ephemeral: myEphemeral } = wrapCEK(cek, {
-        x25519: keypair.x25519PublicKey,
-        mlkem: keypair.mlkemPublicKey,
-      });
+      // Re-wrap the recovered CEK for our own wallet key so decryptContent can use
+      // the normal privateKey path.  Bind to stub's cek_hash as AAD.
+      const myCekHashAad = stub.crypto.cek_hash
+        ? new TextEncoder().encode(stub.crypto.cek_hash)
+        : undefined;
+      const { wrappedCEK: myWrappedCEK, ephemeral: myEphemeral } = wrapCEK(
+        cek,
+        { x25519: keypair.x25519PublicKey, mlkem: keypair.mlkemPublicKey },
+        myCekHashAad
+      );
 
+      const isHybrid = !!myEphemeral.mlkemCiphertext;
       const patchedRecipient = {
-        kid: "x25519" as const,
-        kek: Buffer.from(myWrappedCEK).toString("base64"),
-        ephemeral_x25519: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
+        kid: isHybrid ? "x25519mlkem768" : "x25519",
+        alg: (isHybrid
+          ? "x25519mlkem768-hkdf-xchacha20poly1305"
+          : "x25519-hkdf-xchacha20poly1305") as
+          "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305",
+        wrapped_cek: Buffer.from(myWrappedCEK).toString("base64"),
+        epk: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
         ...(myEphemeral.mlkemCiphertext
-          ? { ephemeral_pq: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+          ? { mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
           : {}),
       };
 

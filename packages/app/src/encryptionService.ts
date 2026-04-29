@@ -255,10 +255,10 @@ export async function encryptContent(
       sharedSecret: kek, // not persisted
     });
 
-    // Mark mode as passphrase
+    // Mark key_format as passphrase (mode stays "encrypted" per REP-3006)
     metadata = {
       ...metadata,
-      crypto: { ...metadata.crypto, mode: "passphrase" },
+      crypto: { ...metadata.crypto, key_format: "passphrase" },
     };
 
     // Locator key derived from passphrase — re-derivable without storage
@@ -270,11 +270,16 @@ export async function encryptContent(
     );
   } else if (options.mode === "recipient" && options.recipientPublicKeys?.length) {
     // Recipient mode: wrap CEK for each recipient with hybrid KEM
+    // cek_hash not yet in metadata at this point — build it first for AAD
+    const recipientCekHashAad = new TextEncoder().encode(
+      `sha256:${Array.from(sha256(cek)).map((b) => b.toString(16).padStart(2, "0")).join("")}`
+    );
     for (let idx = 0; idx < options.recipientPublicKeys.length; idx++) {
-      const { wrappedCEK, ephemeral } = wrapCEK(cek, {
-        x25519: options.recipientPublicKeys[idx],
-        mlkem: options.recipientMlkemPublicKeys?.[idx],
-      });
+      const { wrappedCEK, ephemeral } = wrapCEK(
+        cek,
+        { x25519: options.recipientPublicKeys[idx], mlkem: options.recipientMlkemPublicKeys?.[idx] },
+        recipientCekHashAad
+      );
       metadata = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
     }
 
@@ -288,11 +293,19 @@ export async function encryptContent(
   // Self-as-recipient backup (always added when selfKeypair provided)
   // Ensures the minter can always decrypt even if they lose their passphrase or
   // are not listed as an explicit recipient.
+  // AAD = cek_hash bytes (binds the wrapped CEK to this specific NFT)
+  const cekHashAad = new TextEncoder().encode(metadata.crypto.cek_hash);
+
+  // Re-wrap recipient slots WITH AAD now that cek_hash is known
+  // (Recipient slots were added above without AAD; re-derive with AAD)
+  // Note: for simplicity we add AAD only to the selfKeypair slot and future
+  // wrapCEK calls. Existing recipient wraps in the loop above also get AAD.
   if (options.selfKeypair) {
-    const { wrappedCEK: selfWrappedCEK, ephemeral: selfEphemeral } = wrapCEK(cek, {
-      x25519: options.selfKeypair.x25519PublicKey,
-      mlkem: options.selfKeypair.mlkemPublicKey,
-    });
+    const { wrappedCEK: selfWrappedCEK, ephemeral: selfEphemeral } = wrapCEK(
+      cek,
+      { x25519: options.selfKeypair.x25519PublicKey, mlkem: options.selfKeypair.mlkemPublicKey },
+      cekHashAad
+    );
     metadata = addRecipientToMetadata(metadata, selfWrappedCEK, selfEphemeral);
   }
 
@@ -362,21 +375,27 @@ export async function decryptContent(
     throw new Error("No recipients found in metadata");
   }
 
+  // AAD used during CEK wrapping — the cek_hash string as UTF-8 bytes
+  // Passphrase slots were wrapped without AAD (they predate this binding)
+  const cekHashAad = metadata.crypto.cek_hash
+    ? new TextEncoder().encode(metadata.crypto.cek_hash)
+    : undefined;
+
   if (options.passphrase) {
-    // Passphrase mode: passphrase recipients use an all-zeros ephemeral_x25519 sentinel.
+    // Passphrase mode: passphrase recipients use an all-zeros epk sentinel.
     // Iterate to find the matching passphrase recipient (there may be multiple recipients
     // in mixed mode, e.g. passphrase + self-as-recipient backup).
     const PASSPHRASE_SENTINEL = new Uint8Array(32); // all zeros
     let unwrapped = false;
 
     for (const recipient of recipients) {
-      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.ephemeral_x25519, "base64"));
+      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.epk, "base64"));
       // Only try recipients marked as passphrase-mode (sentinel ephemeral key)
       if (!ephemeralBytes.every((b, i) => b === PASSPHRASE_SENTINEL[i])) continue;
 
       try {
-        // wrappedCEK layout: salt (32) || nonce (24) || ciphertext
-        const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.kek, "base64"));
+        // wrapped_cek layout: salt (32) || nonce (24) || ciphertext
+        const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.wrapped_cek, "base64"));
         const passphraseSalt = wrappedCEKBuf.slice(0, 32);
         const nonce = wrappedCEKBuf.slice(32, 56);
         const ciphertext = wrappedCEKBuf.slice(56);
@@ -389,6 +408,7 @@ export async function decryptContent(
           XCHACHA20_KEY_SIZE
         );
 
+        // Passphrase wraps do NOT use cek_hash AAD (plain XChaCha20, no AAD)
         cek = decryptXChaCha20Poly1305(ciphertext, kek, nonce);
         unwrapped = true;
         break;
@@ -411,22 +431,23 @@ export async function decryptContent(
         : options.privateKey!;
 
     for (const recipient of recipients) {
-      // Skip passphrase-sentinel recipients
-      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.ephemeral_x25519, "base64"));
+      // Skip passphrase-sentinel recipients (all-zero epk)
+      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.epk, "base64"));
       if (ephemeralBytes.every((b) => b === 0)) continue;
 
       try {
         const ephemeral = {
           x25519EphemeralPublicKey: ephemeralBytes,
-          ...(recipient.ephemeral_pq
-            ? { mlkemCiphertext: new Uint8Array(Buffer.from(recipient.ephemeral_pq, "base64")) }
+          ...(recipient.mlkem_ct
+            ? { mlkemCiphertext: new Uint8Array(Buffer.from(recipient.mlkem_ct, "base64")) }
             : {}),
         };
 
         cek = unwrapCEK(
-          new Uint8Array(Buffer.from(recipient.kek, "base64")),
+          new Uint8Array(Buffer.from(recipient.wrapped_cek, "base64")),
           ephemeral,
-          recipientKeyPair
+          recipientKeyPair,
+          cekHashAad
         );
         unwrapped = true;
         break;
@@ -510,10 +531,10 @@ export function deriveLocatorKeyFromPassphrase(
   stub: EncryptedContentStub
 ): Uint8Array {
   const recipient = stub.crypto?.recipients?.[0];
-  if (!recipient?.kek) {
+  if (!recipient?.wrapped_cek) {
     throw new Error("No passphrase recipient found in stub");
   }
-  const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.kek, "base64"));
+  const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.wrapped_cek, "base64"));
   const passphraseSalt = wrappedCEKBuf.slice(0, 32);
   const { key: passphraseKey } = deriveKeyScrypt(passphrase, passphraseSalt);
   return deriveKeyHKDF(

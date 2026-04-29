@@ -129,7 +129,8 @@ describe("Content Encryption", () => {
     expect(result.originalSize).toBe(plaintext.length);
     expect(result.metadata.type).toBe("text/plain");
     expect(result.metadata.name).toBe("test.txt");
-    expect(result.metadata.crypto.mode).toBe("passphrase");
+    expect(result.metadata.crypto.mode).toBe("encrypted");
+    expect(result.metadata.crypto.key_format).toBe("passphrase");
     expect(progressEvents).toContain("encrypting");
     expect(progressEvents).toContain("complete");
   });
@@ -443,7 +444,8 @@ describe("Multi-Recipient Encrypt → Decrypt Roundtrip", () => {
       name: "shared.txt",
     });
 
-    expect(encrypted.metadata.crypto.mode).toBe("wrapped");
+    expect(encrypted.metadata.crypto.mode).toBe("encrypted");
+    expect(encrypted.metadata.crypto.key_format).toBe("wrapped");
     expect(encrypted.metadata.crypto.recipients).toHaveLength(2);
 
     // Alice decrypts
@@ -583,38 +585,44 @@ describe("CEK Share — Export → Import Roundtrip", () => {
       name: "share-test.txt",
     });
 
+    // AAD = cek_hash string as UTF-8 (matches encryptionService behaviour)
+    const cekHashAad = new TextEncoder().encode(encrypted.metadata.crypto.cek_hash);
+
     // Owner unwraps their own CEK
     const recipients = encrypted.metadata.crypto.recipients!;
     let recoveredCek: Uint8Array | undefined;
     for (const r of recipients) {
-      const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+      const ephemeralBytes = new Uint8Array(Buffer.from(r.epk, "base64"));
       if (ephemeralBytes.every((b) => b === 0)) continue;
       try {
         const ephemeral = {
           x25519EphemeralPublicKey: ephemeralBytes,
-          ...(r.ephemeral_pq
-            ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+          ...(r.mlkem_ct
+            ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
             : {}),
         };
         recoveredCek = unwrapCEK(
-          new Uint8Array(Buffer.from(r.kek, "base64")),
+          new Uint8Array(Buffer.from(r.wrapped_cek, "base64")),
           ephemeral,
-          owner
+          owner,
+          cekHashAad
         );
         break;
       } catch { /* try next */ }
     }
     expect(recoveredCek).toBeDefined();
 
-    // Owner re-wraps for newRecipient (simulates handleExportCEK)
-    const { wrappedCEK, ephemeral: shareEphemeral } = wrapCEK(recoveredCek!, {
-      x25519: newRecipient.x25519PublicKey,
-    });
+    // Owner re-wraps for newRecipient, binding cek_hash as AAD (simulates handleExportCEK)
+    const { wrappedCEK, ephemeral: shareEphemeral } = wrapCEK(
+      recoveredCek!,
+      { x25519: newRecipient.x25519PublicKey },
+      cekHashAad
+    );
 
-    // Simulate share token JSON
+    // Simulate share token (REP-3006 field names)
     const shareToken = {
       v: 1,
-      kek: Buffer.from(wrappedCEK).toString("base64"),
+      wrapped_cek: Buffer.from(wrappedCEK).toString("base64"),
       epk: Buffer.from(shareEphemeral.x25519EphemeralPublicKey).toString("base64"),
       cek_hash: encrypted.metadata.crypto.cek_hash,
     };
@@ -624,26 +632,33 @@ describe("CEK Share — Export → Import Roundtrip", () => {
       x25519EphemeralPublicKey: new Uint8Array(Buffer.from(shareToken.epk, "base64")),
     };
     const importedCek = unwrapCEK(
-      new Uint8Array(Buffer.from(shareToken.kek, "base64")),
+      new Uint8Array(Buffer.from(shareToken.wrapped_cek, "base64")),
       ephemeralFromToken,
-      newRecipient
+      newRecipient,
+      cekHashAad  // same cek_hash AAD
     );
 
     // Both CEKs must be identical
     expect(bytesToHex(importedCek)).toBe(bytesToHex(recoveredCek!));
 
     // newRecipient re-wraps for their own key and builds patched stub
-    const { wrappedCEK: myWrapped, ephemeral: myEphemeral } = wrapCEK(importedCek, {
-      x25519: newRecipient.x25519PublicKey,
-      mlkem: newRecipient.mlkemPublicKey,
-    });
+    const { wrappedCEK: myWrapped, ephemeral: myEphemeral } = wrapCEK(
+      importedCek,
+      { x25519: newRecipient.x25519PublicKey, mlkem: newRecipient.mlkemPublicKey },
+      cekHashAad
+    );
 
+    const isHybrid = !!myEphemeral.mlkemCiphertext;
     const patchedRecipient = {
-      kid: "x25519" as const,
-      kek: Buffer.from(myWrapped).toString("base64"),
-      ephemeral_x25519: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
+      kid: isHybrid ? "x25519mlkem768" : "x25519",
+      alg: (isHybrid
+        ? "x25519mlkem768-hkdf-xchacha20poly1305"
+        : "x25519-hkdf-xchacha20poly1305") as
+        "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305",
+      wrapped_cek: Buffer.from(myWrapped).toString("base64"),
+      epk: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
       ...(myEphemeral.mlkemCiphertext
-        ? { ephemeral_pq: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+        ? { mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
         : {}),
     };
 
@@ -712,7 +727,7 @@ describe("CEK Share — Export → Import Roundtrip", () => {
     });
     const shareToken = {
       v: 1,
-      kek: Buffer.from(wrappedCEK).toString("base64"),
+      wrapped_cek: Buffer.from(wrappedCEK).toString("base64"),
       epk: Buffer.from(ephemeral.x25519EphemeralPublicKey).toString("base64"),
       // deliberately wrong hash from a different NFT
       cek_hash: differentNft.metadata.crypto.cek_hash,

@@ -527,7 +527,7 @@ describe("Hybrid X25519 + ML-KEM-768", () => {
     const withRecipient = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
 
     expect(withRecipient.crypto.recipients?.[0].kid).toBe("x25519mlkem768");
-    expect(withRecipient.crypto.recipients?.[0].ephemeral_pq).toBeDefined();
+    expect(withRecipient.crypto.recipients?.[0].mlkem_ct).toBeDefined();
   });
 
   it("should mark metadata with x25519 kid for classic (no PQ)", () => {
@@ -551,7 +551,7 @@ describe("Hybrid X25519 + ML-KEM-768", () => {
     const withRecipient = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
 
     expect(withRecipient.crypto.recipients?.[0].kid).toBe("x25519");
-    expect(withRecipient.crypto.recipients?.[0].ephemeral_pq).toBeUndefined();
+    expect(withRecipient.crypto.recipients?.[0].mlkem_ct).toBeUndefined();
   });
 });
 
@@ -617,7 +617,8 @@ describe("Metadata Builders", () => {
     expect(metadata.main.size).toBe(1048576);
     expect(metadata.main.chunks).toBe(16);
     expect(metadata.main.scheme).toBe("chunked-aead-v1");
-    expect(metadata.crypto.mode).toBe("wrapped");
+    expect(metadata.crypto.mode).toBe("encrypted");
+    expect(metadata.crypto.key_format).toBe("wrapped");
     expect(metadata.crypto.cek_hash).toBe(`sha256:${Buffer.from(cekHash).toString("hex")}`);
   });
 
@@ -661,8 +662,8 @@ describe("Metadata Builders", () => {
 
     expect(metadata.crypto.recipients).toHaveLength(1);
     expect(metadata.crypto.recipients![0].kid).toBe("x25519");
-    expect(metadata.crypto.recipients![0].kek).toBeDefined();
-    expect(metadata.crypto.recipients![0].ephemeral_x25519).toBeDefined();
+    expect(metadata.crypto.recipients![0].wrapped_cek).toBeDefined();
+    expect(metadata.crypto.recipients![0].epk).toBeDefined();
   });
 
   it("should support multiple recipients", () => {

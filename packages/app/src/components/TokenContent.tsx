@@ -77,11 +77,11 @@ export default function TokenContent({
 
     if (thumbnail) {
       // Three distinct lock states:
-      // 1. stillLocked  — timelock unexpired (MdTimer, orange)
-      // 2. wrapped mode — recipient key required (MdLock, purple)
-      // 3. passphrase   — password can be entered (MdLockOpen, blue)
-      const cryptoMode = stub?.mode as string | undefined;
-      const isRecipientMode = !stillLocked && cryptoMode === "wrapped";
+      // 1. stillLocked     — timelock unexpired (MdTimer, orange)
+      // 2. key_format=wrapped — recipient key required (MdLock, purple)
+      // 3. key_format=passphrase — password can be entered (MdLockOpen, blue)
+      const keyFormat = stub?.key_format as string | undefined;
+      const isRecipientMode = !stillLocked && keyFormat === "wrapped";
       const iconAs = stillLocked ? MdTimer : isRecipientMode ? MdLock : MdLockOpen;
       const iconColor = stillLocked ? "orange.400" : isRecipientMode ? "purple.400" : "blue.400";
 
