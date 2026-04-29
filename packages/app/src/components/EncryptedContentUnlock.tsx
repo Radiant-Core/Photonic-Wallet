@@ -21,8 +21,12 @@ import {
   useToast,
   Icon,
   Divider,
+  Textarea,
+  Code,
+  Collapse,
+  useDisclosure,
 } from "@chakra-ui/react";
-import { MdLock, MdLockOpen, MdTimer, MdKey, MdPublic } from "react-icons/md";
+import { MdLock, MdLockOpen, MdTimer, MdKey, MdPublic, MdShare } from "react-icons/md";
 import { Trans, t } from "@lingui/macro";
 import {
   formatTimeRemaining,
@@ -42,7 +46,8 @@ import {
 import { StorageManager } from "@lib/storage";
 import { wallet, feeRate } from "@app/signals";
 import { deriveEncryptionKeypair } from "@app/keys";
-import { deriveKeyHKDF, unwrapCEK } from "@lib/encryption";
+import { deriveKeyHKDF, unwrapCEK, wrapCEK } from "@lib/encryption";
+import { useClipboard } from "@chakra-ui/react";
 import db from "@app/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { ContractType } from "@app/types";
@@ -88,6 +93,18 @@ export default function EncryptedContentUnlock({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isRevealing, setIsRevealing] = useState(false);
   const [decryptProgress, setDecryptProgress] = useState<ProgressType | null>(null);
+
+  // ── CEK sharing: export ──────────────────────────────────────────────────
+  const [recipientPubkeyHex, setRecipientPubkeyHex] = useState("");
+  const [exportedToken, setExportedToken] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const { onCopy: onCopyExport, hasCopied: hasCopiedExport } = useClipboard(exportedToken);
+  const exportDisclosure = useDisclosure();
+
+  // ── CEK sharing: import ──────────────────────────────────────────────────
+  const [importJson, setImportJson] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  const importDisclosure = useDisclosure();
   // Local reveal record (CEK saved at mint time) — only the original minter has this
   const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(() =>
     tokenRef ? getReveal(tokenRef) : undefined
@@ -255,6 +272,199 @@ export default function EncryptedContentUnlock({
       await fetchAndDecryptOnChain(decryptOptions);
     } else {
       await fetchAndDecryptOffChain(locatorKey!, decryptOptions);
+    }
+  };
+
+  /**
+   * Export: unwrap the minter's own CEK slot, then re-wrap it for the
+   * target recipient's raw X25519 public key.
+   * Output is a small JSON blob the recipient pastes into Import.
+   */
+  const handleExportCEK = async () => {
+    if (!walletMnemonic) return;
+    const recipientPubHex = recipientPubkeyHex.trim().replace(/^0x/i, "");
+    if (recipientPubHex.length !== 64) {
+      toast({
+        title: t`Invalid Public Key`,
+        description: t`Recipient X25519 public key must be 32 bytes (64 hex chars)`,
+        status: "error",
+        duration: 5000,
+      });
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const recipients = stub.crypto?.recipients;
+      if (!recipients?.length) throw new Error("No recipients in metadata");
+
+      // Unwrap our own slot to recover the raw CEK
+      let cek: Uint8Array | undefined;
+      for (const r of recipients) {
+        const ephemeralBytes = new Uint8Array(Buffer.from(r.ephemeral_x25519, "base64"));
+        if (ephemeralBytes.every((b) => b === 0)) continue;
+        try {
+          const ephemeral = {
+            x25519EphemeralPublicKey: ephemeralBytes,
+            ...(r.ephemeral_pq
+              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.ephemeral_pq, "base64")) }
+              : {}),
+          };
+          cek = unwrapCEK(
+            new Uint8Array(Buffer.from(r.kek, "base64")),
+            ephemeral,
+            keypair
+          );
+          break;
+        } catch { /* try next */ }
+      }
+      if (!cek) throw new Error("Could not unwrap CEK — wallet not a recipient");
+
+      // Re-wrap for the target recipient's X25519 public key
+      const recipientPub = new Uint8Array(Buffer.from(recipientPubHex, "hex"));
+      const { wrappedCEK, ephemeral: newEphemeral } = wrapCEK(cek, { x25519: recipientPub });
+
+      const payload = JSON.stringify({
+        v: 1,
+        ref: tokenRef ?? "",
+        kid: "x25519",
+        kek: Buffer.from(wrappedCEK).toString("base64"),
+        epk: Buffer.from(newEphemeral.x25519EphemeralPublicKey).toString("base64"),
+        cek_hash: stub.crypto.cek_hash,
+      });
+
+      setExportedToken(payload);
+      toast({
+        title: t`CEK Wrapped`,
+        description: t`Share the token below with the recipient`,
+        status: "success",
+        duration: 4000,
+      });
+    } catch (error) {
+      toast({
+        title: t`Export Failed`,
+        description: error instanceof Error ? error.message : String(error),
+        status: "error",
+        duration: 6000,
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  /** CekShareToken JSON shape — version-guarded on import */
+  type CekShareToken = {
+    v: number;
+    ref: string;
+    kid: string;
+    kek: string; // base64 wrapped CEK
+    epk: string; // base64 X25519 ephemeral pubkey
+    cek_hash: string; // sha256:hex
+  };
+
+  /**
+   * Import: parse the JSON blob, unwrap the CEK with the wallet's private key,
+   * then run the normal decryptContent path.
+   */
+  const handleImportCEK = async () => {
+    if (!assertStorageAvailable()) return;
+    if (!walletMnemonic) {
+      toast({
+        title: t`Wallet Locked`,
+        description: t`Unlock your wallet to import a CEK token`,
+        status: "warning",
+      });
+      return;
+    }
+    setIsImporting(true);
+    setDecryptProgress(null);
+    try {
+      let token: CekShareToken;
+      try {
+        token = JSON.parse(importJson.trim()) as CekShareToken;
+      } catch {
+        throw new Error("Invalid JSON — paste the token exactly as shared");
+      }
+      if (token.v !== 1 || !token.kek || !token.epk) {
+        throw new Error("Unrecognised CEK token format (expected v:1)");
+      }
+
+      // Verify cek_hash matches the on-chain commitment
+      if (token.cek_hash && token.cek_hash !== stub.crypto.cek_hash) {
+        throw new Error("cek_hash mismatch — this token is for a different NFT");
+      }
+
+      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const ephemeral = {
+        x25519EphemeralPublicKey: new Uint8Array(Buffer.from(token.epk, "base64")),
+      };
+      const cek = unwrapCEK(
+        new Uint8Array(Buffer.from(token.kek, "base64")),
+        ephemeral,
+        keypair
+      );
+
+      // Re-wrap the recovered CEK for our own wallet key and build a patched
+      // stub so decryptContent can unwrap it via the normal privateKey path.
+      const { wrappedCEK: myWrappedCEK, ephemeral: myEphemeral } = wrapCEK(cek, {
+        x25519: keypair.x25519PublicKey,
+        mlkem: keypair.mlkemPublicKey,
+      });
+
+      const patchedRecipient = {
+        kid: "x25519" as const,
+        kek: Buffer.from(myWrappedCEK).toString("base64"),
+        ephemeral_x25519: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
+        ...(myEphemeral.mlkemCiphertext
+          ? { ephemeral_pq: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+          : {}),
+      };
+
+      // Build a patched stub with our slot prepended
+      const patchedStub = {
+        ...stub,
+        crypto: {
+          ...stub.crypto,
+          recipients: [patchedRecipient, ...(stub.crypto.recipients ?? [])],
+        },
+      };
+
+      const locatorKey = isOnChain
+        ? undefined
+        : deriveKeyHKDF(
+            keypair.x25519PrivateKey,
+            new Uint8Array(0),
+            new TextEncoder().encode("glyph-locator-recipient-v1"),
+            32
+          );
+
+      if (isOnChain) {
+        const encryptedBlob = hexToBytes(mainB!);
+        const plaintext = await decryptContent(
+          encryptedBlob,
+          { metadata: patchedStub, privateKey: keypair.x25519PrivateKey },
+          (p) => setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+        );
+        toast({ title: t`Content Decrypted!`, status: "success" });
+        onDecrypted(plaintext);
+      } else {
+        await fetchAndDecryptOffChain(locatorKey!, {
+          metadata: patchedStub,
+          privateKey: keypair.x25519PrivateKey,
+        });
+      }
+
+      setImportJson("");
+    } catch (error) {
+      console.error("CEK import error:", error);
+      toast({
+        title: t`Import Failed`,
+        description: error instanceof Error ? error.message : String(error),
+        status: "error",
+        duration: 7000,
+      });
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -554,6 +764,137 @@ export default function EncryptedContentUnlock({
               </TabPanel>
             </TabPanels>
           </Tabs>
+        )}
+
+        {/* ── CEK Import (any wallet-unlocked viewer who received a share token) ── */}
+        {timelockExpired && !!walletMnemonic && !isWalletKeyRecipient && (
+          <>
+            <Divider />
+            <VStack spacing={3} align="stretch">
+              <Button
+                size="sm"
+                variant="ghost"
+                leftIcon={<Icon as={MdShare} />}
+                onClick={importDisclosure.onToggle}
+                justifyContent="flex-start"
+              >
+                <Trans>Import CEK share token</Trans>
+              </Button>
+              <Collapse in={importDisclosure.isOpen}>
+                <VStack spacing={3} align="stretch" pt={1}>
+                  <Text fontSize="xs" color="gray.400">
+                    <Trans>
+                      Paste the CEK share token sent to you by the content owner.
+                      Your wallet key will unwrap it and decrypt the content.
+                    </Trans>
+                  </Text>
+                  <FormControl>
+                    <FormLabel fontSize="sm"><Trans>CEK Share Token (JSON)</Trans></FormLabel>
+                    <Textarea
+                      size="sm"
+                      fontFamily="mono"
+                      fontSize="xs"
+                      rows={4}
+                      value={importJson}
+                      onChange={(e) => setImportJson(e.target.value)}
+                      placeholder='{"v":1,"ref":"...","kek":"...","epk":"...","cek_hash":"..."}'
+                    />
+                  </FormControl>
+                  {isImporting && decryptProgress && (
+                    <EncryptionProgress progress={decryptProgress} operation="decrypting" />
+                  )}
+                  <Button
+                    size="sm"
+                    colorScheme="blue"
+                    onClick={handleImportCEK}
+                    isLoading={isImporting}
+                    isDisabled={!importJson.trim()}
+                    loadingText={t`Decrypting…`}
+                    leftIcon={<Icon as={MdShare} />}
+                  >
+                    <Trans>Decrypt with Shared Key</Trans>
+                  </Button>
+                </VStack>
+              </Collapse>
+            </VStack>
+          </>
+        )}
+
+        {/* ── CEK Export (wallet-key recipients can share to other wallets) ── */}
+        {timelockExpired && isWalletKeyRecipient && (
+          <>
+            <Divider />
+            <VStack spacing={3} align="stretch">
+              <Button
+                size="sm"
+                variant="ghost"
+                leftIcon={<Icon as={MdShare} />}
+                onClick={exportDisclosure.onToggle}
+                justifyContent="flex-start"
+              >
+                <Trans>Share decryption key</Trans>
+              </Button>
+              <Collapse in={exportDisclosure.isOpen}>
+                <VStack spacing={3} align="stretch" pt={1}>
+                  <Text fontSize="xs" color="gray.400">
+                    <Trans>
+                      Enter the recipient's X25519 public key (64 hex chars) to generate
+                      a one-time share token. The token can only be decrypted by the
+                      holder of the matching private key.
+                    </Trans>
+                  </Text>
+                  <FormControl>
+                    <FormLabel fontSize="sm"><Trans>Recipient public key (hex)</Trans></FormLabel>
+                    <Input
+                      size="sm"
+                      fontFamily="mono"
+                      fontSize="xs"
+                      value={recipientPubkeyHex}
+                      onChange={(e) => setRecipientPubkeyHex(e.target.value)}
+                      placeholder="64 hex chars (32 bytes)"
+                    />
+                  </FormControl>
+                  <Button
+                    size="sm"
+                    colorScheme="teal"
+                    onClick={handleExportCEK}
+                    isLoading={isExporting}
+                    isDisabled={!walletMnemonic || recipientPubkeyHex.trim().replace(/^0x/i, "").length !== 64}
+                    loadingText={t`Wrapping…`}
+                    leftIcon={<Icon as={MdShare} />}
+                  >
+                    <Trans>Generate Share Token</Trans>
+                  </Button>
+                  {exportedToken && (
+                    <VStack spacing={2} align="stretch">
+                      <Text fontSize="xs" color="gray.400">
+                        <Trans>Copy this token and send it to the recipient out-of-band (e.g. encrypted message):</Trans>
+                      </Text>
+                      <Code
+                        fontSize="xs"
+                        p={2}
+                        borderRadius="md"
+                        whiteSpace="pre-wrap"
+                        wordBreak="break-all"
+                        display="block"
+                        bg="bg.200"
+                      >
+                        {exportedToken}
+                      </Code>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={onCopyExport}
+                        leftIcon={<Icon as={MdShare} />}
+                      >
+                        {hasCopiedExport ? t`Copied!` : t`Copy to clipboard`}
+                      </Button>
+                    </VStack>
+                  )}
+                </VStack>
+              </Collapse>
+            </VStack>
+          </>
         )}
 
         {/* ── Publish Reveal (owner-only, after timelock expires) ── */}
