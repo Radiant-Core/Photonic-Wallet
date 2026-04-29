@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { EncryptionProgress } from "./EncryptionProgress";
 import type { EncryptionProgress as ProgressType } from "@app/encryptionService";
 import {
@@ -26,7 +26,7 @@ import {
   Collapse,
   useDisclosure,
 } from "@chakra-ui/react";
-import { MdLock, MdLockOpen, MdTimer, MdKey, MdPublic, MdShare } from "react-icons/md";
+import { MdLock, MdLockOpen, MdTimer, MdKey, MdPublic, MdShare, MdContentCopy, MdCheck, MdOpenInNew } from "react-icons/md";
 import { Trans, t } from "@lingui/macro";
 import {
   formatTimeRemaining,
@@ -47,6 +47,7 @@ import { StorageManager } from "@lib/storage";
 import { wallet, feeRate } from "@app/signals";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { deriveKeyHKDF, unwrapCEK, wrapCEK } from "@lib/encryption";
+import { buildShareUrl, parseShareInput, consumeShareFromUrl, type CekShareToken } from "@app/shareLink";
 import { useClipboard } from "@chakra-ui/react";
 import db from "@app/db";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -96,15 +97,25 @@ export default function EncryptedContentUnlock({
 
   // ── CEK sharing: export ──────────────────────────────────────────────────
   const [recipientPubkeyHex, setRecipientPubkeyHex] = useState("");
-  const [exportedToken, setExportedToken] = useState("");
+  const [exportedShareUrl, setExportedShareUrl] = useState("");
   const [isExporting, setIsExporting] = useState(false);
-  const { onCopy: onCopyExport, hasCopied: hasCopiedExport } = useClipboard(exportedToken);
+  const { onCopy: onCopyExport, hasCopied: hasCopiedExport } = useClipboard(exportedShareUrl);
   const exportDisclosure = useDisclosure();
 
   // ── CEK sharing: import ──────────────────────────────────────────────────
-  const [importJson, setImportJson] = useState("");
+  const [importInput, setImportInput] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const importDisclosure = useDisclosure();
+
+  // Auto-read a pending share link from the URL fragment on mount
+  useEffect(() => {
+    const token = consumeShareFromUrl();
+    if (!token) return;
+    // Pre-fill the import field and open the panel
+    setImportInput(buildShareUrl(token)); // store as URL so parseShareInput handles it
+    importDisclosure.onOpen();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Local reveal record (CEK saved at mint time) — only the original minter has this
   const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(() =>
     tokenRef ? getReveal(tokenRef) : undefined
@@ -324,19 +335,20 @@ export default function EncryptedContentUnlock({
       const recipientPub = new Uint8Array(Buffer.from(recipientPubHex, "hex"));
       const { wrappedCEK, ephemeral: newEphemeral } = wrapCEK(cek, { x25519: recipientPub });
 
-      const payload = JSON.stringify({
+      const tokenPayload: CekShareToken = {
         v: 1,
         ref: tokenRef ?? "",
         kid: "x25519",
         kek: Buffer.from(wrappedCEK).toString("base64"),
         epk: Buffer.from(newEphemeral.x25519EphemeralPublicKey).toString("base64"),
         cek_hash: stub.crypto.cek_hash,
-      });
+      };
 
-      setExportedToken(payload);
+      const shareUrl = buildShareUrl(tokenPayload);
+      setExportedShareUrl(shareUrl);
       toast({
-        title: t`CEK Wrapped`,
-        description: t`Share the token below with the recipient`,
+        title: t`Access link ready`,
+        description: t`Copy the link and send it to the recipient`,
         status: "success",
         duration: 4000,
       });
@@ -352,26 +364,16 @@ export default function EncryptedContentUnlock({
     }
   };
 
-  /** CekShareToken JSON shape — version-guarded on import */
-  type CekShareToken = {
-    v: number;
-    ref: string;
-    kid: string;
-    kek: string; // base64 wrapped CEK
-    epk: string; // base64 X25519 ephemeral pubkey
-    cek_hash: string; // sha256:hex
-  };
-
   /**
-   * Import: parse the JSON blob, unwrap the CEK with the wallet's private key,
-   * then run the normal decryptContent path.
+   * Import: parse a share link or JSON blob, unwrap the CEK with the wallet's
+   * private key, then run the normal decryptContent path.
    */
   const handleImportCEK = async () => {
     if (!assertStorageAvailable()) return;
     if (!walletMnemonic) {
       toast({
-        title: t`Wallet Locked`,
-        description: t`Unlock your wallet to import a CEK token`,
+        title: t`Wallet locked`,
+        description: t`Unlock your wallet first, then try again`,
         status: "warning",
       });
       return;
@@ -379,14 +381,9 @@ export default function EncryptedContentUnlock({
     setIsImporting(true);
     setDecryptProgress(null);
     try {
-      let token: CekShareToken;
-      try {
-        token = JSON.parse(importJson.trim()) as CekShareToken;
-      } catch {
-        throw new Error("Invalid JSON — paste the token exactly as shared");
-      }
-      if (token.v !== 1 || !token.kek || !token.epk) {
-        throw new Error("Unrecognised CEK token format (expected v:1)");
+      const token: CekShareToken | null = parseShareInput(importInput);
+      if (!token) {
+        throw new Error("Couldn't read the access link — paste the full link or token exactly as received");
       }
 
       // Verify cek_hash matches the on-chain commitment
@@ -454,7 +451,7 @@ export default function EncryptedContentUnlock({
         });
       }
 
-      setImportJson("");
+      setImportInput("");
     } catch (error) {
       console.error("CEK import error:", error);
       toast({
@@ -723,8 +720,7 @@ export default function EncryptedContentUnlock({
                 <VStack spacing={3} align="stretch">
                   <Text fontSize="sm" color="gray.400">
                     <Trans>
-                      Use your wallet's encryption key (HD path m/44'/0'/0'/2/0) to
-                      decrypt content you were added as a recipient for.
+                      Decrypt content that was shared directly with your wallet.
                     </Trans>
                   </Text>
                   {!walletMnemonic && (
@@ -766,7 +762,7 @@ export default function EncryptedContentUnlock({
           </Tabs>
         )}
 
-        {/* ── CEK Import (any wallet-unlocked viewer who received a share token) ── */}
+        {/* ── CEK Import (any wallet-unlocked viewer who received a share link) ── */}
         {timelockExpired && !!walletMnemonic && !isWalletKeyRecipient && (
           <>
             <Divider />
@@ -774,30 +770,28 @@ export default function EncryptedContentUnlock({
               <Button
                 size="sm"
                 variant="ghost"
-                leftIcon={<Icon as={MdShare} />}
+                leftIcon={<Icon as={MdOpenInNew} />}
                 onClick={importDisclosure.onToggle}
                 justifyContent="flex-start"
               >
-                <Trans>Import CEK share token</Trans>
+                <Trans>Use an access link</Trans>
               </Button>
               <Collapse in={importDisclosure.isOpen}>
                 <VStack spacing={3} align="stretch" pt={1}>
                   <Text fontSize="xs" color="gray.400">
                     <Trans>
-                      Paste the CEK share token sent to you by the content owner.
-                      Your wallet key will unwrap it and decrypt the content.
+                      Paste the access link sent to you by the content owner.
+                      Your wallet will automatically unlock and decrypt the content.
                     </Trans>
                   </Text>
                   <FormControl>
-                    <FormLabel fontSize="sm"><Trans>CEK Share Token (JSON)</Trans></FormLabel>
+                    <FormLabel fontSize="sm"><Trans>Access link or token</Trans></FormLabel>
                     <Textarea
                       size="sm"
-                      fontFamily="mono"
-                      fontSize="xs"
-                      rows={4}
-                      value={importJson}
-                      onChange={(e) => setImportJson(e.target.value)}
-                      placeholder='{"v":1,"ref":"...","kek":"...","epk":"...","cek_hash":"..."}'
+                      rows={3}
+                      value={importInput}
+                      onChange={(e) => setImportInput(e.target.value)}
+                      placeholder={t`Paste the link you received here…`}
                     />
                   </FormControl>
                   {isImporting && decryptProgress && (
@@ -808,11 +802,11 @@ export default function EncryptedContentUnlock({
                     colorScheme="blue"
                     onClick={handleImportCEK}
                     isLoading={isImporting}
-                    isDisabled={!importJson.trim()}
-                    loadingText={t`Decrypting…`}
-                    leftIcon={<Icon as={MdShare} />}
+                    isDisabled={!importInput.trim()}
+                    loadingText={t`Unlocking…`}
+                    leftIcon={<Icon as={MdLockOpen} />}
                   >
-                    <Trans>Decrypt with Shared Key</Trans>
+                    <Trans>Unlock with access link</Trans>
                   </Button>
                 </VStack>
               </Collapse>
@@ -820,7 +814,7 @@ export default function EncryptedContentUnlock({
           </>
         )}
 
-        {/* ── CEK Export (wallet-key recipients can share to other wallets) ── */}
+        {/* ── CEK Export (wallet-key recipients can share access to other wallets) ── */}
         {timelockExpired && isWalletKeyRecipient && (
           <>
             <Divider />
@@ -832,26 +826,26 @@ export default function EncryptedContentUnlock({
                 onClick={exportDisclosure.onToggle}
                 justifyContent="flex-start"
               >
-                <Trans>Share decryption key</Trans>
+                <Trans>Give someone access</Trans>
               </Button>
               <Collapse in={exportDisclosure.isOpen}>
                 <VStack spacing={3} align="stretch" pt={1}>
                   <Text fontSize="xs" color="gray.400">
                     <Trans>
-                      Enter the recipient's X25519 public key (64 hex chars) to generate
-                      a one-time share token. The token can only be decrypted by the
-                      holder of the matching private key.
+                      Enter the recipient's encryption public key to generate a
+                      one-time access link. Only they can use it — find the key
+                      in their wallet under Settings → Encryption Public Key.
                     </Trans>
                   </Text>
                   <FormControl>
-                    <FormLabel fontSize="sm"><Trans>Recipient public key (hex)</Trans></FormLabel>
+                    <FormLabel fontSize="sm"><Trans>Recipient's encryption public key</Trans></FormLabel>
                     <Input
                       size="sm"
                       fontFamily="mono"
                       fontSize="xs"
                       value={recipientPubkeyHex}
                       onChange={(e) => setRecipientPubkeyHex(e.target.value)}
-                      placeholder="64 hex chars (32 bytes)"
+                      placeholder={t`64-character key from their wallet Settings`}
                     />
                   </FormControl>
                   <Button
@@ -860,15 +854,15 @@ export default function EncryptedContentUnlock({
                     onClick={handleExportCEK}
                     isLoading={isExporting}
                     isDisabled={!walletMnemonic || recipientPubkeyHex.trim().replace(/^0x/i, "").length !== 64}
-                    loadingText={t`Wrapping…`}
+                    loadingText={t`Creating link…`}
                     leftIcon={<Icon as={MdShare} />}
                   >
-                    <Trans>Generate Share Token</Trans>
+                    <Trans>Create access link</Trans>
                   </Button>
-                  {exportedToken && (
+                  {exportedShareUrl && (
                     <VStack spacing={2} align="stretch">
                       <Text fontSize="xs" color="gray.400">
-                        <Trans>Copy this token and send it to the recipient out-of-band (e.g. encrypted message):</Trans>
+                        <Trans>Send this link to the recipient — it works only with their wallet key:</Trans>
                       </Text>
                       <Code
                         fontSize="xs"
@@ -879,15 +873,15 @@ export default function EncryptedContentUnlock({
                         display="block"
                         bg="bg.200"
                       >
-                        {exportedToken}
+                        {exportedShareUrl}
                       </Code>
                       <Button
                         size="xs"
                         variant="outline"
                         onClick={onCopyExport}
-                        leftIcon={<Icon as={MdShare} />}
+                        leftIcon={<Icon as={hasCopiedExport ? MdCheck : MdContentCopy} />}
                       >
-                        {hasCopiedExport ? t`Copied!` : t`Copy to clipboard`}
+                        {hasCopiedExport ? t`Copied!` : t`Copy link`}
                       </Button>
                     </VStack>
                   )}
