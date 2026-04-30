@@ -613,10 +613,17 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     }
 
     // ----------------------------------------------------------------
-    // Phase 6: Encrypt file content before building payload
+    // Phase 6: Encrypt file/text content before building payload
     // ----------------------------------------------------------------
     let encryptionResult: Awaited<ReturnType<typeof encryptContent>> | null = null;
-    if (encState.enabled && mode === "file" && fileState.file?.data) {
+    const encryptableBytes: Uint8Array | null =
+      encState.enabled && mode === "file" && fileState.file?.data
+        ? new Uint8Array(fileState.file.data)
+        : encState.enabled && mode === "text" && text
+        ? new TextEncoder().encode(text)
+        : null;
+
+    if (encryptableBytes) {
       const tlParams = timelockState.enabled
         ? resolveTimelockParams(timelockState)
         : null;
@@ -627,8 +634,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         ? deriveEncryptionKeypair(wallet.value.mnemonic)
         : undefined;
 
+      const contentType =
+        mode === "text" ? "text/plain" : fileState.file?.type || "application/octet-stream";
+
       encryptionResult = await encryptContent(
-        new Uint8Array(fileState.file.data),
+        encryptableBytes,
         {
           mode: encState.mode,
           passphrase: encState.mode === "passphrase" ? encState.passphrase : undefined,
@@ -636,8 +646,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             encState.mode === "recipient"
               ? encState.recipientKeys.map((k) => new Uint8Array(Buffer.from(k, "hex")))
               : undefined,
-          contentType: fileState.file.type || "application/octet-stream",
-          name: fields.name || payloadFilename || "file",
+          contentType,
+          name: fields.name || payloadFilename || (mode === "text" ? "text" : "file"),
           protocolIds: [GLYPH_NFT, GLYPH_ENCRYPTED],
           selfKeypair,
         }
@@ -1448,6 +1458,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>{t`File`}</FormLabel>
                     <FormHelperText mb={4}>
                       {t`Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
+                      {` — `}
+                      {t`Encryption and timelock options appear after upload.`}
                     </FormHelperText>
                     {fileState.file?.data ? (
                       <Flex
@@ -1504,15 +1516,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   </FormControl>
                 </>
               )}
-              {mode === "file" && fileState.file?.data && (
+              {((mode === "file" && fileState.file?.data) || (mode === "text" && !!formData.text)) && (
                 <EncryptionSection
                   state={encState}
                   onChange={setEncState}
-                  fileSize={fileState.file.size}
+                  fileSize={mode === "text" ? new TextEncoder().encode(formData.text ?? "").length : fileState.file?.size}
                   disabled={loading}
                 />
               )}
-              {mode === "file" && fileState.file?.data && encState.enabled && (
+              {((mode === "file" && fileState.file?.data) || (mode === "text" && !!formData.text)) && encState.enabled && (
                 <TimelockSection
                   state={timelockState}
                   onChange={setTimelockState}
@@ -1745,6 +1757,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>Text</FormLabel>
                     <FormHelperText mb={4}>
                       {t`Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
+                      {` — `}
+                      {t`Encryption options appear after entering text.`}
                     </FormHelperText>
                     <Textarea
                       name="text"

@@ -1,4 +1,4 @@
-import { Box, Flex, Icon, Text } from "@chakra-ui/react";
+import { Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -8,6 +8,8 @@ import { TbBox, TbUserCircle } from "react-icons/tb";
 import { IconType } from "react-icons/lib";
 import ValueTag from "./ValueTag";
 import { formatPhotons } from "@lib/format";
+import { MdLock, MdTimer } from "react-icons/md";
+import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
 
 const Ref = ({ value }: { value: string }) => {
   const ref = Outpoint.fromString(value);
@@ -32,6 +34,8 @@ export default function TokenRow({
   defaultIcon?: IconType;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
+  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
+  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
 
   const short = ref.shortInput();
   return (
@@ -72,6 +76,16 @@ export default function TokenRow({
             </Text>
           ) : (
             <Identifier>{short}</Identifier>
+          )}
+          {(isEncrypted || isTimelocked) && (
+            <Tooltip label={isTimelocked ? "Timelocked" : "Encrypted"} placement="top">
+              <Icon
+                as={isTimelocked ? MdTimer : MdLock}
+                boxSize={3.5}
+                color={isTimelocked ? "orange.300" : "purple.300"}
+                flexShrink={0}
+              />
+            </Tooltip>
           )}
           <Text as="div" color="gray.400" whiteSpace="nowrap" flexShrink={0}>
             {(glyph.ticker as string) || ""}

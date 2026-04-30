@@ -1,4 +1,4 @@
-import { Box, Flex, Icon, Text } from "@chakra-ui/react";
+import { Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -9,6 +9,8 @@ import { TbBox, TbUserCircle } from "react-icons/tb";
 import { IconType } from "react-icons/lib";
 import { LinkIcon } from "@chakra-ui/icons";
 import { RiSwap2Line } from "react-icons/ri";
+import { MdLock, MdTimer } from "react-icons/md";
+import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
 
 export default function TokenCard({
   glyph,
@@ -25,6 +27,8 @@ export default function TokenCard({
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isLink = !!glyph?.location;
+  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
+  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
 
   const short = ref.shortInput();
   return (
@@ -61,6 +65,24 @@ export default function TokenCard({
           >
             <Icon as={RiSwap2Line} boxSize={8} />
           </Box>
+        )}
+        {(isEncrypted || isTimelocked) && (
+          <Tooltip label={isTimelocked ? "Timelocked" : "Encrypted"} placement="top">
+            <Box
+              position="absolute"
+              top={2}
+              left={2}
+              bgColor={isTimelocked ? "orange.700" : "purple.700"}
+              p={1}
+              borderRadius={4}
+            >
+              <Icon
+                as={isTimelocked ? MdTimer : MdLock}
+                boxSize={4}
+                color="white"
+              />
+            </Box>
+          </Tooltip>
         )}
         <TokenContent glyph={glyph} defaultIcon={defaultIcon} thumbnail />
       </Box>
