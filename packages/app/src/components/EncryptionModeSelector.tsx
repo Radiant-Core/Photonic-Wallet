@@ -26,7 +26,6 @@ import {
   Icon,
 } from "@chakra-ui/react";
 import { MdVisibility, MdVisibilityOff, MdPersonAdd, MdLock, MdPeople } from "react-icons/md";
-import { Trans, t } from "@lingui/macro";
 import type { EncryptionMode } from "../encryptionService";
 
 export type EncryptionModeSelectorProps = {
@@ -60,9 +59,9 @@ function evaluateStrength(pass: string): number {
 }
 
 function strengthMeta(score: number): { label: string; color: string } {
-  if (score < 40) return { label: t`Weak`, color: "red" };
-  if (score < 70) return { label: t`Medium`, color: "yellow" };
-  return { label: t`Strong`, color: "green" };
+  if (score < 40) return { label: "Weak", color: "red" };
+  if (score < 70) return { label: "Medium", color: "yellow" };
+  return { label: "Strong", color: "green" };
 }
 
 /**
@@ -93,7 +92,7 @@ export function EncryptionModeSelector({
           colorScheme={mode === "passphrase" ? "blue" : undefined}
           flex={1}
         >
-          <Trans>Passphrase</Trans>
+          Passphrase
         </Button>
         <Button
           leftIcon={<Icon as={MdPeople} />}
@@ -102,26 +101,26 @@ export function EncryptionModeSelector({
           colorScheme={mode === "recipient" ? "blue" : undefined}
           flex={1}
         >
-          <Trans>Recipients</Trans>
+          Recipients
         </Button>
       </ButtonGroup>
 
       {mode === "passphrase" && (
         <VStack spacing={2} align="stretch">
           <FormControl isRequired>
-            <FormLabel fontSize="sm"><Trans>Encryption Passphrase</Trans></FormLabel>
+            <FormLabel fontSize="sm">Encryption Passphrase</FormLabel>
             <InputGroup size="sm">
               <Input
                 type={showPassword ? "text" : "password"}
                 value={passphrase || ""}
                 onChange={(e) => onPassphraseChange?.(e.target.value)}
-                placeholder={t`Enter a strong passphrase…`}
+                placeholder="Enter a strong passphrase…"
                 isDisabled={disabled}
                 pr="2.5rem"
               />
               <InputRightElement>
                 <IconButton
-                  aria-label={showPassword ? t`Hide passphrase` : t`Show passphrase`}
+                  aria-label={showPassword ? "Hide passphrase" : "Show passphrase"}
                   icon={<Icon as={showPassword ? MdVisibilityOff : MdVisibility} />}
                   size="xs"
                   variant="ghost"
@@ -147,15 +146,17 @@ export function EncryptionModeSelector({
             </Box>
           )}
 
-          <FormHelperText fontSize="xs">
-            <Trans>Required to decrypt content. Store it securely — it cannot be recovered.</Trans>
-          </FormHelperText>
+          <FormControl>
+            <FormHelperText fontSize="xs">
+              Required to decrypt content. Store it securely — it cannot be recovered.
+            </FormHelperText>
+          </FormControl>
         </VStack>
       )}
 
       {mode === "recipient" && (
         <VStack spacing={2} align="stretch">
-          <FormLabel fontSize="sm" mb={0}><Trans>Recipients</Trans></FormLabel>
+          <Text fontSize="sm" fontWeight="medium" mb={0}>Recipients</Text>
 
           {recipientKeys && recipientKeys.length > 0 && (
             <HStack flexWrap="wrap" gap={2}>
@@ -181,12 +182,14 @@ export function EncryptionModeSelector({
             isDisabled={disabled}
             alignSelf="flex-start"
           >
-            <Trans>Add Recipient</Trans>
+            Add Recipient
           </Button>
 
-          <FormHelperText fontSize="xs">
-            <Trans>Add by WAVE name (e.g. alice.rxd) or X25519 public key. Only listed recipients can decrypt.</Trans>
-          </FormHelperText>
+          <FormControl>
+            <FormHelperText fontSize="xs">
+              Add by WAVE name (e.g. alice.rxd) or X25519 public key. Only listed recipients can decrypt.
+            </FormHelperText>
+          </FormControl>
         </VStack>
       )}
     </VStack>

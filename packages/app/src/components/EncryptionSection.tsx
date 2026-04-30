@@ -22,7 +22,6 @@ import {
   Spinner,
 } from "@chakra-ui/react";
 import { MdPersonAdd, MdClose } from "react-icons/md";
-import { Trans, t } from "@lingui/macro";
 import { EncryptToggle } from "./EncryptToggle";
 import { EncryptionModeSelector } from "./EncryptionModeSelector";
 import { EncryptionProgress } from "./EncryptionProgress";
@@ -231,7 +230,7 @@ export function EncryptionSection({
           {showAddRecipient && (
             <FormControl isInvalid={!!recipientKeyError}>
               <FormLabel fontSize="sm">
-                <Trans>Recipient — WAVE name (e.g. alice.rxd) or X25519 public key</Trans>
+                Recipient — WAVE name (e.g. alice.rxd) or X25519 public key
               </FormLabel>
               <HStack>
                 <Input
@@ -243,7 +242,7 @@ export function EncryptionSection({
                     setNewRecipient(e.target.value);
                     setRecipientKeyError(null);
                   }}
-                  placeholder={t`alice.rxd or a1b2c3d4… (64 hex)`}
+                  placeholder="alice.rxd or a1b2c3d4… (64 hex)"
                   isDisabled={disabled || isEncrypting || isResolving}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -261,7 +260,7 @@ export function EncryptionSection({
                   leftIcon={isResolving ? <Spinner size="xs" /> : <Icon as={MdPersonAdd} />}
                   flexShrink={0}
                 >
-                  {isResolving ? <Trans>Resolving…</Trans> : <Trans>Add</Trans>}
+                  {isResolving ? "Resolving…" : "Add"}
                 </Button>
                 <Button
                   size="sm"
@@ -275,7 +274,7 @@ export function EncryptionSection({
                   leftIcon={<Icon as={MdClose} />}
                   flexShrink={0}
                 >
-                  <Trans>Cancel</Trans>
+                  Cancel
                 </Button>
               </HStack>
               {recipientKeyError && (
@@ -289,8 +288,8 @@ export function EncryptionSection({
               <AlertIcon />
               <AlertDescription>
                 {state.mode === "passphrase"
-                  ? <Trans>Passphrase must be at least 8 characters</Trans>
-                  : <Trans>Add at least one recipient</Trans>}
+                  ? "Passphrase must be at least 8 characters"
+                  : "Add at least one recipient"}
               </AlertDescription>
             </Alert>
           )}
