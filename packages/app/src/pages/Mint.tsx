@@ -1458,8 +1458,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>{t`File`}</FormLabel>
                     <FormHelperText mb={4}>
                       {t`Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
-                      {` — `}
-                      {t`Encryption and timelock options appear after upload.`}
                     </FormHelperText>
                     {fileState.file?.data ? (
                       <Flex
@@ -1757,8 +1755,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>Text</FormLabel>
                     <FormHelperText mb={4}>
                       {t`Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
-                      {` — `}
-                      {t`Encryption options appear after entering text.`}
                     </FormHelperText>
                     <Textarea
                       name="text"
