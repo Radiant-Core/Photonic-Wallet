@@ -247,10 +247,12 @@ export default function WalletSettings() {
 
       <FormSection>
         <FormControl>
-          <FormLabel>{t`Language`}</FormLabel>
+          <FormLabel id="language-label" htmlFor="language-select">{t`Language`}</FormLabel>
           <Select
             ref={languageRef}
+            id="language-select"
             defaultValue={savedLanguage || ""}
+            aria-labelledby="language-label"
             aria-label="Language"
             title="Language"
           >
