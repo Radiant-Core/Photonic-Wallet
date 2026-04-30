@@ -126,27 +126,9 @@ export default function ViewDigitalObject({
   const txid = useRef("");
   const { onCopy: onLinkCopy } = useClipboard(nft?.remote?.u || "");
 
-  // Restore decrypted content from sessionStorage on mount (survives back-navigation)
-  const cacheKey = `photonic:decrypted:${sref}`;
-  const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(() => {
-    try {
-      const raw = sessionStorage.getItem(cacheKey);
-      if (!raw) return null;
-      const { b64, mime: _mime } = JSON.parse(raw) as { b64: string; mime: string };
-      return new Uint8Array(Buffer.from(b64, "base64"));
-    } catch {
-      return null;
-    }
-  });
-  const [decryptedMime, setDecryptedMime] = useState<string>(() => {
-    try {
-      const raw = sessionStorage.getItem(cacheKey);
-      if (!raw) return "application/octet-stream";
-      return (JSON.parse(raw) as { b64: string; mime: string }).mime;
-    } catch {
-      return "application/octet-stream";
-    }
-  });
+  // Decrypted bytes held in memory only — never written to any persistent storage
+  const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(null);
+  const [decryptedMime, setDecryptedMime] = useState<string>("application/octet-stream");
 
   // TODO show loading or 404
   if (!txo || !nft) {
@@ -187,7 +169,6 @@ export default function ViewDigitalObject({
     "image/webp",
     "image/gif",
     "image/avif",
-    "image/svg+xml",
   ].includes(nft.embed?.t || "");
   const location = Outpoint.fromUTXO(txo.txid, txo.vout);
   const isLink = !!nft.location;
@@ -282,14 +263,6 @@ export default function ViewDigitalObject({
                   onDecrypted={(bytes, mime) => {
                     setDecryptedBytes(bytes);
                     setDecryptedMime(mime);
-                    try {
-                      sessionStorage.setItem(
-                        cacheKey,
-                        JSON.stringify({ b64: Buffer.from(bytes).toString("base64"), mime })
-                      );
-                    } catch {
-                      // sessionStorage quota exceeded or unavailable — non-fatal
-                    }
                   }}
                 />
               </GridItem>

@@ -7,23 +7,36 @@ import topLevelAwait from "vite-plugin-top-level-await";
 //import basicSsl from "@vitejs/plugin-basic-ssl";
 import path from "path";
 
+/**
+ * Security headers applied to dev/preview servers.
+ *
+ * IMPORTANT — PRODUCTION DEPLOYMENT:
+ * These headers are only active during `vite dev` and `vite preview`.
+ * They MUST also be set in the production web server config (Nginx/Caddy/etc.).
+ *
+ * Nginx example (add inside `location / { ... }`):
+ *   add_header X-Frame-Options "DENY" always;
+ *   add_header X-Content-Type-Options "nosniff" always;
+ *   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+ *   add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+ *   add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; frame-src 'none'" always;
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; frame-src 'none'",
+};
+
 export default defineConfig({
   base: "./",
   server: {
-    headers: {
-      "X-Frame-Options": "DENY",
-      "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    },
+    headers: SECURITY_HEADERS,
   },
   preview: {
-    headers: {
-      "X-Frame-Options": "DENY",
-      "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    },
+    headers: SECURITY_HEADERS,
   },
   plugins: [
     react({

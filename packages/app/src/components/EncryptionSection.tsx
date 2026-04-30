@@ -6,6 +6,23 @@
  */
 
 import { useState, useMemo } from "react";
+import {
+  VStack,
+  HStack,
+  FormControl,
+  FormLabel,
+  FormHelperText,
+  Input,
+  Button,
+  Icon,
+  Text,
+  Alert,
+  AlertIcon,
+  AlertDescription,
+  Spinner,
+} from "@chakra-ui/react";
+import { MdPersonAdd, MdClose } from "react-icons/md";
+import { Trans, t } from "@lingui/macro";
 import { EncryptToggle } from "./EncryptToggle";
 import { EncryptionModeSelector } from "./EncryptionModeSelector";
 import { EncryptionProgress } from "./EncryptionProgress";
@@ -182,7 +199,7 @@ export function EncryptionSection({
     : true;
 
   return (
-    <div className="encryption-section">
+    <VStack spacing={3} align="stretch" p={4} borderWidth={1} borderRadius="md" borderColor="whiteAlpha.200" bg="whiteAlpha.50">
       <EncryptToggle
         enabled={state.enabled}
         onChange={handleToggle}
@@ -192,7 +209,7 @@ export function EncryptionSection({
       />
 
       {state.enabled && (
-        <>
+        <VStack spacing={3} align="stretch">
           <StorageBackendSelector
             backend={state.storageBackend}
             onChange={handleStorageBackendChange}
@@ -212,180 +229,82 @@ export function EncryptionSection({
           />
 
           {showAddRecipient && (
-            <div className="add-recipient-form">
-              <label className="form-label">
-                Recipient — WAVE name (e.g. alice.rxd) or X25519 public key (64 hex chars)
-              </label>
-              <div className="form-input-row">
-                <input
-                  type="text"
+            <FormControl isInvalid={!!recipientKeyError}>
+              <FormLabel fontSize="sm">
+                <Trans>Recipient — WAVE name (e.g. alice.rxd) or X25519 public key</Trans>
+              </FormLabel>
+              <HStack>
+                <Input
+                  size="sm"
+                  fontFamily="mono"
+                  fontSize="xs"
                   value={newRecipient}
                   onChange={(e) => {
                     setNewRecipient(e.target.value);
                     setRecipientKeyError(null);
                   }}
-                  placeholder="alice.rxd or a1b2c3d4... (64 hex)"
-                  className={`form-input${recipientKeyError ? " form-input-error" : ""}`}
-                  disabled={disabled || isEncrypting || isResolving}
+                  placeholder={t`alice.rxd or a1b2c3d4… (64 hex)`}
+                  isDisabled={disabled || isEncrypting || isResolving}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
                       handleAddRecipient();
                     }
                   }}
+                  isInvalid={!!recipientKeyError}
                 />
-                <button
-                  className="btn-add"
+                <Button
+                  size="sm"
+                  colorScheme="blue"
                   onClick={handleAddRecipient}
-                  disabled={disabled || isEncrypting || isResolving || !newRecipient.trim()}
-                  type="button"
+                  isDisabled={disabled || isEncrypting || isResolving || !newRecipient.trim()}
+                  leftIcon={isResolving ? <Spinner size="xs" /> : <Icon as={MdPersonAdd} />}
+                  flexShrink={0}
                 >
-                  {isResolving ? "Resolving…" : "Add"}
-                </button>
-                <button
-                  className="btn-cancel"
+                  {isResolving ? <Trans>Resolving…</Trans> : <Trans>Add</Trans>}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={() => {
                     setShowAddRecipient(false);
                     setNewRecipient("");
+                    setRecipientKeyError(null);
                   }}
-                  disabled={disabled || isEncrypting}
-                  type="button"
+                  isDisabled={disabled || isEncrypting}
+                  leftIcon={<Icon as={MdClose} />}
+                  flexShrink={0}
                 >
-                  Cancel
-                </button>
-              </div>
+                  <Trans>Cancel</Trans>
+                </Button>
+              </HStack>
               {recipientKeyError && (
-                <p className="recipient-key-error">{recipientKeyError}</p>
+                <FormHelperText color="red.400" fontSize="xs">{recipientKeyError}</FormHelperText>
               )}
-            </div>
+            </FormControl>
           )}
 
           {state.enabled && !isValid && (
-            <div className="validation-warning">
-              {state.mode === "passphrase"
-                ? "⚠️ Passphrase must be at least 8 characters"
-                : "⚠️ Add at least one recipient"}
-            </div>
+            <Alert status="warning" borderRadius="md" fontSize="sm" py={2}>
+              <AlertIcon />
+              <AlertDescription>
+                {state.mode === "passphrase"
+                  ? <Trans>Passphrase must be at least 8 characters</Trans>
+                  : <Trans>Add at least one recipient</Trans>}
+              </AlertDescription>
+            </Alert>
           )}
 
           {(progress || isEncrypting || error) && (
-            <div className="progress-container">
-              <EncryptionProgress
-                progress={progress ?? null}
-                operation="encrypting"
-                error={error}
-              />
-            </div>
+            <EncryptionProgress
+              progress={progress ?? null}
+              operation="encrypting"
+              error={error}
+            />
           )}
-        </>
+        </VStack>
       )}
-
-      <style>{`
-        .encryption-section {
-          margin: 16px 0;
-          padding: 16px;
-          background: linear-gradient(
-            135deg,
-            rgba(102, 126, 234, 0.03) 0%,
-            rgba(118, 75, 162, 0.03) 100%
-          );
-          border-radius: 12px;
-          border: 1px solid rgba(102, 126, 234, 0.15);
-        }
-
-        .add-recipient-form {
-          margin-top: 12px;
-          padding: 12px;
-          background: white;
-          border-radius: 8px;
-          border: 1px solid #e0e0e0;
-        }
-
-        .form-label {
-          display: block;
-          font-size: 13px;
-          font-weight: 600;
-          color: #333;
-          margin-bottom: 8px;
-        }
-
-        .form-input-row {
-          display: flex;
-          gap: 8px;
-        }
-
-        .form-input {
-          flex: 1;
-          padding: 8px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-        }
-
-        .form-input:focus {
-          outline: none;
-          border-color: #667eea;
-        }
-
-        .form-input-error {
-          border-color: #e53e3e;
-        }
-
-        .recipient-key-error {
-          margin: 4px 0 0;
-          font-size: 12px;
-          color: #e53e3e;
-        }
-
-        .btn-add,
-        .btn-cancel {
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-weight: 500;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .btn-add {
-          background: #667eea;
-          border: none;
-          color: white;
-        }
-
-        .btn-add:hover:not(:disabled) {
-          opacity: 0.9;
-        }
-
-        .btn-add:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .btn-cancel {
-          background: white;
-          border: 1px solid #ddd;
-          color: #666;
-        }
-
-        .btn-cancel:hover:not(:disabled) {
-          background: #f5f5f5;
-        }
-
-        .validation-warning {
-          margin-top: 12px;
-          padding: 8px 12px;
-          background: rgba(255, 193, 7, 0.1);
-          border-left: 3px solid #ffc107;
-          border-radius: 4px;
-          font-size: 13px;
-          color: #856404;
-        }
-
-        .progress-container {
-          margin-top: 12px;
-        }
-      `}</style>
-    </div>
+    </VStack>
   );
 }
 

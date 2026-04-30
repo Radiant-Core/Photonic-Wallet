@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo } from "react";
-import { t } from "@lingui/macro";
+import { t, Trans } from "@lingui/macro";
 import {
   Button,
   Center,
@@ -16,14 +16,17 @@ import {
   useToast,
   Code,
   HStack,
+  VStack,
   Icon,
   useClipboard,
   Alert,
   AlertIcon,
   AlertDescription,
+  Box,
+  Collapse,
 } from "@chakra-ui/react";
-import { MdKey, MdContentCopy, MdCheck } from "react-icons/md";
-import { Trans } from "@lingui/macro";
+import { MdKey, MdContentCopy, MdCheck, MdQrCode, MdShare } from "react-icons/md";
+import { QRCodeSVG } from "qrcode.react";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { bytesToHex } from "@noble/hashes/utils";
 import PasswordModal from "@app/components/PasswordModal";
@@ -49,6 +52,7 @@ const normalizeFeeRate = (value: string | number) => {
 
 export default function WalletSettings() {
   const disclosure = useDisclosure();
+  const qrDisclosure = useDisclosure();
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [mnemonic, setMnemonic] = useState("");
   const passwordSuccess = (walletMnemonic: string) => {
@@ -131,9 +135,8 @@ export default function WalletSettings() {
           </Trans>
         </Text>
         {encPubkeyHex ? (
-          <>
+          <VStack align="stretch" spacing={3} mt={3}>
             <Code
-              mt={3}
               p={2}
               borderRadius="md"
               fontSize="xs"
@@ -145,7 +148,7 @@ export default function WalletSettings() {
             >
               {encPubkeyHex}
             </Code>
-            <HStack mt={2}>
+            <HStack spacing={2}>
               <Button
                 size="xs"
                 variant="outline"
@@ -154,8 +157,51 @@ export default function WalletSettings() {
               >
                 {hasCopiedEncKey ? t`Copied!` : t`Copy`}
               </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                leftIcon={<Icon as={MdQrCode} />}
+                onClick={qrDisclosure.onToggle}
+              >
+                {qrDisclosure.isOpen ? t`Hide QR` : t`Show QR`}
+              </Button>
+              {typeof navigator.share === "function" && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  leftIcon={<Icon as={MdShare} />}
+                  onClick={() =>
+                    navigator.share({
+                      title: t`My Encryption Public Key`,
+                      text: encPubkeyHex,
+                    })
+                  }
+                >
+                  {t`Share`}
+                </Button>
+              )}
             </HStack>
-          </>
+            <Collapse in={qrDisclosure.isOpen} animateOpacity>
+              <Box
+                display="inline-flex"
+                p={3}
+                bg="white"
+                borderRadius="md"
+                borderWidth={1}
+                borderColor="whiteAlpha.300"
+              >
+                <QRCodeSVG
+                  value={encPubkeyHex}
+                  size={160}
+                  level="M"
+                  includeMargin={false}
+                />
+              </Box>
+              <Text fontSize="xs" color="gray.400" mt={2}>
+                <Trans>Recipient can scan this to add your key without typing</Trans>
+              </Text>
+            </Collapse>
+          </VStack>
         ) : (
           <Alert status="info" mt={3} borderRadius="md" fontSize="sm">
             <AlertIcon as={MdKey} />

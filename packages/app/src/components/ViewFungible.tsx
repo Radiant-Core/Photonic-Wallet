@@ -159,7 +159,6 @@ export default function ViewFungible({
     "image/webp",
     "image/gif",
     "image/avif",
-    "image/svg+xml",
   ].includes(token.embed?.t || "");
 
   return (

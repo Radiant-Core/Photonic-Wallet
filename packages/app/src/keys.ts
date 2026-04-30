@@ -10,14 +10,15 @@ import { HDKey } from "@scure/bip32";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import {
   EncryptedData,
-  decrypt,
-  encrypt,
+  decryptWallet,
+  encryptWallet,
   buildHybridKeyPairFromPrivateKey,
   deriveKeyHKDF,
   type HybridKeyPair,
 } from "@lib/encryption";
 import db from "@app/db";
 import { NetworkKey } from "@lib/types";
+import { SavedWallet } from "@app/types";
 
 const derivationPath = "m/44'/0'/0'/0/0";
 const swapDerivationPath = "m/44'/0'/0'/0/1";
@@ -59,11 +60,16 @@ export function deriveEncryptionKeypair(mnemonic: string): HybridKeyPair {
 }
 
 export async function decryptKeys(net: NetworkKey, password: string) {
-  const data = (await db.kvp.get("wallet")) as EncryptedData;
+  const data = (await db.kvp.get("wallet")) as SavedWallet & { version?: number };
   if (!data) {
     throw new Error("Failed to unlock");
   }
-  const decrypted = await decrypt(data, password);
+  const decrypted = await decryptWallet(data, password);
+  // Upgrade legacy v1 (AES-128-CTR) blobs to v2 (AES-256-GCM) transparently
+  if (!data.version) {
+    const upgraded = await encryptWallet(decrypted, password);
+    await db.kvp.put({ ...upgraded, address: data.address, swapAddress: data.swapAddress, net: data.net }, "wallet");
+  }
   const mnemonic = entropyToMnemonic(decrypted, wordlist);
   const seed = mnemonicToSeedSync(mnemonic);
   const hdKey = HDKey.fromMasterSeed(seed);
@@ -118,7 +124,7 @@ export async function recoverKeys(
   const swapAddress = swapPrivKey?.toAddress().toString() as string;
   const entropy = mnemonicToEntropy(mnemonic, wordlist);
   await db.kvp.put(
-    { ...(await encrypt(entropy, password)), address, swapAddress, net: net },
+    { ...(await encryptWallet(entropy, password)), address, swapAddress, net: net },
     "wallet"
   );
 

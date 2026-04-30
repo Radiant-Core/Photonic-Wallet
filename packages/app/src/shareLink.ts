@@ -60,7 +60,7 @@ export function parseShareInput(input: string): CekShareToken | null {
   // (c) Raw JSON fallback
   try {
     const obj = JSON.parse(trimmed) as CekShareToken;
-    if (obj.v === 1 && obj.wrapped_cek && obj.epk) return obj;
+    if (obj.v === 1 && obj.wrapped_cek && obj.epk && obj.cek_hash) return obj;
   } catch { /* not JSON */ }
 
   return null;
@@ -72,7 +72,7 @@ function decodeShareB64(b64: string): CekShareToken | null {
     const padded = b64.replace(/-/g, "+").replace(/_/g, "/");
     const json = atob(padded);
     const obj = JSON.parse(json) as CekShareToken;
-    if (obj.v === 1 && obj.wrapped_cek && obj.epk) return obj;
+    if (obj.v === 1 && obj.wrapped_cek && obj.epk && obj.cek_hash) return obj;
   } catch { /* invalid */ }
   return null;
 }

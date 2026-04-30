@@ -28,13 +28,24 @@ const POLY1305_TAG_SIZE = 16;
 // Note: ML-KEM-768 (post-quantum) temporarily removed pending library support
 // Will be added as hybrid X25519+ML-KEM when available
 
-// Scrypt parameters for passphrase-based keys
+// Scrypt parameters for passphrase-based keys (NFT content encryption)
 const SCRYPT_PARAMS = {
   dkLen: 32,
-  N: 65536, // 2^16
+  N: 131072, // 2^17 — OWASP recommended minimum
   r: 8,
   p: 1,
 };
+
+// Scrypt parameters for wallet key storage — same strength, explicit constant
+const WALLET_SCRYPT_PARAMS = {
+  dkLen: 32,
+  N: 131072, // 2^17
+  r: 8,
+  p: 1,
+};
+
+// Version tag written into new wallet blobs so we can distinguish format on load
+const WALLET_V2_MAGIC = 0x02;
 
 // ============================================================================
 // Legacy Types (backwards compatibility)
@@ -631,58 +642,115 @@ export function fromBase64(base64: string): Uint8Array {
 }
 
 // ============================================================================
-// Legacy Exports (backwards compatibility)
+// Wallet Storage Encryption (AES-256-GCM, scrypt N=2^17)
 // ============================================================================
 
 /**
- * Legacy encrypt function (AES-CTR with scrypt)
- * @deprecated Use encryptChunked + wrapCEK for new implementations
+ * Encrypt wallet entropy for storage.
+ * Uses AES-256-GCM (authenticated) with scrypt N=2^17.
+ * The returned EncryptedData is wire-compatible with the existing SavedWallet
+ * shape stored in IndexedDB, with `mac` repurposed as the GCM auth tag and
+ * `iv` as the 12-byte GCM nonce.  A `version` field (0x02) is written so
+ * decryptWallet can distinguish new blobs from old AES-CTR ones.
  */
-export async function encrypt(
+export async function encryptWallet(
   data: Uint8Array,
   password: string
-): Promise<EncryptedData> {
-  const { key, salt } = deriveKeyScrypt(password);
-  const iv = randomBytes(16);
+): Promise<EncryptedData & { version: number }> {
+  const { key, salt } = deriveKeyScryptWallet(password);
+  const iv = randomBytes(12); // 96-bit nonce for GCM
 
   const { crypto } = globalThis;
   const importedKey = await crypto.subtle.importKey(
     "raw",
-    key.slice(0, 16),
-    { name: "AES-CTR" },
+    key.slice().buffer,
+    { name: "AES-GCM" },
     false,
     ["encrypt"]
   );
 
-  const ciphertext = await crypto.subtle.encrypt(
-    {
-      name: "AES-CTR",
-      counter: iv as BufferSource,
-      length: 64,
-    },
+  // AES-GCM output = ciphertext || 16-byte auth tag
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv.slice().buffer, tagLength: 128 },
     importedKey,
-    data as BufferSource
+    data.slice().buffer
   );
 
-  const mac = sha256(concatBytes(key.slice(16, 32), new Uint8Array(ciphertext)));
+  const encBytes = new Uint8Array(encrypted);
+  const ciphertext = encBytes.slice(0, -16);
+  const tag = encBytes.slice(-16);
 
   return {
+    version: WALLET_V2_MAGIC,
     ciphertext,
     salt,
     iv,
-    mac,
+    mac: tag, // GCM auth tag stored in mac field
   };
 }
 
 /**
- * Legacy decrypt function
- * @deprecated Use decryptChunked + unwrapCEK for new implementations
+ * Decrypt wallet entropy.
+ * Handles both v2 (AES-256-GCM) and legacy v1 (AES-128-CTR) blobs.
  */
-export async function decrypt(data: EncryptedData, password: string): Promise<Uint8Array> {
+export async function decryptWallet(
+  data: EncryptedData & { version?: number },
+  password: string
+): Promise<Uint8Array> {
+  if ((data as any).version === WALLET_V2_MAGIC) {
+    return _decryptWalletV2(data, password);
+  }
+  return _decryptWalletV1(data, password);
+}
+
+async function _decryptWalletV2(
+  data: EncryptedData,
+  password: string
+): Promise<Uint8Array> {
+  const { key } = deriveKeyScryptWallet(password, data.salt);
+
+  const { crypto } = globalThis;
+  const importedKey = await crypto.subtle.importKey(
+    "raw",
+    key.slice().buffer,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"]
+  );
+
+  // Normalize EncryptedData fields (typed as ArrayBuffer|Uint8Array) to Uint8Array
+  const toU8 = (v: ArrayBuffer | Uint8Array): Uint8Array =>
+    v instanceof Uint8Array ? v : new Uint8Array(v);
+
+  // Reassemble ciphertext || tag
+  const ct = toU8(data.ciphertext);
+  const tag = toU8(data.mac);
+  const combined = new Uint8Array(ct.byteLength + tag.byteLength);
+  combined.set(ct);
+  combined.set(tag, ct.byteLength);
+
+  try {
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: toU8(data.iv).slice().buffer, tagLength: 128 },
+      importedKey,
+      combined.slice().buffer
+    );
+    return new Uint8Array(decrypted);
+  } catch {
+    throw new Error("Password incorrect");
+  }
+}
+
+async function _decryptWalletV1(
+  data: EncryptedData,
+  password: string
+): Promise<Uint8Array> {
   const { key } = deriveKeyScrypt(password, data.salt);
 
-  const mac = sha256(concatBytes(key.slice(16, 32), new Uint8Array(data.ciphertext)));
-  if (Buffer.compare(Buffer.from(data.mac), Buffer.from(mac)) !== 0) {
+  const toU8v1 = (v: ArrayBuffer | Uint8Array): Uint8Array =>
+    v instanceof Uint8Array ? v : new Uint8Array(v);
+  const mac = sha256(concatBytes(key.slice(16, 32), toU8v1(data.ciphertext)));
+  if (Buffer.compare(Buffer.from(toU8v1(data.mac)), Buffer.from(mac)) !== 0) {
     throw new Error("Password incorrect");
   }
 
@@ -696,14 +764,41 @@ export async function decrypt(data: EncryptedData, password: string): Promise<Ui
   );
 
   const decrypted = await crypto.subtle.decrypt(
-    {
-      name: "AES-CTR",
-      counter: data.iv as BufferSource,
-      length: 128,
-    },
+    { name: "AES-CTR", counter: data.iv as BufferSource, length: 128 },
     importedKey,
     data.ciphertext as BufferSource
   );
 
   return new Uint8Array(decrypted);
 }
+
+/**
+ * Derive key using scrypt specifically for wallet storage (N=2^17).
+ */
+function deriveKeyScryptWallet(
+  password: string,
+  salt?: Uint8Array
+): { key: Uint8Array; salt: Uint8Array } {
+  const usedSalt = salt ?? randomBytes(32);
+  const key = scrypt(
+    new TextEncoder().encode(password),
+    usedSalt,
+    WALLET_SCRYPT_PARAMS
+  );
+  return { key, salt: usedSalt };
+}
+
+// ============================================================================
+// Legacy Exports (backwards compatibility — kept for decrypt-only of old blobs)
+// ============================================================================
+
+/**
+ * @deprecated Use encryptWallet for new wallet storage.
+ * Kept only so old code that imported `encrypt` still compiles during migration.
+ */
+export const encrypt = encryptWallet;
+
+/**
+ * @deprecated Use decryptWallet which handles both v1 and v2 blobs.
+ */
+export const decrypt = decryptWallet;
