@@ -169,17 +169,31 @@ const worker = {
     }
   },
   async checkWaveAvailable(name: string): Promise<boolean> {
-    const result = await electrum.client?.request(
-      "wave.check_available",
-      name
-    ) as boolean | undefined;
+    try {
+      const result = await electrum.client?.request(
+        "wave.check_available",
+        name
+      ) as boolean | undefined;
 
-    // If server returns undefined/null, the method is not supported
-    if (result === undefined || result === null) {
-      throw new Error("Server does not support WAVE availability checking");
+      // If server returns undefined/null, the method is not supported
+      if (result === undefined || result === null) {
+        throw new Error("Server does not support WAVE availability checking");
+      }
+
+      return result;
+    } catch (error: any) {
+      // Handle both RPC errors (unknown method) and connection errors
+      const errorMessage = error?.message || error?.toString() || "";
+      if (
+        errorMessage.includes("unknown method") ||
+        errorMessage.includes("not supported") ||
+        errorMessage.includes("method not found")
+      ) {
+        throw new Error("Server does not support WAVE availability checking");
+      }
+      // Re-throw other errors
+      throw error;
     }
-
-    return result;
   },
 };
 
