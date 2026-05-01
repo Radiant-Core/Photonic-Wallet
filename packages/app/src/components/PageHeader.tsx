@@ -62,7 +62,7 @@ export default function PageHeader({
         <IconButton
           icon={<HamburgerIcon />}
           display={{ base: "flex", lg: "none" }}
-          aria-label={t`Open menu`}
+          aria-label={"Open menu"}
           variant="ghost"
           onClick={() => {
             openMenu.value = true;

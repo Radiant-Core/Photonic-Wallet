@@ -7,9 +7,9 @@ export default function About() {
     <Container maxW="container.lg">
       <Text>Photonic Wallet</Text>
       <Text mb={4}>
-        {t`Version:`} {APP_VERSION}
+        {"Version:"} {APP_VERSION}
       </Text>
-      <Heading mb={4} size="md">{t`License`}</Heading>
+      <Heading mb={4} size="md">{"License"}</Heading>
       <License />
     </Container>
   );

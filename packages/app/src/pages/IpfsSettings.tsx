@@ -36,7 +36,7 @@ export default function IpfsSettings() {
       keys
     );
     toast({
-      title: t`Saved`,
+      title: "Saved",
       status: "success",
     });
   };
@@ -55,43 +55,39 @@ export default function IpfsSettings() {
     <Container as={Grid} maxW="container.lg" gap={4} pt={8}>
       <FormSection>
         <FormControl>
-          <FormLabel>{t`NFT.Storage API Key`}</FormLabel>
+          <FormLabel>{"NFT.Storage API Key"}</FormLabel>
           <Textarea
             ref={nftStorageApiKeyRef}
-            placeholder={t`API key`}
+            placeholder={"API key"}
             name="nftStorageKey"
             height={{ base: "200px", md: "120px" }}
             defaultValue={apiKey}
           />
           <FormHelperText>
-            <Trans>
-              An NFT.Storage API key is required for uploading files to IPFS.
-              Generate a key at{" "}
-              <Link to="https://nft.storage" target="_blank">
-                https://nft.storage
-              </Link>
-              .
-            </Trans>
+            An NFT.Storage API key is required for uploading files to IPFS.
+            Generate a key at{" "}
+            <Link to="https://nft.storage" target="_blank">
+              https://nft.storage
+            </Link>
+            .
           </FormHelperText>
         </FormControl>
         <FormControl>
-          <FormLabel>{t`Method to resolve IPFS token content`}</FormLabel>
-          <Select ref={ipfsMethodRef} defaultValue={ipfsMethod || "gateway"}>
-            <option value="gateway">{t`Gateway`}</option>
-            <option value="default">{t`Default`}</option>
+          <FormLabel>{"Method to resolve IPFS token content"}</FormLabel>
+          <Select ref={ipfsMethodRef} defaultValue={ipfsMethod || "gateway"} aria-label="Method to resolve IPFS token content">
+            <option value="gateway">{"Gateway"}</option>
+            <option value="default">{"Default"}</option>
           </Select>
           <FormHelperText>
-            <Trans>
-              Default setting will use <Code>ipfs://</Code> URLs which will be
-              handled according to your browser's configuration
-            </Trans>
+            Default setting will use <Code>ipfs://</Code> URLs which will be
+            handled according to your browser's configuration
           </FormHelperText>
         </FormControl>
         <FormControl>
-          <FormLabel>{t`IPFS Gateway URL`}</FormLabel>
+          <FormLabel>{"IPFS Gateway URL"}</FormLabel>
           <Input
             ref={ipfsGatewayUrlRef}
-            placeholder={t`IPFS gateway`}
+            placeholder={"IPFS gateway"}
             name="gateway"
             defaultValue={ipfsGatewayUrl}
           />
@@ -99,7 +95,7 @@ export default function IpfsSettings() {
       </FormSection>
       <Flex justifyContent="center" py={8} mb={16}>
         <Button size="lg" w="240px" maxW="100%" shadow="dark-md" onClick={save}>
-          {t`Save`}
+          {"Save"}
         </Button>
       </Flex>
     </Container>

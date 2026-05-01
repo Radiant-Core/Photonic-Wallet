@@ -109,6 +109,24 @@ body :not(:hover, :focus, :focus-within)::-webkit-scrollbar-thumb {
   color: var(--strength-color, #e2e8f0);
 }
 
+/* Error page */
+.error-page {
+  padding: 24px;
+  color: #fff;
+  font-family: monospace;
+}
+
+.error-page-pre {
+  white-space: pre-wrap;
+  margin-top: 12px;
+}
+
+.error-page-stack {
+  white-space: pre-wrap;
+  margin-top: 12px;
+  opacity: 0.6;
+}
+
 /* days-one-latin-400-normal */
 @font-face {
   font-family: "Days One";

@@ -8,7 +8,7 @@ export default function Placeholder() {
     <ContentContainer>
       <PageHeader showLogo />
       <Flex flexDirection="column" alignItems="center" pt="33vh">
-        <Text fontSize="2xl">{t`This feature is coming soon`}</Text>
+        <Text fontSize="2xl">{"This feature is coming soon"}</Text>
       </Flex>
     </ContentContainer>
   );

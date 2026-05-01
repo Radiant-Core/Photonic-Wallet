@@ -316,17 +316,17 @@ export default function VaultPage() {
   const locktimeHint = useMemo(() => {
     if (mode === "block") {
       const lt = parseInt(locktime, 10);
-      if (!currentHeight) return t`Waiting for block data…`;
-      if (!lt) return `${t`Current block`}: ${currentHeight.toLocaleString()}`;
+      if (!currentHeight) return "Waiting for block data…";
+      if (!lt) return `${"Current block"}: ${currentHeight.toLocaleString()}`;
       const diff = lt - currentHeight;
-      if (diff <= 0) return `⚠ ${t`Must be greater than current block`} (${currentHeight.toLocaleString()})`;
-      return `${t`Current block`}: ${currentHeight.toLocaleString()} — ${t`locks for`} ${blocksToDuration(diff)}`;
+      if (diff <= 0) return `⚠ ${"Must be greater than current block"} (${currentHeight.toLocaleString()})`;
+      return `${"Current block"}: ${currentHeight.toLocaleString()} — ${"locks for"} ${blocksToDuration(diff)}`;
     }
     const lt = parseInt(locktime, 10);
-    if (!lt) return `${t`Current time`}: ${new Date().toLocaleString()}`;
+    if (!lt) return `${"Current time"}: ${new Date().toLocaleString()}`;
     const diff = lt - currentTimestamp;
-    if (diff <= 0) return `⚠ ${t`Must be in the future`}`;
-    return `${t`Current time`}: ${new Date().toLocaleString()} — ${t`locks for`} ${secsToDuration(diff)}`;
+    if (diff <= 0) return `⚠ ${"Must be in the future"}`;
+    return `${"Current time"}: ${new Date().toLocaleString()} — ${"locks for"} ${secsToDuration(diff)}`;
   }, [mode, locktime, currentHeight, currentTimestamp]);
 
   // ────────────────────────────────────────────────────────
@@ -449,7 +449,7 @@ export default function VaultPage() {
 
     toast({
       title: preset.label,
-      description: `${count} ${t`tranches generated`}`,
+      description: `${count} ${"tranches generated"}`,
       status: "info",
       duration: 2000,
     });
@@ -472,7 +472,7 @@ export default function VaultPage() {
     }
 
     if (!start || !step || step <= 0) {
-      toast({ title: t`Error`, description: t`Fill in start and interval`, status: "error" });
+      toast({ title: "Error", description: "Fill in start and interval", status: "error" });
       return;
     }
 
@@ -565,7 +565,7 @@ export default function VaultPage() {
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_create" });
 
         toast({
-          title: t`Vault Created`,
+          title: "Vault Created",
           description: txid,
           status: "success",
           duration: 8000,
@@ -628,7 +628,7 @@ export default function VaultPage() {
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_vesting" });
 
         toast({
-          title: t`Vesting Schedule Created`,
+          title: "Vesting Schedule Created",
           description: `${txid} — ${vestingTranches.length} tranches`,
           status: "success",
           duration: 8000,
@@ -643,7 +643,7 @@ export default function VaultPage() {
       }
     } catch (err: unknown) {
       toast({
-        title: t`Error`,
+        title: "Error",
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
@@ -682,7 +682,7 @@ export default function VaultPage() {
       await db.broadcast.put({ txid, date: Date.now(), description: "vault_claim" });
 
       toast({
-        title: t`Vault Claimed`,
+        title: "Vault Claimed",
         description: txid,
         status: "success",
         duration: 8000,
@@ -690,7 +690,7 @@ export default function VaultPage() {
       });
     } catch (err: unknown) {
       toast({
-        title: t`Claim Failed`,
+        title: "Claim Failed",
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
@@ -703,7 +703,7 @@ export default function VaultPage() {
   return (
     <ContentContainer>
       <Container maxW="container.md" px={4}>
-      <PageHeader>{t`Vault`}</PageHeader>
+      <PageHeader>{"Vault"}</PageHeader>
 
       {/* Tabs */}
       <HStack mb={6} gap={2}>
@@ -712,14 +712,14 @@ export default function VaultPage() {
           variant={tab === "list" ? "primary" : "ghost"}
           onClick={() => setTab("list")}
         >
-          {t`My Vaults`}
+          {"My Vaults"}
         </Button>
         <Button
           size="sm"
           variant={tab === "create" ? "primary" : "ghost"}
           onClick={() => setTab("create")}
         >
-          {t`Create Vault`}
+          {"Create Vault"}
         </Button>
       </HStack>
 
@@ -727,7 +727,7 @@ export default function VaultPage() {
       {tab === "create" && (
         <VStack gap={4} align="stretch">
           <FormControl>
-            <FormLabel>{t`Recipient Address`}</FormLabel>
+            <FormLabel>{"Recipient Address"}</FormLabel>
             <HStack>
               <Input
                 value={recipient}
@@ -737,17 +737,18 @@ export default function VaultPage() {
                 size="sm"
               />
               <Button size="sm" onClick={fillSelf} variant="solid">
-                {t`Self`}
+                {"Self"}
               </Button>
             </HStack>
           </FormControl>
 
           <SimpleGrid columns={2} gap={4}>
             <FormControl>
-              <FormLabel>{t`Asset Type`}</FormLabel>
+              <FormLabel>{"Asset Type"}</FormLabel>
               <Select
                 size="sm"
                 value={assetType}
+                aria-label="Asset Type"
                 onChange={(e) =>
                   setAssetType(e.target.value as VaultAssetType)
                 }
@@ -759,21 +760,22 @@ export default function VaultPage() {
             </FormControl>
 
             <FormControl>
-              <FormLabel>{t`Lock Mode`}</FormLabel>
+              <FormLabel>{"Lock Mode"}</FormLabel>
               <Select
                 size="sm"
                 value={mode}
+                aria-label="Lock Mode"
                 onChange={(e) => setMode(e.target.value as VaultMode)}
               >
-                <option value="block">{t`Block Height`}</option>
-                <option value="time">{t`Unix Timestamp`}</option>
+                <option value="block">{"Block Height"}</option>
+                <option value="time">{"Unix Timestamp"}</option>
               </Select>
             </FormControl>
           </SimpleGrid>
 
           {assetType !== "rxd" && (
             <FormControl>
-              <FormLabel>{t`Token Ref (LE hex)`}</FormLabel>
+              <FormLabel>{"Token Ref (LE hex)"}</FormLabel>
               <Input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
@@ -789,7 +791,7 @@ export default function VaultPage() {
               isChecked={vesting}
               onChange={(e) => setVesting(e.target.checked)}
             />
-            <FormLabel mb={0}>{t`Vesting Schedule`}</FormLabel>
+            <FormLabel mb={0}>{"Vesting Schedule"}</FormLabel>
           </FormControl>
 
           {!vesting ? (
@@ -798,7 +800,7 @@ export default function VaultPage() {
               <SimpleGrid columns={2} gap={4}>
                 <FormControl isInvalid={locktimeInvalid}>
                   <FormLabel>
-                    {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
+                    {mode === "block" ? "Lock Until Block" : "Lock Until (Unix)"}
                   </FormLabel>
                   <Input
                     size="sm"
@@ -817,7 +819,7 @@ export default function VaultPage() {
                   </FormHelperText>
                 </FormControl>
                 <FormControl>
-                  <FormLabel>{t`Amount (RXD)`}</FormLabel>
+                  <FormLabel>{"Amount (RXD)"}</FormLabel>
                   <Input
                     size="sm"
                     value={amount}
@@ -830,7 +832,7 @@ export default function VaultPage() {
               {/* Date picker for timestamp mode */}
               {mode === "time" && (
                 <FormControl>
-                  <FormLabel>{t`Pick a Date`}</FormLabel>
+                  <FormLabel>{"Pick a Date"}</FormLabel>
                   <Input
                     type="datetime-local"
                     size="sm"
@@ -846,7 +848,7 @@ export default function VaultPage() {
               {/* Mode toggle + total amount (percentage mode) */}
               <HStack justify="space-between" align="center">
                 <Heading size="xs">
-                  {t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})
+                  {"Tranches"} ({tranches.length}/{VAULT_MAX_TRANCHES})
                 </Heading>
                 <HStack gap={1}>
                   <Button
@@ -854,14 +856,14 @@ export default function VaultPage() {
                     variant={vestingInputMode === "manual" ? "solid" : "ghost"}
                     onClick={() => setVestingInputMode("manual")}
                   >
-                    {t`Manual`}
+                    {"Manual"}
                   </Button>
                   <Button
                     size="xs"
                     variant={vestingInputMode === "percentage" ? "solid" : "ghost"}
                     onClick={() => setVestingInputMode("percentage")}
                   >
-                    {t`Percentage`}
+                    {"Percentage"}
                   </Button>
                 </HStack>
               </HStack>
@@ -873,7 +875,7 @@ export default function VaultPage() {
                 borderColor="whiteAlpha.200"
                 borderRadius="md"
               >
-                <Text fontSize="xs" fontWeight="bold" mb={2}>{t`Preset Templates`}</Text>
+                <Text fontSize="xs" fontWeight="bold" mb={2}>{"Preset Templates"}</Text>
                 <SimpleGrid columns={2} gap={2}>
                   {PRESETS.map((p) => (
                     <Button
@@ -897,7 +899,7 @@ export default function VaultPage() {
 
               {vestingInputMode === "percentage" && (
                 <FormControl>
-                  <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
+                  <FormLabel>{"Total Vesting Amount (RXD)"}</FormLabel>
                   <Input
                     size="sm"
                     value={totalVestingAmount}
@@ -916,7 +918,7 @@ export default function VaultPage() {
               >
                 <HStack mb={2}>
                   <Icon as={TbWand} />
-                  <Text fontSize="xs" fontWeight="bold">{t`Auto-fill Schedule`}</Text>
+                  <Text fontSize="xs" fontWeight="bold">{"Auto-fill Schedule"}</Text>
                 </HStack>
                 <SimpleGrid columns={2} gap={2}>
                   {mode === "block" ? (
@@ -924,7 +926,7 @@ export default function VaultPage() {
                       size="xs"
                       value={intervalStart}
                       onChange={(e) => setIntervalStart(e.target.value)}
-                      placeholder={t`Start block` + (currentHeight ? ` (${t`now`}: ${currentHeight})` : "")}
+                      placeholder={"Start block" + (currentHeight ? ` (${"now"}: ${currentHeight})` : "")}
                     />
                   ) : (
                     <Input
@@ -939,18 +941,18 @@ export default function VaultPage() {
                     value={intervalStep}
                     onChange={(e) => setIntervalStep(e.target.value)}
                     placeholder={
-                      mode === "block" ? t`Interval (blocks)` : t`Interval (seconds)`
+                      mode === "block" ? "Interval (blocks)" : "Interval (seconds)"
                     }
                   />
                 </SimpleGrid>
                 {mode === "block" && intervalStep && (
                   <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {t`Interval`}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
+                    {"Interval"}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
                   </Text>
                 )}
                 {mode === "time" && intervalStep && (
                   <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {t`Interval`}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
+                    {"Interval"}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
                   </Text>
                 )}
                 <Button
@@ -960,7 +962,7 @@ export default function VaultPage() {
                   onClick={generateIntervalTranches}
                   mt={2}
                 >
-                  {t`Generate`}
+                  {"Generate"}
                 </Button>
               </Box>
 
@@ -988,7 +990,7 @@ export default function VaultPage() {
                       onChange={(e) =>
                         updateTranche(i, "value", e.target.value)
                       }
-                      placeholder={t`Amount (RXD)`}
+                      placeholder={"Amount (RXD)"}
                     />
                   ) : (
                     <Input
@@ -998,7 +1000,7 @@ export default function VaultPage() {
                       onChange={(e) =>
                         updateTranche(i, "pct", e.target.value)
                       }
-                      placeholder={`% ${t`of total`}`}
+                      placeholder={`% ${"of total"}`}
                     />
                   )}
                   {vestingInputMode === "percentage" && (
@@ -1029,7 +1031,7 @@ export default function VaultPage() {
                   onClick={addTranche}
                   alignSelf="flex-start"
                 >
-                  {t`Add Tranche`}
+                  {"Add Tranche"}
                 </Button>
               )}
 
@@ -1038,15 +1040,15 @@ export default function VaultPage() {
                 <Box>
                   <HStack justify="space-between" mb={1}>
                     <Text fontSize="xs" color="whiteAlpha.600">
-                      {t`Allocated`}: {pctAllocated.toFixed(1)}%
+                      {"Allocated"}: {pctAllocated.toFixed(1)}%
                     </Text>
                     <HStack gap={2}>
                       <Text fontSize="xs" color="whiteAlpha.600">
-                        {t`Remaining`}: {pctRemaining.toFixed(1)}%
+                        {"Remaining"}: {pctRemaining.toFixed(1)}%
                       </Text>
                       {pctRemaining > 0 && (
                         <Button size="xs" variant="ghost" onClick={autoFillLastPct}>
-                          {t`Auto-fill`}
+                          {"Auto-fill"}
                         </Button>
                       )}
                     </HStack>
@@ -1069,7 +1071,7 @@ export default function VaultPage() {
           )}
 
           <FormControl>
-            <FormLabel>{t`Label (optional)`}</FormLabel>
+            <FormLabel>{"Label (optional)"}</FormLabel>
             <Input
               size="sm"
               value={label}
@@ -1084,7 +1086,7 @@ export default function VaultPage() {
             onClick={handleCreate}
             mt={2}
           >
-            {vesting ? t`Create Vesting Schedule` : t`Lock in Vault`}
+            {vesting ? "Create Vesting Schedule" : "Lock in Vault"}
           </Button>
         </VStack>
       )}
@@ -1101,34 +1103,34 @@ export default function VaultPage() {
                   isChecked={showClaimed}
                   onChange={(e) => setShowClaimed(e.target.checked)}
                 />
-                <FormLabel mb={0} fontSize="xs">{t`Show Claimed`}</FormLabel>
+                <FormLabel mb={0} fontSize="xs">{"Show Claimed"}</FormLabel>
               </FormControl>
               <Text fontSize="xs" color="whiteAlpha.500">
-                {vaults.filter((v) => !v.claimed).length} {t`active`}
-                {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${t`claimed`}`}
+                {vaults.filter((v) => !v.claimed).length} {"active"}
+                {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${"claimed"}`}
               </Text>
             </HStack>
           )}
 
           {!vaults || vaults.length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
-              {t`No vaults yet. Create one to get started.`}
+              {"No vaults yet. Create one to get started."}
             </Text>
           ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
-              {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
+              {"All vaults claimed. Toggle \u201cShow Claimed\u201d to view history."}
             </Text>
           ) : (
             <Table size="sm" variant="simple">
               <Thead>
                 <Tr>
                   {([
-                    ["status",    t`Status`],
-                    ["type",      t`Type`],
-                    ["value",     t`Value`],
-                    ["locktime",  t`Unlock At`],
-                    ["remaining", t`Remaining`],
-                    ["label",     t`Label`],
+                    ["status",    "Status"],
+                    ["type",      "Type"],
+                    ["value",     "Value"],
+                    ["locktime",  "Unlock At"],
+                    ["remaining", "Remaining"],
+                    ["label",     "Label"],
                   ] as [SortCol, string][]).map(([col, label]) => (
                     <Th
                       key={col}
@@ -1170,17 +1172,17 @@ export default function VaultPage() {
                       <Td>
                         {v.claimed ? (
                           <Tag size="sm" colorScheme="gray">
-                            {t`Claimed`}
+                            {"Claimed"}
                           </Tag>
                         ) : unlockable ? (
                           <Tag size="sm" colorScheme="green">
                             <Icon as={TbLockOpen} mr={1} />
-                            {t`Unlockable`}
+                            {"Unlockable"}
                           </Tag>
                         ) : (
                           <Tag size="sm" colorScheme="orange">
                             <Icon as={TbLock} mr={1} />
-                            {t`Locked`}
+                            {"Locked"}
                           </Tag>
                         )}
                       </Td>
@@ -1193,7 +1195,7 @@ export default function VaultPage() {
                         {v.claimed ? (
                           "—"
                         ) : remaining.value === 0 ? (
-                          t`Now`
+                          "Now"
                         ) : remaining.unit === "blocks" ? (
                           <Tooltip
                             label={`${remaining.value.toLocaleString()} blocks`}
@@ -1232,12 +1234,12 @@ export default function VaultPage() {
                                 variant="primary"
                                 onClick={() => handleClaim(v)}
                               >
-                                {t`Claim`}
+                                {"Claim"}
                               </Button>
                             ) : (
-                              <Tooltip label={t`You are not the recipient`} placement="top">
+                              <Tooltip label={"You are not the recipient"} placement="top">
                                 <Button size="xs" variant="outline" isDisabled>
-                                  {t`Claim`}
+                                  {"Claim"}
                                 </Button>
                               </Tooltip>
                             )
@@ -1245,8 +1247,8 @@ export default function VaultPage() {
                           {!v.claimed && !unlockable && currentHeight > 0 && (
                             <Tooltip
                               label={v.mode === "block"
-                                ? `${t`Unlocks at block`} ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} ${t`remaining`}`
-                                : `${t`Unlocks`} ${new Date(v.locktime * 1000).toLocaleString()}`
+                                ? `${"Unlocks at block"} ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} ${"remaining"}`
+                                : `${"Unlocks"} ${new Date(v.locktime * 1000).toLocaleString()}`
                               }
                               placement="top"
                             >

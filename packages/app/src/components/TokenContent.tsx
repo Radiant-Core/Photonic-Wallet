@@ -58,11 +58,11 @@ export default function TokenContent({
   }, [isTimelocked, decryptedBytes]);
 
   if (isEncrypted && !decryptedBytes) {
-    const rawPayload = glyph as unknown as Record<string, unknown>;
-    const stub = rawPayload?.crypto as any;
-    const locator = rawPayload?.locator as string | undefined;
-    const locatorNonce = rawPayload?.locator_nonce as string | undefined;
-    const mainObj = rawPayload?.main as any;
+    const stub = glyph?.crypto as any;
+    const cryptoObj = glyph?.crypto as Record<string, unknown> | undefined;
+    const locator = cryptoObj?.locator as string | undefined;
+    const locatorNonce = cryptoObj?.locator_nonce as string | undefined;
+    const mainObj = glyph?.main as any;
     const mainB = mainObj?.b as string | undefined; // hex ciphertext for on-chain (glyph) storage
     const contentType = mainObj?.type as string | undefined;
 

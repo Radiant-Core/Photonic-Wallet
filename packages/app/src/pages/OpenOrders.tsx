@@ -276,7 +276,7 @@ function OrderRow({
       </Td>
       <Td>
         <Button size="sm" colorScheme="blue" onClick={() => onAccept(order)}>
-          {t`Accept`}
+          {"Accept"}
         </Button>
       </Td>
     </Tr>
@@ -682,7 +682,7 @@ export default function OpenOrders() {
     <Container maxW="container.lg" px={4}>
       <VStack spacing={6} align="stretch">
         <Flex justify="space-between" align="center">
-          <Heading size="lg">{t`Open Orders`}</Heading>
+          <Heading size="lg">{"Open Orders"}</Heading>
           <HStack>
             <Button
               size="sm"
@@ -697,7 +697,7 @@ export default function OpenOrders() {
               onClick={() => fetchOrders()}
               isLoading={loading}
             >
-              {t`Refresh`}
+              {"Refresh"}
             </Button>
           </HStack>
         </Flex>
@@ -724,13 +724,13 @@ export default function OpenOrders() {
               <SearchIcon color="gray.400" />
             </InputLeftElement>
             <Input
-              placeholder={t`Search by token ref...`}
+              placeholder={"Search by token ref..."}
               value={searchRef}
               onChange={(e) => setSearchRef(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && handleSearch()}
             />
             <Button ml={2} onClick={handleSearch} isLoading={loading}>
-              {t`Search`}
+              {"Search"}
             </Button>
           </InputGroup>
         </Card>
@@ -744,20 +744,20 @@ export default function OpenOrders() {
             </VStack>
           ) : orders.length === 0 ? (
             <Box p={8} textAlign="center">
-              <Text color="gray.500">{t`No open orders found`}</Text>
+              <Text color="gray.500">{"No open orders found"}</Text>
               <Text fontSize="sm" color="gray.400" mt={2}>
-                {t`Orders will appear here when users broadcast swap offers for tokens you own`}
+                {"Orders will appear here when users broadcast swap offers for tokens you own"}
               </Text>
             </Box>
           ) : (
             <Table size="sm">
               <Thead>
                 <Tr>
-                  <Th>{t`Swap`}</Th>
-                  <Th>{t`Offering`}</Th>
-                  <Th>{t`Wants`}</Th>
+                  <Th>{"Swap"}</Th>
+                  <Th>{"Offering"}</Th>
+                  <Th>{"Wants"}</Th>
                   <Th display={{ base: "none", md: "table-cell" }}>
-                    {t`Block`}
+                    {"Block"}
                   </Th>
                   <Th></Th>
                 </Tr>
@@ -778,9 +778,9 @@ export default function OpenOrders() {
         <Alert status="info">
           <AlertIcon />
           <Box>
-            <Text fontWeight="medium">{t`How it works`}</Text>
+            <Text fontWeight="medium">{"How it works"}</Text>
             <Text fontSize="sm">
-              {t`Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction.`}
+              {"Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction."}
             </Text>
           </Box>
         </Alert>

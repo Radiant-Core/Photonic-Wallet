@@ -187,7 +187,7 @@ function TargetBox({
               color="green.300"
             />
             <Text color="whiteAlpha.800" fontSize="2xl" mb={2}>
-              {t`Drop file`}
+              {"Drop file"}
             </Text>
           </>
         ) : (
@@ -200,13 +200,10 @@ function TargetBox({
               color="gray.600"
             />
             <Text color="gray.300" fontSize="xl" mb={1}>
-              {t`Upload file`}
+              {"Upload file"}
             </Text>
             <Text color="gray.300" fontSize="md">
-              <Trans>
-                Maximum {formatNumber(mintEmbedMaxBytes / 1000)}
-                KB - Images, Files, URLs, or Text
-              </Trans>
+              Maximum {formatNumber(mintEmbedMaxBytes / 1000)}KB - Images, Files, URLs, or Text
             </Text>
           </>
         )}
@@ -433,7 +430,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     p.catch((error) => {
       console.log(error);
       toast({
-        title: t`Error`,
+        title: "Error",
         description: cleanError((error as Error).message || "") || undefined,
         status: "error",
       });
@@ -445,7 +442,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     if (fileState.ipfs && !apiKey) {
       toast({
         status: "error",
-        title: t`No NFT.Storage API key provided`,
+        title: "No NFT.Storage API key provided",
       });
       return;
     }
@@ -455,16 +452,16 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       if (encState.mode === "passphrase" && encState.passphrase.length < 8) {
         toast({
           status: "error",
-          title: t`Invalid encryption passphrase`,
-          description: t`Passphrase must be at least 8 characters`,
+          title: "Invalid encryption passphrase",
+          description: "Passphrase must be at least 8 characters",
         });
         return;
       }
       if (encState.mode === "recipient" && encState.recipientKeys.length === 0) {
         toast({
           status: "error",
-          title: t`No recipients`,
-          description: t`Add at least one recipient for encryption`,
+          title: "No recipients",
+          description: "Add at least one recipient for encryption",
         });
         return;
       }
@@ -475,7 +472,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         if (tlError) {
           toast({
             status: "error",
-            title: t`Invalid timelock`,
+            title: "Invalid timelock",
             description: tlError,
           });
           return;
@@ -484,8 +481,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         if (!resolved) {
           toast({
             status: "error",
-            title: t`Invalid timelock`,
-            description: t`Could not resolve timelock parameters`,
+            title: "Invalid timelock",
+            description: "Could not resolve timelock parameters",
           });
           return;
         }
@@ -494,8 +491,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       // Timelock without encryption is not allowed
       toast({
         status: "error",
-        title: t`Timelock requires encryption`,
-        description: t`Enable encryption before adding a timelock`,
+        title: "Timelock requires encryption",
+        description: "Enable encryption before adding a timelock",
       });
       return;
     }
@@ -524,7 +521,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     if (mode === "url" && !mime.getType(urlFileType)) {
       toast({
         status: "error",
-        title: t`Unrecognized URL file type`,
+        title: "Unrecognized URL file type",
       });
       return;
     }
@@ -535,8 +532,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       if (textSize > mintEmbedMaxBytes) {
         toast({
           status: "error",
-          title: t`Text content is too large`,
-          description: t`Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB`,
+          title: "Text content is too large",
+          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -547,8 +544,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       if (urlSize > mintEmbedMaxBytes) {
         toast({
           status: "error",
-          title: t`URL content is too large`,
-          description: t`Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB`,
+          title: "URL content is too large",
+          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -559,8 +556,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       if (!dualFileState.previewImage && !dualFileState.contentFile) {
         toast({
           status: "error",
-          title: t`No files uploaded`,
-          description: t`Please upload at least a preview image or content file`,
+          title: "No files uploaded",
+          description: "Please upload at least a preview image or content file",
         });
         return;
       }
@@ -568,8 +565,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       if (dualFileState.totalSize > mintEmbedMaxBytes) {
         toast({
           status: "error",
-          title: t`Combined file size is too large`,
-          description: t`Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB`,
+          title: "Combined file size is too large",
+          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -579,7 +576,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     if (outputValue < 0 || outputValue > 1000000000000) {
       toast({
         status: "error",
-        title: t`Token supply is too high`,
+        title: "Token supply is too high",
       });
       return;
     }
@@ -686,7 +683,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       setLoading(false);
       toast({
         title: "Error",
-        description: t`Couldn't find user`,
+        description: "Couldn't find user",
         status: "error",
       });
       return;
@@ -706,7 +703,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       setLoading(false);
       toast({
         title: "Error",
-        description: t`Couldn't find container`,
+        description: "Couldn't find container",
         status: "error",
       });
       return;
@@ -1095,14 +1092,14 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       } else {
         onSuccessModalOpen();
         toast({
-          title: t`Minted. Fee ${photonsToRXD(fee)} ${network.value.ticker}`,
+          title: "Minted. Fee ${photonsToRXD(fee)} ${network.value.ticker}",
           status: "success",
         });
       }
     } catch (error) {
       console.log(error);
       toast({
-        title: t`Error`,
+        title: "Error",
         description: cleanError((error as Error).message || "") || undefined,
         status: "error",
       });
@@ -1118,13 +1115,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
       //if (files[0].size > MAX_IPFS_BYTES) {
       if (files[0].size > mintEmbedMaxBytes) {
-        toast({ title: t`File is too large`, status: "error" });
+        toast({ title: "File is too large", status: "error" });
         setFileState(newState);
         return;
       }
       const { name, size, type } = files[0];
       if (!type) {
-        toast({ title: t`Unrecognized file type`, status: "error" });
+        toast({ title: "Unrecognized file type", status: "error" });
         setFileState(newState);
         return;
       }
@@ -1187,13 +1184,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       const newState = { ...dualFileState };
 
       if (files[0].size > mintEmbedMaxBytes) {
-        toast({ title: t`Preview image is too large`, status: "error" });
+        toast({ title: "Preview image is too large", status: "error" });
         return;
       }
 
       const { name, size, type } = files[0];
       if (!type || !type.startsWith('image/')) {
-        toast({ title: t`Preview must be an image file`, status: "error" });
+        toast({ title: "Preview must be an image file", status: "error" });
         return;
       }
 
@@ -1208,8 +1205,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
       if (newState.totalSize > mintEmbedMaxBytes) {
         toast({ 
-          title: t`Combined file size is too large`, 
-          description: t`Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB`,
+          title: "Combined file size is too large", 
+          description: "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
           status: "error" 
         });
         return;
@@ -1235,7 +1232,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       const newState = { ...dualFileState };
 
       if (files[0].size > mintEmbedMaxBytes) {
-        toast({ title: t`Content file is too large`, status: "error" });
+        toast({ title: "Content file is too large", status: "error" });
         return;
       }
 
@@ -1252,8 +1249,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
       if (newState.totalSize > mintEmbedMaxBytes) {
         toast({ 
-          title: t`Combined file size is too large`, 
-          description: t`Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB`,
+          title: "Combined file size is too large", 
+          description: "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
           status: "error" 
         });
         return;
@@ -1369,9 +1366,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     <>
       <ContentContainer>
         <PageHeader back to="/objects">
-          <Trans>
-            Mint <TokenType type={tokenType} />
-          </Trans>
+          Mint <TokenType type={tokenType} />
         </PageHeader>
 
         <form onSubmit={clean ? mint : preview}>
@@ -1388,27 +1383,25 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               <Alert status="info">
                 <AlertIcon />
                 <span>
-                  <Trans>
-                    No NFT.Storage API key has been provided. To upload large
-                    files, please go to{" "}
-                    <Text
-                      as={Link}
-                      to="/settings/ipfs"
-                      textDecoration="underline"
-                    >
-                      IPFS Settings
-                    </Text>{" "}
-                    and enter your key.
-                  </Trans>
+                  No NFT.Storage API key has been provided. To upload large
+                  files, please go to{" "}
+                  <Text
+                    as={Link}
+                    to="/settings/ipfs"
+                    textDecoration="underline"
+                  >
+                    IPFS Settings
+                  </Text>{" "}
+                  and enter your key.
                 </span>
               </Alert>
             )}
             {tokenType !== "user" && (
               <FormSection>
                 <FormControl>
-                  <FormLabel>{t`Author`}</FormLabel>
+                  <FormLabel>{"Author"}</FormLabel>
                   <Select name="authorId" onChange={onFormChange}>
-                    <option value="">{t`None`}</option>
+                    <option value="">{"None"}</option>
                     {users.map((u, index) => (
                       <option key={u.ref} value={index}>
                         {u.name} [{Outpoint.fromString(u.ref).shortRef()}]
@@ -1416,12 +1409,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     ))}
                   </Select>
                   <FormHelperText>
-                    {t`Assigning an author is recommended for authentication of tokens.`}
+                    {"Assigning an author is recommended for authentication of tokens."}
                   </FormHelperText>
                 </FormControl>
                 {tokenType === "object" && (
                   <FormControl>
-                    <FormLabel>{t`Container`}</FormLabel>
+                    <FormLabel>{"Container"}</FormLabel>
                     <Select name="containerId" onChange={onFormChange}>
                       <option value="">None</option>
                       {containers.map((c, index) => (
@@ -1431,7 +1424,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       ))}
                     </Select>
                     <FormHelperText>
-                      {t`Containers can be used to create token collections`}
+                      {"Containers can be used to create token collections"}
                     </FormHelperText>
                   </FormControl>
                 )}
@@ -1439,13 +1432,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             )}
             <FormSection>
               <FormControl>
-                <FormLabel>{t`What data do you want to store?`}</FormLabel>
+                <FormLabel>{"What data do you want to store?"}</FormLabel>
                 <RadioGroup defaultValue="file" onChange={changeMode}>
                   <Stack spacing={5} direction="row">
-                    <Radio value="file">{t`File`}</Radio>
-                    <Radio value="dual">{t`Preview + Content`}</Radio>
-                    <Radio value="url">{t`URL`}</Radio>
-                    <Radio value="text">{t`Text`}</Radio>
+                    <Radio value="file">{"File"}</Radio>
+                    <Radio value="dual">{"Preview + Content"}</Radio>
+                    <Radio value="url">{"URL"}</Radio>
+                    <Radio value="text">{"Text"}</Radio>
                   </Stack>
                 </RadioGroup>
               </FormControl>
@@ -1455,9 +1448,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 <>
                   {/* Not sure why z-index fixes glow box */}
                   <FormControl zIndex={0}>
-                    <FormLabel>{t`File`}</FormLabel>
+                    <FormLabel>{"File"}</FormLabel>
                     <FormHelperText mb={4}>
-                      {t`Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
+                      {"Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
                     </FormHelperText>
                     {fileState.file?.data ? (
                       <Flex
@@ -1533,15 +1526,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               {mode === "file" && fileState.file?.data && !fileState.ipfs && (
                 <>
                   <Alert status="info">
-                    <AlertIcon /> {t`Your file will be stored on-chain.`}
+                    <AlertIcon /> {"Your file will be stored on-chain."}
                   </Alert>
                   <Alert status="warning" mt={2}>
                     <AlertIcon />
                     <Text>
-                      {t`Estimated fee: ~${photonsToRXD(estimateMintFee(fileState.file.size || 0, feeRate.value))} ${network.value.ticker}`}
+                      {"Estimated fee: ~${photonsToRXD(estimateMintFee(fileState.file.size || 0, feeRate.value))} ${network.value.ticker}"}
                       {(fileState.file.size || 0) > 50000 && (
                         <Text as="span" fontWeight="bold" color="orange.300">
-                          {" "}{t`(Large file - consider compressing)`}
+                          {" "}{"(Large file - consider compressing)"}
                         </Text>
                       )}
                     </Text>
@@ -1551,9 +1544,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               {mode === "file" && fileState.file?.data && fileState.ipfs && (
                 <Alert status="info">
                   <AlertIcon />
-                  {t`Your file will be stored in IPFS.`}{" "}
+                  {"Your file will be stored in IPFS."}{" "}
                   {fileState.stampSupported &&
-                    t`A HashStamp image may be stored on-chain.`}
+                    "A HashStamp image may be stored on-chain."}
                 </Alert>
               )}
               {mode === "file" && fileState.file?.data && fileState.ipfs && (
@@ -1561,35 +1554,33 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <Divider />
                   {fileState.cid && (
                     <FormControl>
-                      <FormLabel>{t`IPFS`}</FormLabel>
-                      <Trans>
-                        <FormHelperText mb={4}>
-                          Your uploaded file will have the following URL
-                        </FormHelperText>
-                        <Identifier overflowWrap="anywhere">
-                          ipfs://{fileState.cid}
-                        </Identifier>
-                      </Trans>
+                      <FormLabel>{"IPFS"}</FormLabel>
+                      <FormHelperText mb={4}>
+                        Your uploaded file will have the following URL
+                      </FormHelperText>
+                      <Identifier overflowWrap="anywhere">
+                        ipfs://{fileState.cid}
+                      </Identifier>
                     </FormControl>
                   )}
                   {fileState.stampSupported && (
                     <>
                       <Divider />
                       <FormControl>
-                        <FormLabel>{t`HashStamp`}</FormLabel>
+                        <FormLabel>{"HashStamp"}</FormLabel>
                         <RadioGroup
                           defaultValue="1"
                           onChange={(value) => setEnableHashstamp(!!value)}
                         >
                           <Stack spacing={5} direction="row">
                             <Radio value="1">
-                              {t`Store HashStamp on-chain`}
+                              {"Store HashStamp on-chain"}
                             </Radio>
-                            <Radio value="">{t`No HashStamp`}</Radio>
+                            <Radio value="">{"No HashStamp"}</Radio>
                           </Stack>
                         </RadioGroup>
                         <FormHelperText mb={4}>
-                          {t`A compressed copy of the token image stored on-chain`}
+                          {"A compressed copy of the token image stored on-chain"}
                         </FormHelperText>
                         {enableHashstamp && (
                           <>
@@ -1621,15 +1612,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               {mode === "dual" && (
                 <>
                   <FormControl>
-                    <FormLabel>{t`Preview Image + Content File`}</FormLabel>
+                    <FormLabel>{"Preview Image + Content File"}</FormLabel>
                     <FormHelperText mb={4}>
-                      {t`Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB total)`}
+                      {"Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB total)"}
                     </FormHelperText>
                   </FormControl>
                   
                   {/* Preview Image Upload */}
                   <FormControl zIndex={0}>
-                    <FormLabel>{t`Preview Image`}</FormLabel>
+                    <FormLabel>{"Preview Image"}</FormLabel>
                     {dualFileState.previewImage?.data ? (
                       <Flex
                         height={{ base: "120px", md: "150px" }}
@@ -1682,7 +1673,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
                   {/* Content File Upload */}
                   <FormControl zIndex={0}>
-                    <FormLabel>{t`Content File`}</FormLabel>
+                    <FormLabel>{"Content File"}</FormLabel>
                     {dualFileState.contentFile?.data ? (
                       <Flex
                         height={{ base: "120px", md: "150px" }}
@@ -1731,16 +1722,16 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       <Alert status="info">
                         <AlertIcon />
                         <Text>
-                          {t`Combined size: ${filesize(dualFileState.totalSize) as string} / ${formatNumber(mintEmbedMaxBytes / 1000)} KB`}
+                          {"Combined size: ${filesize(dualFileState.totalSize) as string} / ${formatNumber(mintEmbedMaxBytes / 1000)} KB"}
                         </Text>
                       </Alert>
                       <Alert status="warning" mt={2}>
                         <AlertIcon />
                         <Text>
-                          {t`Estimated fee: ~${photonsToRXD(estimateMintFee(dualFileState.totalSize, feeRate.value))} ${network.value.ticker}`}
+                          {"Estimated fee: ~${photonsToRXD(estimateMintFee(dualFileState.totalSize, feeRate.value))} ${network.value.ticker}"}
                           {dualFileState.totalSize > 50000 && (
                             <Text as="span" fontWeight="bold" color="orange.300">
-                              {" "}{t`(Large file - consider compressing)`}
+                              {" "}{"(Large file - consider compressing)"}
                             </Text>
                           )}
                         </Text>
@@ -1754,7 +1745,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl>
                     <FormLabel>Text</FormLabel>
                     <FormHelperText mb={4}>
-                      {t`Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
+                      {"Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
                     </FormHelperText>
                     <Textarea
                       name="text"
@@ -1770,7 +1761,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl>
                     <FormLabel>URL</FormLabel>
                     <FormHelperText mb={4}>
-                      {t`Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)`}
+                      {"Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
                     </FormHelperText>
                     <Input name="url" onChange={onFormChange} />
                   </FormControl>
@@ -1782,7 +1773,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       onChange={onFormChange}
                     />
                     <FormHelperText>
-                      {t`Type of content the URL links to. Leave empty for a website link.`}
+                      {"Type of content the URL links to. Leave empty for a website link."}
                     </FormHelperText>
                   </FormControl>
                 </>
@@ -1792,7 +1783,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               {tokenType === "fungible" && (
                 <>
                   <FormControl>
-                    <FormLabel>{t`Ticker`}</FormLabel>
+                    <FormLabel>{"Ticker"}</FormLabel>
                     <Input
                       placeholder="Ticker"
                       name="ticker"
@@ -1803,42 +1794,42 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 </>
               )}
               <FormControl>
-                <FormLabel>{t`Name`}</FormLabel>
+                <FormLabel>{"Name"}</FormLabel>
                 <Input
-                  placeholder={t`Name`}
+                  placeholder={"Name"}
                   name="name"
                   onChange={onFormChange}
                   required
                 />
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Description`}</FormLabel>
+                <FormLabel>{"Description"}</FormLabel>
                 <Input
-                  placeholder={t`Description`}
+                  placeholder={"Description"}
                   name="desc"
                   onChange={onFormChange}
                 />
               </FormControl>
               <FormControl>
-                <FormLabel>{t`License`}</FormLabel>
+                <FormLabel>{"License"}</FormLabel>
                 <Input
-                  placeholder={t`License`}
+                  placeholder={"License"}
                   name="license"
                   onChange={onFormChange}
                 />
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Attributes`}</FormLabel>
+                <FormLabel>{"Attributes"}</FormLabel>
                 <Box>
                   <HStack wrap="wrap">
                     <Input
-                      placeholder={t`Name`}
+                      placeholder={"Name"}
                       ref={attrName}
                       width="auto"
                       flexGrow={1}
                     />
                     <Input
-                      placeholder={t`Value`}
+                      placeholder={"Value"}
                       ref={attrValue}
                       width="auto"
                       flexGrow={1}
@@ -1846,13 +1837,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <Button
                       leftIcon={<AddIcon />}
                       onClick={addAttr}
-                      aria-label={t`Add attribute`}
+                      aria-label={"Add attribute"}
                     >
                       Add
                     </Button>
                   </HStack>
                   <FormHelperText>
-                    {t`Properties that describe your asset`}
+                    {"Properties that describe your asset"}
                   </FormHelperText>
                   {attrs.length > 0 && (
                     <Flex gap={4} flexWrap="wrap" mt={4}>
@@ -1870,23 +1861,23 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               </FormControl>
               {tokenType !== "fungible" && (
                 <FormControl>
-                  <FormLabel>{t`Immutable`}</FormLabel>
+                  <FormLabel>{"Immutable"}</FormLabel>
                   <RadioGroup
                     name="immutable"
                     defaultValue={tokenType === "object" ? "1" : "0"}
                   >
                     <Stack spacing={5} direction="row">
                       <Radio value="1" onChange={onFormChange}>
-                        {t`Yes`}
+                        {"Yes"}
                       </Radio>
                       <Radio value="0" onChange={onFormChange}>
-                        {t`No, allow token owner to modify`}
+                        {"No, allow token owner to modify"}
                       </Radio>
                     </Stack>
                   </RadioGroup>
                   {["user", "container"].includes(tokenType) && (
                     <FormHelperText mb={4}>
-                      {t`Mutable tokens are recommended for user and container tokens`}
+                      {"Mutable tokens are recommended for user and container tokens"}
                     </FormHelperText>
                   )}
                 </FormControl>
@@ -1895,24 +1886,24 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             {formData.immutable !== "1" && (
               <Alert status="info">
                 <AlertIcon />
-                {t`Mutable tokens are not yet fully supported by Photonic Wallet, however a mutable contract containing 1 photon will be created.`}
+                {"A mutable contract will be created. The token owner can edit name, description, and attributes after minting."}
               </Alert>
             )}
             {tokenType === "fungible" && (
               <>
                 <FormSection>
                   <FormControl>
-                    <FormLabel>{t`Deployment method`}</FormLabel>
+                    <FormLabel>{"Deployment method"}</FormLabel>
                     <Select name="deployMethod" onChange={onFormChange}>
-                      <option value="direct">{t`Direct to wallet`}</option>
-                      <option value="dmint">{t`Decentralized mint`}</option>
+                      <option value="direct">{"Direct to wallet"}</option>
+                      <option value="dmint">{"Decentralized mint"}</option>
                     </Select>
                   </FormControl>
                   <Divider />
                   {formData.deployMethod === "dmint" && (
                     <>
                       <FormControl>
-                        <FormLabel>{t`Mining Algorithm`}</FormLabel>
+                        <FormLabel>{"Mining Algorithm"}</FormLabel>
                         <Select
                           name="algorithm"
                           defaultValue={formData.algorithm}
@@ -1940,7 +1931,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         </Alert>
                       )}
                       <FormControl>
-                        <FormLabel>{t`Difficulty Adjustment`}</FormLabel>
+                        <FormLabel>{"Difficulty Adjustment"}</FormLabel>
                         <Select
                           name="daaMode"
                           defaultValue={formData.daaMode}
@@ -1967,7 +1958,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       </FormControl>
                       {formData.daaMode !== 'fixed' && (
                         <FormControl>
-                          <FormLabel>{t`Target Block Time (seconds)`}</FormLabel>
+                          <FormLabel>{"Target Block Time (seconds)"}</FormLabel>
                           <Input
                             defaultValue={formData.targetBlockTime}
                             placeholder="60"
@@ -1987,7 +1978,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       {formData.daaMode === 'asert' && (
                         <>
                           <FormControl>
-                            <FormLabel>{t`ASERT Half Life (blocks)`}</FormLabel>
+                            <FormLabel>{"ASERT Half Life (blocks)"}</FormLabel>
                             <Input
                               defaultValue={formData.asertHalfLife || "1000"}
                               placeholder="1000"
@@ -2002,7 +1993,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
-                            <FormLabel>{t`ASERT Asymptote (optional)`}</FormLabel>
+                            <FormLabel>{"ASERT Asymptote (optional)"}</FormLabel>
                             <Input
                               defaultValue={formData.asertAsymptote || "0"}
                               placeholder="0"
@@ -2021,7 +2012,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       
                       {formData.daaMode === 'lwma' && (
                         <FormControl>
-                          <FormLabel>{t`LWMA Window Size (blocks)`}</FormLabel>
+                          <FormLabel>{"LWMA Window Size (blocks)"}</FormLabel>
                           <Input
                             defaultValue={formData.lwmaWindowSize || "144"}
                             placeholder="144"
@@ -2040,7 +2031,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       {formData.daaMode === 'epoch' && (
                         <>
                           <FormControl>
-                            <FormLabel>{t`Epoch Length (blocks)`}</FormLabel>
+                            <FormLabel>{"Epoch Length (blocks)"}</FormLabel>
                             <Input
                               defaultValue={formData.epochLength || "2016"}
                               placeholder="2016"
@@ -2055,7 +2046,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
-                            <FormLabel>{t`Max Adjustment Factor`}</FormLabel>
+                            <FormLabel>{"Max Adjustment Factor"}</FormLabel>
                             <Input
                               defaultValue={formData.maxAdjustment || "4"}
                               placeholder="4"
@@ -2075,7 +2066,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       
                       {formData.daaMode === 'schedule' && (
                         <FormControl>
-                          <FormLabel>{t`Difficulty Schedule`}</FormLabel>
+                          <FormLabel>{"Difficulty Schedule"}</FormLabel>
                           <Textarea
                             defaultValue={formData.schedule || "0:1000,1000:500,2000:250"}
                             placeholder="0:1000,1000:500,2000:250"
@@ -2089,7 +2080,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         </FormControl>
                       )}
                       <FormControl>
-                        <FormLabel>{t`Initial Difficulty`}</FormLabel>
+                        <FormLabel>{"Initial Difficulty"}</FormLabel>
                         <Input
                           defaultValue={formData.difficulty}
                           placeholder="10"
@@ -2111,7 +2102,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         )}
                       </FormControl>
                       <FormControl>
-                        <FormLabel>{t`Number of contracts`}</FormLabel>
+                        <FormLabel>{"Number of contracts"}</FormLabel>
                         <Input
                           value={isAdaptiveDaaMode(formData.daaMode) ? "1" : formData.numContracts}
                           placeholder=""
@@ -2124,12 +2115,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         />
                         <FormHelperText>
                           {isAdaptiveDaaMode(formData.daaMode)
-                            ? t`Adaptive DAA modes require a single contract.`
-                            : t`Multiple contracts allows parallel mining, reducing congestion for low difficulty contracts`}
+                            ? "Adaptive DAA modes require a single contract."
+                            : "Multiple contracts allows parallel mining, reducing congestion for low difficulty contracts"}
                         </FormHelperText>
                       </FormControl>
                       <FormControl>
-                        <FormLabel>{t`Number of mints`}</FormLabel>
+                        <FormLabel>{"Number of mints"}</FormLabel>
                         <Input
                           defaultValue={formData.maxHeight}
                           placeholder=""
@@ -2139,11 +2130,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           min={1}
                         />
                         <FormHelperText>
-                          {t`Total number of mints`}
+                          {"Total number of mints"}
                         </FormHelperText>
                       </FormControl>
                       <FormControl>
-                        <FormLabel>{t`Reward`}</FormLabel>
+                        <FormLabel>{"Reward"}</FormLabel>
                         <Input
                           defaultValue={formData.reward}
                           placeholder=""
@@ -2153,11 +2144,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           min={1}
                         />
                         <FormHelperText>
-                          {t`Number of tokens created on each mint`}
+                          {"Number of tokens created on each mint"}
                         </FormHelperText>
                       </FormControl>
                       <FormControl>
-                        <FormLabel>{t`Premine`}</FormLabel>
+                        <FormLabel>{"Premine"}</FormLabel>
                         <Input
                           placeholder=""
                           name="premine"
@@ -2167,14 +2158,14 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           min={0}
                         />
                         <FormHelperText>
-                          {t`Token supply sent directly to your wallet. Requires an equal amount of RXD photons.`}
+                          {"Token supply sent directly to your wallet. Requires an equal amount of RXD photons."}
                         </FormHelperText>
                       </FormControl>
                     </>
                   )}
                   {formData.deployMethod === "direct" && (
                     <FormControl>
-                      <FormLabel>{t`Photon Supply`}</FormLabel>
+                      <FormLabel>{"Photon Supply"}</FormLabel>
                       <Input
                         placeholder=""
                         name="supply"
@@ -2184,7 +2175,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         min={1}
                       />
                       <FormHelperText>
-                        {t`Token supply requires an equal amount of RXD photons. This must be provided on mint for "direct to wallet" deployments.`}
+                        {"Token supply requires an equal amount of RXD photons. This must be provided on mint for \u201cdirect to wallet\u201d deployments."}
                       </FormHelperText>
                     </FormControl>
                   )}
@@ -2192,7 +2183,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 {formData.deployMethod === "dmint" && totalDmintSupply > 0 && (
                   <Alert status="info">
                     <AlertIcon />
-                    {t`Total minted supply will be ${totalDmintSupply} ${formData.ticker}`}
+                    {`Total minted supply will be ${totalDmintSupply} ${formData.ticker}`}
                   </Alert>
                 )}
               </>
@@ -2200,23 +2191,23 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             {clean && (
               <FormSection>
                 <FormControl>
-                  <FormLabel>{t`Summary`}</FormLabel>
+                  <FormLabel>{"Summary"}</FormLabel>
                   <SimpleGrid
                     templateColumns="max-content max-content"
                     columnGap={8}
                     rowGap={2}
                     py={2}
                   >
-                    <Box>{t`Transaction size`}</Box>
+                    <Box>{"Transaction size"}</Box>
                     <Box>{filesize(stats.size) as string}</Box>
-                    <Box>{t`Fee`}</Box>
+                    <Box>{"Fee"}</Box>
                     <Box>
                       {photonsToRXD(stats.fee)} {network.value.ticker}
                     </Box>
                     {tokenType === "fungible" &&
                       formData.deployMethod === "direct" && (
                         <>
-                          <Box>{t`FT supply funding`}</Box>
+                          <Box>{"FT supply funding"}</Box>
                           <Box>
                             {photonsToRXD(parseInt(formData.supply, 10))}{" "}
                             {network.value.ticker}
@@ -2227,7 +2218,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       formData.deployMethod === "dmint" &&
                       parseInt(formData.premine, 10) > 0 && (
                         <>
-                          <Box>{t`Premine supply funding`}</Box>
+                          <Box>{"Premine supply funding"}</Box>
                           <Box>
                             {photonsToRXD(parseInt(formData.premine, 10))}{" "}
                             {network.value.ticker}
@@ -2244,12 +2235,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 {isConnected ? (
                   <Alert status="success">
                     <AlertIcon />
-                    {t`Your token is ready to mint. Please review all data and the transaction fee before proceeding.`}
+                    {"Your token is ready to mint. Please review all data and the transaction fee before proceeding."}
                   </Alert>
                 ) : (
                   <Alert status="warning">
                     <AlertIcon />
-                    {t`Please reconnect to mint your token`}
+                    {"Please reconnect to mint your token"}
                   </Alert>
                 )}
                 <Flex justifyContent="center" py={8} mb={16}>
@@ -2264,7 +2255,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     shadow="dark-md"
                     isDisabled={!isConnected}
                   >
-                    {t`Mint`}
+                    {"Mint"}
                   </Button>
                 </Flex>
               </>
@@ -2279,7 +2270,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   loadingText="Calculating"
                   shadow="dark-md"
                 >
-                  {t`Calculate Fee`}
+                  {"Calculate Fee"}
                 </Button>
               </Flex>
             )}

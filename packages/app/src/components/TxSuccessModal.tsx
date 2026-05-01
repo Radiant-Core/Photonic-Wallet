@@ -34,12 +34,12 @@ export default function TxSuccessModal({
     >
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>{t`Transaction successful`}</ModalHeader>
+        <ModalHeader>{"Transaction successful"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          <Text mb={2}>{t`Transaction ID:`}</Text>
+          <Text mb={2}>{"Transaction ID:"}</Text>
           <div>
-            <Identifier showCopy>{txid || t`Unknown`}</Identifier>
+            <Identifier showCopy>{txid || "Unknown"}</Identifier>
           </div>
           <Link
             as={RouterLink}
@@ -48,13 +48,13 @@ export default function TxSuccessModal({
             isExternal
             my={4}
           >
-            {t`View on block explorer`}
+            {"View on block explorer"}
             <ExternalLinkIcon mx="2px" />
           </Link>
         </ModalBody>
 
         <ModalFooter>
-          <Button onClick={onClose}>{t`Close`}</Button>
+          <Button onClick={onClose}>{"Close"}</Button>
         </ModalFooter>
       </ModalContent>
     </Modal>

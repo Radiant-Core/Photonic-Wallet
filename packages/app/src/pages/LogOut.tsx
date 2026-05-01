@@ -21,14 +21,14 @@ export default function LogOut() {
 
   return (
     <Container maxW="container.lg">
-      <Heading mb={4} size="md">{t`Log out`}</Heading>
+      <Heading mb={4} size="md">{"Log out"}</Heading>
       <Text mb={4}>
-        {t`Logging out will remove your wallet and all saved data from your browser.`}
+        {"Logging out will remove your wallet and all saved data from your browser."}
       </Text>
       <Alert status="error">
         <AlertIcon />
         <AlertDescription>
-          {t`Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet.`}
+          {"Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet."}
         </AlertDescription>
       </Alert>
       <Flex justifyContent="center" py={8} mb={16}>
@@ -39,7 +39,7 @@ export default function LogOut() {
           shadow="dark-md"
           onClick={logout}
         >
-          {t`Log out`}
+          {"Log out"}
         </Button>
       </Flex>
     </Container>

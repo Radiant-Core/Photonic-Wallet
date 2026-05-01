@@ -25,7 +25,7 @@ export default function Unlock() {
 
   const onSuccess = (mnemonic: string, wif: string, swapWif: string) => {
     toast({
-      title: t`Wallet unlocked`,
+      title: "Wallet unlocked",
       status: "success",
     });
 
@@ -48,7 +48,7 @@ export default function Unlock() {
 
   return (
     <PasswordModal
-      header={t`Unlock to enable spending`}
+      header={"Unlock to enable spending"}
       allowClose
       onSuccess={onSuccess}
       isOpen={disclosure.isOpen}

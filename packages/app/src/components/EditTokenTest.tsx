@@ -155,7 +155,7 @@ export default function EditTokenTest({
       leftIcon={<EditIcon />}
       colSpan={2}
     >
-      {t`Edit`}
+      {"Edit"}
     </GridItem>
   );
 }

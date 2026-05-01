@@ -23,7 +23,7 @@ const UnlockButton = () => {
   const onClickLock = () => {
     lockWallet();
     toast({
-      title: t`Wallet locked`,
+      title: "Wallet locked",
       status: "success",
     });
   };
@@ -37,7 +37,7 @@ const UnlockButton = () => {
         onMouseOver={() => setHover(true)}
         onMouseOut={() => setHover(false)}
       >
-        {hover ? t`Click to unlock` : t`Locked`}
+        {hover ? "Click to unlock" : "Locked"}
       </MenuButton>
     );
   }
@@ -53,7 +53,7 @@ const UnlockButton = () => {
       onMouseOver={() => setHover(true)}
       onMouseOut={() => setHover(false)}
     >
-      {hover ? t`Click to lock` : t`Unlocked`}
+      {hover ? "Click to lock" : "Unlocked"}
     </MenuButton>
   );
 };
@@ -64,16 +64,16 @@ const ConnectButton = () => {
   const toast = useToast();
 
   const statusText = {
-    [ElectrumStatus.CONNECTED]: t`Connected`,
-    [ElectrumStatus.CONNECTING]: t`Connecting`,
-    [ElectrumStatus.DISCONNECTED]: t`Disconnected`,
-    [ElectrumStatus.LOADING]: t`Disconnected`,
+    [ElectrumStatus.CONNECTED]: "Connected",
+    [ElectrumStatus.CONNECTING]: "Connecting",
+    [ElectrumStatus.DISCONNECTED]: "Disconnected",
+    [ElectrumStatus.LOADING]: "Disconnected",
   };
 
   const onClickConnect = () => {
     if (!electrumWorker.value.reconnect()) {
       toast({
-        title: t`No servers defined`,
+        title: "No servers defined",
         status: "error",
       });
     }
@@ -93,7 +93,7 @@ const ConnectButton = () => {
         onMouseOver={() => setHover(true)}
         onMouseOut={() => setHover(false)}
       >
-        {hover ? t`Click to disconnect` : statusText[electrumStatus.value]}
+        {hover ? "Click to disconnect" : statusText[electrumStatus.value]}
       </MenuButton>
     );
   }
@@ -119,7 +119,7 @@ const ConnectButton = () => {
       onMouseOver={() => setHover(true)}
       onMouseOut={() => setHover(false)}
     >
-      {hover ? t`Click to connect` : statusText[electrumStatus.value]}
+      {hover ? "Click to connect" : statusText[electrumStatus.value]}
     </MenuButton>
   );
 };
@@ -134,7 +134,7 @@ export default function StatusBar() {
         leftIcon={<SettingsIcon boxSize={5} />}
         match="/settings"
       >
-        {t`Settings`}
+        {"Settings"}
       </MenuButton>
     </>
   );

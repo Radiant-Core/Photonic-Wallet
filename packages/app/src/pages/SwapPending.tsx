@@ -154,7 +154,7 @@ export default function SwapPending() {
       <Modal isOpen={isOpen} onClose={onClose} isCentered size="lg">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Swap`}</ModalHeader>
+          <ModalHeader>{"Swap"}</ModalHeader>
           <ModalCloseButton />
           {openSwap && (
             <ViewSwap

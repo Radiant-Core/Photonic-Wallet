@@ -75,7 +75,7 @@ export default function SendDigitalObject({
     let fail = false;
     if (!toAddress.current?.value || !isP2pkh(toAddress.current.value)) {
       fail = true;
-      setErrorMessage(t`Invalid address`);
+      setErrorMessage("Invalid address");
     }
 
     if (fail) {
@@ -101,7 +101,7 @@ export default function SendDigitalObject({
       db.broadcast.put({ txid, date: Date.now(), description: "nft_send" });
 
       toast({
-        title: t`Sent NFT`,
+        title: "Sent NFT",
         status: "success",
       });
       const changeScript = p2pkhScript(wallet.value.address);
@@ -136,7 +136,7 @@ export default function SendDigitalObject({
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
       } else {
-        setErrorMessage(t`Transaction rejected`);
+        setErrorMessage("Transaction rejected");
       }
       console.debug(error);
       setSuccess(false);
@@ -165,7 +165,7 @@ export default function SendDigitalObject({
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Send Non-Fungible Token`}</ModalHeader>
+          <ModalHeader>{"Send Non-Fungible Token"}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
@@ -195,11 +195,11 @@ export default function SendDigitalObject({
                 </Flex>
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Non-Fungible Token`}</FormLabel>
+                <FormLabel>{"Non-Fungible Token"}</FormLabel>
                 <Identifier>{ref.reverse().shortInput()}</Identifier>
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Amount`}</FormLabel>
+                <FormLabel>{"Amount"}</FormLabel>
                 <Identifier>{`${photonsToRXD(txo.value)} ${
                   network.value.ticker
                 }`}</Identifier>
@@ -212,9 +212,9 @@ export default function SendDigitalObject({
                 isLoading={loading}
                 mr={4}
               >
-                {t`Send`}
+                {"Send"}
               </Button>
-              <Button onClick={onClose}>{t`Cancel`}</Button>
+              <Button onClick={onClose}>{"Cancel"}</Button>
             </ModalFooter>
           </AddressInput>
         </ModalContent>

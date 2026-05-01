@@ -676,7 +676,8 @@ export function mintToken(
   utxos: Utxo[],
   payload: SmartTokenPayload,
   relUtxos: Utxo[],
-  feeRate: number
+  feeRate: number,
+  extraOutputs?: { script: string; value: number }[] // Additional outputs for reveal tx (e.g., registration fees)
 ) {
   if (deploy.method === "dmint" && contract !== "ft") {
     throw new Error("Token contract does not support dmint deployments");
@@ -777,6 +778,7 @@ export function mintToken(
   const revealOutputs = [
     ...revealTarget.outputs, // Minted token
     ...relUtxos, // Related tokens
+    ...(extraOutputs || []), // Extra outputs (e.g., registration fees)
   ];
 
   const revealFund = fundTx(

@@ -48,12 +48,11 @@ import createExplorerUrl from "@app/network/createExplorerUrl";
 import { RiContractRightLine, RiExpandLeftLine } from "react-icons/ri";
 import { useViewPanelContext } from "@app/layouts/ViewPanelLayout";
 import ActionIcon from "./ActionIcon";
-import { MdDeleteForever, MdLock, MdTimer } from "react-icons/md";
+import { MdDeleteForever, MdEdit, MdLock, MdTimer } from "react-icons/md";
 import { TbArrowUpRight, TbBox } from "react-icons/tb";
 import mime from "mime";
-import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
-// import FetchTokenTest from "./FetchMutableTest";
-// import EditTokenTest from "./EditTokenTest";
+import { GLYPH_ENCRYPTED, GLYPH_MUT, GLYPH_NFT, GLYPH_TIMELOCK } from "@lib/protocols";
+import EditDigitalObject from "./EditDigitalObject";
 
 export const PropertyCard = ({
   heading,
@@ -91,7 +90,7 @@ function Warning({ children }: PropsWithChildren) {
   return (
     <Alert status="warning" as={GridItem} justifyContent="center" colSpan={2}>
       <AlertIcon />
-      <Trans>{children}</Trans>
+      {children}
     </Alert>
   );
 }
@@ -110,6 +109,7 @@ export default function ViewDigitalObject({
   const navigate = useNavigate();
   const sendDisclosure = useDisclosure();
   const meltDisclosure = useDisclosure();
+  const editDisclosure = useDisclosure();
   const successDisclosure = useDisclosure();
   const [nft, txo, author, container] = useLiveQuery(
     async () => {
@@ -151,7 +151,7 @@ export default function ViewDigitalObject({
   };
 
   const openSend = () => sendDisclosure.onOpen();
-
+  const openEdit = () => editDisclosure.onOpen();
   const openMelt = () => meltDisclosure.onOpen();
 
   const openSuccess = (id: string) => {
@@ -161,6 +161,7 @@ export default function ViewDigitalObject({
 
   const isEncrypted = !!(nft.p?.includes(GLYPH_ENCRYPTED));
   const isTimelocked = !!(nft.p?.includes(GLYPH_TIMELOCK));
+  const isMutable = !!(nft.p?.includes(GLYPH_NFT) && nft.p?.includes(GLYPH_MUT));
   const isIPFS = nft.remote?.u?.startsWith("ipfs://");
   const isKnownEmbed = [
     "text/plain",
@@ -196,9 +197,9 @@ export default function ViewDigitalObject({
           }
         >
           <HStack spacing={2} flexWrap="wrap" align="center">
-            <span>{nft.name || t`Unnamed token`}</span>
+            <span>{nft.name || "Unnamed token"}</span>
             {isEncrypted && !decryptedBytes && (
-              <Tooltip label={isTimelocked ? t`Timelocked encrypted content` : t`Contains encrypted content`}>
+              <Tooltip label={isTimelocked ? "Timelocked encrypted content" : "Contains encrypted content"}>
                 <Badge
                   colorScheme={isTimelocked ? "orange" : "blue"}
                   display="flex"
@@ -207,14 +208,28 @@ export default function ViewDigitalObject({
                   fontSize="xs"
                 >
                   <Icon as={isTimelocked ? MdTimer : MdLock} />
-                  {isTimelocked ? t`Timelocked` : t`Encrypted`}
+                  {isTimelocked ? "Timelocked" : "Encrypted"}
+                </Badge>
+              </Tooltip>
+            )}
+            {isMutable && (
+              <Tooltip label={"Token metadata can be modified by the owner"}>
+                <Badge
+                  colorScheme="purple"
+                  display="flex"
+                  alignItems="center"
+                  gap={1}
+                  fontSize="xs"
+                >
+                  <Icon as={MdEdit} />
+                  {"Mutable"}
                 </Badge>
               </Tooltip>
             )}
             {isEncrypted && decryptedBytes && (
               <Badge colorScheme="green" display="flex" alignItems="center" gap={1} fontSize="xs">
                 <Icon as={MdLock} />
-                {t`Decrypted`}
+                {"Decrypted"}
               </Badge>
             )}
           </HStack>
@@ -267,7 +282,7 @@ export default function ViewDigitalObject({
                 />
               </GridItem>
               {nft.embed && !isKnownEmbed && (
-                <Warning>{t`Files may be unsafe and result in loss of funds`}</Warning>
+                <Warning>{"Files may be unsafe and result in loss of funds"}</Warning>
               )}
               {nft.swapPending && (
                 <Alert
@@ -277,12 +292,12 @@ export default function ViewDigitalObject({
                   colSpan={2}
                 >
                   <AlertIcon />
-                  <Trans>Swap pending</Trans>
+                  Swap pending
                 </Alert>
               )}
               {!nft.embed && nft.remote && !isIPFS && (
                 <Warning>
-                  {t`URLs may be unsafe and result in loss of funds`}
+                  {"URLs may be unsafe and result in loss of funds"}
                 </Warning>
               )}
               {isEncrypted && decryptedBytes && (
@@ -294,7 +309,7 @@ export default function ViewDigitalObject({
                   leftIcon={<ActionIcon as={DownloadIcon} />}
                   colSpan={2}
                 >
-                  {t`Download Decrypted File`}
+                  {"Download Decrypted File"}
                 </GridItem>
               )}
               {nft.embed && (
@@ -306,7 +321,7 @@ export default function ViewDigitalObject({
                   leftIcon={<ActionIcon as={DownloadIcon} />}
                   colSpan={2}
                 >
-                  {t`Download`}
+                  {"Download"}
                 </GridItem>
               )}
               {!nft.embed && nft.remote && (
@@ -317,23 +332,25 @@ export default function ViewDigitalObject({
                     leftIcon={<ActionIcon as={CopyIcon} />}
                     colSpan={2}
                   >
-                    {t`Copy URL`}
+                    {"Copy URL"}
                   </GridItem>
                 </>
               )}
-              {/* Edit mutable token, for testing purposes only
-              {nft.immutable === false && (
-                <>
-                  <EditTokenTest token={nft} txo={txo} />
-                  <FetchTokenTest token={nft} />
-                </>
-              )} */}
+              {isMutable && (
+                <Button
+                  leftIcon={<ActionIcon as={MdEdit} />}
+                  onClick={() => unlock(openEdit)}
+                  sx={{ gridColumn: "span 2 / span 2" }}
+                >
+                  {"Edit Token"}
+                </Button>
+              )}
               <Button
                 disabled={nft.swapPending}
                 leftIcon={<ActionIcon as={TbArrowUpRight} />}
                 onClick={() => unlock(openSend)}
               >
-                {t`Send`}
+                {"Send"}
               </Button>
               <Button
                 disabled={nft.swapPending}
@@ -341,7 +358,7 @@ export default function ViewDigitalObject({
                 onClick={() => unlock(openMelt)}
                 _hover={{ bg: "red.600" }}
               >
-                {t`Melt`}
+                {"Melt"}
               </Button>
               {nft.type === "container" && (
                 <Button
@@ -350,27 +367,27 @@ export default function ViewDigitalObject({
                   leftIcon={<ActionIcon as={TbBox} />}
                   sx={{ gridColumn: "span 2 / span 2" }}
                 >
-                  {t`View contents`}
+                  {"View contents"}
                 </Button>
               )}
             </SimpleGrid>
             {nft && (
               <TokenDetails glyph={nft} container={container} author={author}>
-                <PropertyCard heading={t`Output value`}>
+                <PropertyCard heading={"Output value"}>
                   <Photons value={txo.value} />
                 </PropertyCard>
                 {nft.type && (
-                  <PropertyCard heading={t`Type`}>
+                  <PropertyCard heading={"Type"}>
                     <TokenType type={nft.type} />
                   </PropertyCard>
                 )}
-                <PropertyCard heading={t`Location`}>
+                <PropertyCard heading={"Location"}>
                   <div>
                     <Identifier showCopy copyValue={txo.txid}>
                       {location.shortOutput()}
                     </Identifier>
                     <IconButton
-                      aria-label={t`Open in block explorer`}
+                      aria-label={"Open in block explorer"}
                       icon={<ExternalLinkIcon />}
                       size="xs"
                       variant="ghost"
@@ -381,14 +398,14 @@ export default function ViewDigitalObject({
                   </div>
                 </PropertyCard>
                 {/* Temporarily disabled. See comment regarding date in buildUpdateTXOs.
-                      <PropertyCard heading={t`Received`}>
+                      <PropertyCard heading={"Received"}>
                         {txo.date
                           ? dayjs(txo.date * 1000).format("lll")
                           : "Unconfirmed"}
                       </PropertyCard>
                       */}
-                <PropertyCard heading={t`Height`}>
-                  {txo.height === Infinity ? t`Unconfirmed` : txo.height}
+                <PropertyCard heading={"Height"}>
+                  {txo.height === Infinity ? "Unconfirmed" : txo.height}
                 </PropertyCard>
               </TokenDetails>
             )}
@@ -401,6 +418,15 @@ export default function ViewDigitalObject({
         disclosure={sendDisclosure}
         onSuccess={(txid) => {
           sendDisclosure.onClose();
+          openSuccess(txid);
+        }}
+      />
+      <EditDigitalObject
+        token={nft}
+        txo={txo}
+        disclosure={editDisclosure}
+        onSuccess={(txid) => {
+          editDisclosure.onClose();
           openSuccess(txid);
         }}
       />

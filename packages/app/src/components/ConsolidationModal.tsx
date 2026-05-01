@@ -242,7 +242,7 @@ export default function ConsolidationModal() {
         setWaiting(false);
         disclosure.onClose();
         toast({
-          title: t`UTXO consolidation complete`,
+          title: "UTXO consolidation complete",
           status: "success",
         });
       } catch (error) {
@@ -271,16 +271,16 @@ export default function ConsolidationModal() {
     >
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>{t`Consolidation required`}</ModalHeader>
+        <ModalHeader>{"Consolidation required"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          {t`Your wallet contains many unspent outputs that will cause long sync times. Output consolidation is required.`}
+          {"Your wallet contains many unspent outputs that will cause long sync times. Output consolidation is required."}
           <Box mt={2}>{disclosure.isOpen && <OutputCounts />}</Box>
         </ModalBody>
 
         <ModalFooter>
           <Button isLoading={waiting} onClick={onClick}>
-            {waiting ? t`Consolidating UTXOs` : t`Start consolidation process`}
+            {waiting ? "Consolidating UTXOs" : "Start consolidation process"}
           </Button>
         </ModalFooter>
       </ModalContent>

@@ -25,7 +25,7 @@ export default function MintMenu() {
         rightIcon={<ChevronDownIcon />}
         shadow="dark-md"
       >
-        {t`Mint`}
+        {"Mint"}
       </MenuButton>
       <MenuList>
         <MenuItem
@@ -33,28 +33,28 @@ export default function MintMenu() {
           to="/mint/object"
           icon={<Icon as={TbTriangleSquareCircle} fontSize="2xl" />}
         >
-          {t`Non-Fungible Token`}
+          {"Non-Fungible Token"}
         </MenuItem>
         <MenuItem
           as={NavLink}
           to="/mint/fungible"
           icon={<Icon as={TbStack2} fontSize="2xl" />}
         >
-          {t`Fungible Token`}
+          {"Fungible Token"}
         </MenuItem>
         <MenuItem
           as={NavLink}
           to="/mint/container"
           icon={<Icon as={TbBox} fontSize="2xl" />}
         >
-          {t`Container`}
+          {"Container"}
         </MenuItem>
         <MenuItem
           as={NavLink}
           to="/mint/user"
           icon={<Icon as={TbUserCircle} fontSize="2xl" />}
         >
-          {t`User`}
+          {"User"}
         </MenuItem>
       </MenuList>
     </Menu>

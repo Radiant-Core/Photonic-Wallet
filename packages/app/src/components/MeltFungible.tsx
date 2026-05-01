@@ -59,7 +59,7 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
     melt().catch((error) => {
       console.log(error);
       toast({
-        title: t`Error`,
+        title: "Error",
         description: "Could not melt",
         status: "error",
       });
@@ -93,7 +93,7 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
       feeRate.value
     );
     if (!selected.inputs?.length) {
-      setErrorMessage(t`Insufficient funds`);
+      setErrorMessage("Insufficient funds");
       setSuccess(false);
       setLoading(false);
       return;
@@ -112,9 +112,9 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
       const txid = await electrumWorker.value.broadcast(rawTx);
       db.broadcast.put({ txid, date: Date.now(), description: "ft_melt" });
       onSuccess && onSuccess(txid);
-      toast({ status: "success", title: t`Tokens melted` });
+      toast({ status: "success", title: "Tokens melted" });
     } catch (error) {
-      setErrorMessage(t`Transaction rejected`);
+      setErrorMessage("Transaction rejected");
       setSuccess(false);
       setLoading(false);
     }
@@ -125,7 +125,7 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Melt tokens`}</ModalHeader>
+          <ModalHeader>{"Melt tokens"}</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
             {success || (
@@ -136,7 +136,7 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
             )}
             <Flex direction="row" gap={4}>
               <WarningIcon fontSize="2xl" />
-              {t`This will destroy your tokens! Are you sure?`}
+              {"This will destroy your tokens! Are you sure?"}
             </Flex>
           </ModalBody>
           <ModalFooter>
@@ -147,9 +147,9 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
               isLoading={loading}
               mr={4}
             >
-              {t`Melt`}
+              {"Melt"}
             </Button>
-            <Button onClick={onClose}>{t`Cancel`}</Button>
+            <Button onClick={onClose}>{"Cancel"}</Button>
           </ModalFooter>
         </ModalContent>
       </form>

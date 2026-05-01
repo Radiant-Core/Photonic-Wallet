@@ -91,18 +91,18 @@ export default function PasswordModal({
             {success || (
               <Alert status="error" mb={4}>
                 <AlertIcon />
-                <AlertDescription>{t`Incorrect password`}</AlertDescription>
+                <AlertDescription>{"Incorrect password"}</AlertDescription>
               </Alert>
             )}
             <FormControl>
-              <FormLabel>{t`Password`}</FormLabel>
-              <Input ref={password} type="password" placeholder={t`Password`} />
+              <FormLabel>{"Password"}</FormLabel>
+              <Input ref={password} type="password" placeholder={"Password"} />
             </FormControl>
           </ModalBody>
 
           <ModalFooter>
             <Button type="submit" isLoading={loading}>
-              {t`Unlock`}
+              {"Unlock"}
             </Button>
           </ModalFooter>
         </ModalContent>

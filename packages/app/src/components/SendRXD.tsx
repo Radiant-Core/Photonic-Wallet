@@ -26,6 +26,11 @@ import {
   useToast,
   IconButton,
   Flex,
+  Badge,
+  Text,
+  Spinner,
+  Icon,
+  HStack,
 } from "@chakra-ui/react";
 import { photonsToRXD } from "@lib/format";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -39,6 +44,8 @@ import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
 import AddressInput from "./AddressInput";
 import { BsQrCodeScan } from "react-icons/bs";
 import { transferRadiant } from "@lib/transfer";
+import { useWaveResolver, isPotentialWaveName } from "@app/hooks/useWaveResolver";
+import { HiOutlineAtSymbol } from "react-icons/hi";
 
 interface Props {
   onSuccess?: (txid: string) => void;
@@ -54,10 +61,35 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
   const [errorMessage, setErrorMessage] = useState("");
   const toast = useToast();
 
+  // WAVE name resolution
+  const waveResolver = useWaveResolver();
+  const [recipientInput, setRecipientInput] = useState("");
+  const [finalAddress, setFinalAddress] = useState<string | null>(null);
+
   const setFailure = (reason: string) => {
     setErrorMessage(reason);
     setSuccess(false);
     setLoading(false);
+  };
+
+  // Handle recipient input change for WAVE resolution
+  const handleRecipientChange = async (value: string) => {
+    setRecipientInput(value);
+    waveResolver.clear();
+    setFinalAddress(null);
+
+    if (isPotentialWaveName(value)) {
+      const resolved = await waveResolver.resolveName(value);
+      if (resolved) {
+        setFinalAddress(resolved);
+      }
+    } else if (value) {
+      // Check if it's a valid regular address
+      const script = payToScript(value);
+      if (script) {
+        setFinalAddress(value);
+      }
+    }
   };
 
   const rxd = useLiveQuery(
@@ -69,6 +101,9 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
   useEffect(() => {
     setSuccess(true);
     setLoading(false);
+    waveResolver.clear();
+    setRecipientInput("");
+    setFinalAddress(null);
   }, [isOpen]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -77,23 +112,25 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     setLoading(true);
 
     if (!amount.current?.value) {
-      return setFailure(t`Invalid amount`);
+      return setFailure("Invalid amount");
     }
 
-    const p2script = payToScript(toAddress.current?.value || "");
+    // Use resolved WAVE name address or direct address input
+    const recipientAddress = finalAddress || toAddress.current?.value || "";
+    const p2script = payToScript(recipientAddress);
 
     if (!p2script) {
-      return setFailure(t`Invalid address`);
+      return setFailure("Invalid address or unresolved WAVE name");
     }
 
     const amountBig = Big(amount.current.value);
     if (amountBig.lte(0)) {
-      return setFailure(t`Invalid amount`);
+      return setFailure("Invalid amount");
     }
 
     const value = Number(amountBig.times(100000000).round(0, 0).toString());
     if (!Number.isSafeInteger(value) || value <= 0) {
-      return setFailure(t`Invalid amount`);
+      return setFailure("Invalid amount");
     }
 
     const coins: SelectableInput[] = rxd.slice();
@@ -113,7 +150,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
       console.debug("Result", txid);
       toast({
-        title: t`Sent ${photonsToRXD(value)} ${network.value.ticker}`,
+        title: "Sent ${photonsToRXD(value)} ${network.value.ticker}",
         status: "success",
       });
 
@@ -136,11 +173,11 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
         error instanceof Error &&
         error.message === "Electrum client not connected"
       ) {
-        setFailure(t`Not connected to server. Check your network connection.`);
+        setFailure("Not connected to server. Check your network connection.");
       } else if (error instanceof Error) {
         setFailure(error.message);
       } else {
-        setFailure(t`Could not send transaction`);
+        setFailure("Could not send transaction");
       }
       console.error(error);
     }
@@ -149,6 +186,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
   const onScan = (value: string) => {
     setScan(false);
     setSuccess(true);
+    handleRecipientChange(value);
     if (toAddress.current) {
       toAddress.current.value = value;
     }
@@ -167,7 +205,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Send ${network.value.ticker}`}</ModalHeader>
+          <ModalHeader>{`Send ${network.value.ticker}`}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
@@ -176,7 +214,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
           >
             <ModalBody pb={6} gap={4} hidden={scan}>
               <VStack>
-                <Heading size="sm">{t`Balance`}</Heading>
+                <Heading size="sm">{"Balance"}</Heading>
                 <Box>
                   <Balance />
                 </Box>
@@ -188,12 +226,24 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
                 </Alert>
               )}
               <FormControl>
-                <FormLabel>To</FormLabel>
+                <FormLabel>
+                  <HStack spacing={2}>
+                    <span>To</span>
+                    {waveResolver.isWaveName && (
+                      <Badge colorScheme="brand" size="sm">
+                        <Icon as={HiOutlineAtSymbol} boxSize={3} mr={1} />
+                        WAVE
+                      </Badge>
+                    )}
+                  </HStack>
+                </FormLabel>
                 <Flex gap={2}>
                   <Input
                     ref={toAddress}
                     type="text"
-                    placeholder={`${network.value.name} address`}
+                    placeholder={`${network.value.name} address or WAVE name (e.g., alice.rxd)`}
+                    value={recipientInput}
+                    onChange={(e) => handleRecipientChange(e.target.value)}
                   />
                   <IconButton
                     icon={<BsQrCodeScan />}
@@ -201,9 +251,34 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
                     onClick={() => setScan(true)}
                   />
                 </Flex>
+                {/* WAVE resolution status */}
+                {waveResolver.isResolving && (
+                  <Flex align="center" mt={2} gap={2}>
+                    <Spinner size="xs" />
+                    <Text fontSize="xs" color="gray.500">
+                      {"Resolving WAVE name..."}
+                    </Text>
+                  </Flex>
+                )}
+                {waveResolver.error && (
+                  <Alert status="warning" mt={2} size="sm" borderRadius="md">
+                    <AlertIcon boxSize={4} />
+                    <AlertDescription fontSize="xs">
+                      {waveResolver.error}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {waveResolver.resolvedAddress && (
+                  <Alert status="success" mt={2} size="sm" borderRadius="md">
+                    <AlertIcon boxSize={4} />
+                    <AlertDescription fontSize="xs" wordBreak="break-all">
+                      {"Resolved to:"} {waveResolver.resolvedAddress}
+                    </AlertDescription>
+                  </Alert>
+                )}
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Amount`}</FormLabel>
+                <FormLabel>{"Amount"}</FormLabel>
                 <InputGroup>
                   <Input
                     ref={amount}
@@ -226,9 +301,9 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
                 isLoading={loading}
                 mr={4}
               >
-                {t`Send`}
+                {"Send"}
               </Button>
-              <Button onClick={onClose}>{t`Cancel`}</Button>
+              <Button onClick={onClose}>{"Cancel"}</Button>
             </ModalFooter>
           </AddressInput>
         </ModalContent>

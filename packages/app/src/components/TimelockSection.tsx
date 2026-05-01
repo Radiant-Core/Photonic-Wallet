@@ -103,12 +103,12 @@ export function TimelockSection({
       <Flex align="center" justify="space-between">
         <Box>
           <Text fontWeight="semibold" fontSize="sm">
-            {t`Timelock`}
+            {"Timelock"}
           </Text>
           <Text fontSize="xs" color="gray.400">
             {encryptionEnabled
-              ? t`Lock content until a block height or date`
-              : t`Enable encryption first to use timelock`}
+              ? "Lock content until a block height or date"
+              : "Enable encryption first to use timelock"}
           </Text>
         </Box>
         <Switch
@@ -126,7 +126,7 @@ export function TimelockSection({
           {/* Mode selector */}
           <FormControl>
             <FormLabel fontSize="xs" color="gray.300" mb={1}>
-              {t`Lock until`}
+              {"Lock until"}
             </FormLabel>
             <RadioGroup
               value={state.mode}
@@ -137,10 +137,10 @@ export function TimelockSection({
             >
               <HStack spacing={4}>
                 <Radio value="time" colorScheme="purple" size="sm">
-                  <Text fontSize="sm">{t`Date / Time`}</Text>
+                  <Text fontSize="sm">{"Date / Time"}</Text>
                 </Radio>
                 <Radio value="block" colorScheme="purple" size="sm">
-                  <Text fontSize="sm">{t`Block Height`}</Text>
+                  <Text fontSize="sm">{"Block Height"}</Text>
                 </Radio>
               </HStack>
             </RadioGroup>
@@ -160,7 +160,7 @@ export function TimelockSection({
                   bg="whiteAlpha.100"
                 />
                 <FormHelperText fontSize="xs" color="gray.400">
-                  {t`Content will be inaccessible until this date.`}
+                  {"Content will be inaccessible until this date."}
                 </FormHelperText>
               </>
             ) : (
@@ -169,8 +169,8 @@ export function TimelockSection({
                   type="number"
                   placeholder={
                     currentBlock
-                      ? t`Current block: ${currentBlock}`
-                      : t`Enter block height`
+                      ? "Current block: ${currentBlock}"
+                      : "Enter block height"
                   }
                   value={state.unlockValue}
                   onChange={(e) => update({ unlockValue: e.target.value })}
@@ -186,7 +186,7 @@ export function TimelockSection({
                         parseInt(state.unlockValue, 10) - currentBlock;
                       if (isNaN(blocksLeft) || blocksLeft <= 0) return null;
                       const mins = blocksLeft * 2;
-                      return t`~${mins} min (~${blocksLeft} blocks)`;
+                      return "~${mins} min (~${blocksLeft} blocks)";
                     })()}
                   </FormHelperText>
                 )}
@@ -208,16 +208,16 @@ export function TimelockSection({
             alignSelf="flex-start"
             isDisabled={disabled}
           >
-            {showAdvanced ? t`Hide hint` : t`Add hint (optional)`}
+            {showAdvanced ? "Hide hint" : "Add hint (optional)"}
           </Button>
 
           {showAdvanced && (
             <FormControl>
               <FormLabel fontSize="xs" color="gray.300" mb={1}>
-                {t`Hint for viewers`}
+                {"Hint for viewers"}
               </FormLabel>
               <Input
-                placeholder={t`e.g. "Reveal on New Year's Day"`}
+                placeholder={"e.g. \"Reveal on New Year's Day\""}
                 value={state.hint}
                 onChange={(e) => update({ hint: e.target.value })}
                 isDisabled={disabled}
@@ -226,7 +226,7 @@ export function TimelockSection({
                 bg="whiteAlpha.100"
               />
               <FormHelperText fontSize="xs" color="gray.400">
-                {t`Shown publicly before unlock. Do not include sensitive info.`}
+                {"Shown publicly before unlock. Do not include sensitive info."}
               </FormHelperText>
             </FormControl>
           )}
@@ -241,7 +241,7 @@ export function TimelockSection({
           >
             <Text fontSize="xs" color="orange.200">
               ⚠️{" "}
-              {t`Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost.`}
+              {"Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost."}
             </Text>
           </Box>
         </Stack>

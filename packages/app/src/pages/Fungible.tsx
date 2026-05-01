@@ -126,7 +126,7 @@ function TokenGrid() {
 
   return (
     <>
-      <PageHeader toolbar={<MintMenu />}>{t`Fungible Tokens`}</PageHeader>
+      <PageHeader toolbar={<MintMenu />}>{"Fungible Tokens"}</PageHeader>
 
       <Flex
         columnGap={2}
@@ -211,7 +211,7 @@ function TokenGrid() {
         sx={{ scrollbarGutter: "stable both-edges" }}
       >
         {listed.length === 0 ? (
-          <NoContent>{t`No assets`}</NoContent>
+          <NoContent>{"No assets"}</NoContent>
         ) : (
           listed.map(({ token, value }) =>
             value > 0 && (

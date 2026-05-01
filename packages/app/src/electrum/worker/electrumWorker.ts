@@ -156,6 +156,31 @@ const worker = {
       return 0;
     }
   },
+  async resolveWaveName(name: string): Promise<{ target: string } | null> {
+    try {
+      // Query RXinDexer WAVE resolution endpoint
+      const result = await electrum.client?.request(
+        "wave.resolve",
+        name
+      ) as { target: string } | undefined;
+      return result || null;
+    } catch {
+      return null;
+    }
+  },
+  async checkWaveAvailable(name: string): Promise<boolean> {
+    const result = await electrum.client?.request(
+      "wave.check_available",
+      name
+    ) as boolean | undefined;
+
+    // If server returns undefined/null, the method is not supported
+    if (result === undefined || result === null) {
+      throw new Error("Server does not support WAVE availability checking");
+    }
+
+    return result;
+  },
 };
 
 const rxd = new RXDWorker(worker, electrum);

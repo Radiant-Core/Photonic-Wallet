@@ -30,7 +30,7 @@ export default function MobileHome() {
         <Card mx="auto">
           <Flex flexDirection="column" alignItems="center" mb={4}>
             <Text fontSize="xl" fontWeight="medium" mb={2}>
-              <Trans>{network.value.ticker} BALANCE</Trans>
+              {network.value.ticker} BALANCE
             </Text>
             <ValueTag>
               <Balance />
@@ -42,14 +42,14 @@ export default function MobileHome() {
                 openModal.value = { modal: "send" };
               }}
             >
-              {t`Send`}
+              {"Send"}
             </Button>
             <Button
               onClick={() => {
                 openModal.value = { modal: "receive" };
               }}
             >
-              {t`Receive`}
+              {"Receive"}
             </Button>
           </SimpleGrid>
         </Card>

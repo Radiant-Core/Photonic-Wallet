@@ -73,44 +73,43 @@ export default function SideBar({ ...rest }: GridProps) {
           to="/home"
           leftIcon={<Icon as={MdHome} boxSize={5} />}
         >
-          {t`Home`}
+          {"Home"}
         </MenuButton>
         <MenuButton
           to="/objects"
           match={["/objects", "/container"]}
           leftIcon={<Icon as={TbTriangleSquareCircle} boxSize={5} />}
         >
-          {t`Non-Fungible Tokens`}
+          {"Non-Fungible Tokens"}
         </MenuButton>
         <MenuButton
           to="/fungible"
           match="/fungible"
           leftIcon={<Icon as={TbStack2} boxSize={5} />}
         >
-          {t`Fungible Tokens`}
+          {"Fungible Tokens"}
         </MenuButton>
         <MenuButton
-          display="none"
-          to="/names"
+          to="/wave-names"
           leftIcon={<Icon as={HiOutlineAtSymbol} boxSize={5} />}
         >
-          {t`Wave Names`}
+          {"Wave Names"}
         </MenuButton>
         <MenuButton to="/coins" leftIcon={<Icon as={TbCoins} boxSize={5} />}>
-          {t`Coins`}
+          {"Coins"}
         </MenuButton>
         <MenuButton
           to="/swap"
           match={["/swap"]}
           leftIcon={<Icon as={RiSwap2Line} boxSize={5} />}
         >
-          {t`Swap`}
+          {"Swap"}
         </MenuButton>
         <MenuButton
           to="/vault"
           leftIcon={<Icon as={TbLock} boxSize={5} />}
         >
-          {t`Vault`}
+          {"Vault"}
         </MenuButton>
       </SimpleGrid>
       <Box />

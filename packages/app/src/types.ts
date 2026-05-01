@@ -123,6 +123,9 @@ export interface SmartToken {
   }; // Remote file
   height?: number;
   swapPending?: boolean;
+  // Encrypted NFT fields (GLYPH_ENCRYPTED protocol)
+  crypto?: unknown;        // payload.crypto — encryption metadata stub
+  main?: unknown;          // payload.main — on-chain ciphertext or file metadata
 }
 
 export interface Subscription {

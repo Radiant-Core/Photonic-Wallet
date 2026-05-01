@@ -65,12 +65,12 @@ export default function CreateWallet() {
     const passwordValue = password.current?.value || "";
     const confirmValue = confirm.current?.value || "";
     if (confirmValue !== passwordValue) {
-      setError(t`Passwords do not match`);
+      setError("Passwords do not match");
       return false;
     }
 
     if (!networkKeys.includes(network.current?.value || "")) {
-      setError(t`Select a valid network`);
+      setError("Select a valid network");
       return false;
     }
 
@@ -128,7 +128,7 @@ export default function CreateWallet() {
             {step === 0 ? (
               <>
                 <Heading size="md" mb={4}>
-                  {t`Create a wallet`}
+                  {"Create a wallet"}
                 </Heading>
                 {error && (
                   <Alert status="error" mb={4}>
@@ -138,23 +138,23 @@ export default function CreateWallet() {
                 )}
                 <form onSubmit={createWallet}>
                   <FormControl mb={4}>
-                    <FormLabel>{t`Password`}</FormLabel>
+                    <FormLabel>{"Password"}</FormLabel>
                     <Input
                       ref={password}
                       type="password"
-                      placeholder={t`Password`}
+                      placeholder={"Password"}
                     />
                   </FormControl>
                   <FormControl mb={4}>
-                    <FormLabel>{t`Confirm password`}</FormLabel>
+                    <FormLabel>{"Confirm password"}</FormLabel>
                     <Input
                       ref={confirm}
                       type="password"
-                      placeholder={t`Password`}
+                      placeholder={"Password"}
                     />
                   </FormControl>
                   <FormControl mb={4}>
-                    <FormLabel>{t`Network`}</FormLabel>
+                    <FormLabel>{"Network"}</FormLabel>
                     <Select ref={network}>
                       {networkKeys.map((k) => (
                         <option key={k} value={k}>
@@ -167,13 +167,13 @@ export default function CreateWallet() {
                     width="full"
                     type="submit"
                     isLoading={loading}
-                    loadingText={t`Creating wallet`}
+                    loadingText={"Creating wallet"}
                   >
-                    {t`Next`}
+                    {"Next"}
                   </Button>
                   <Center mt={4}>
                     <Button variant="ghost" as={Link} to="/recover">
-                      {t`Recover my wallet`}
+                      {"Recover my wallet"}
                     </Button>
                   </Center>
                 </form>
@@ -181,10 +181,10 @@ export default function CreateWallet() {
             ) : (
               <>
                 <Heading size="md" mb={4}>
-                  {t`Wallet created`}
+                  {"Wallet created"}
                 </Heading>
                 <Box mb={4}>
-                  {t`Your wallet has been created. Please record your recovery phrase below.`}
+                  {"Your wallet has been created. Please record your recovery phrase below."}
                 </Box>
                 <RecoveryPhrase phrase={phrase} />
                 <Button
@@ -193,7 +193,7 @@ export default function CreateWallet() {
                   to="/objects"
                   width="full"
                 >
-                  {t`Confirm`}
+                  {"Confirm"}
                 </Button>
                 <Button
                   display={{ base: "flex", lg: "none" }}
@@ -201,7 +201,7 @@ export default function CreateWallet() {
                   to="/home"
                   width="full"
                 >
-                  {t`Confirm`}
+                  {"Confirm"}
                 </Button>
               </>
             )}

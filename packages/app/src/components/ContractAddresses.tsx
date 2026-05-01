@@ -71,7 +71,7 @@ function ContractRow({ contractRef, index }: { contractRef: string; index: numbe
       _hover={{ bg: "blackAlpha.400" }}
     >
       <Text fontSize="sm" fontWeight="medium" minW="80px">
-        {t`Contract`} {index}
+        {"Contract"} {index}
       </Text>
       <Code 
         fontSize="xs" 
@@ -83,16 +83,16 @@ function ContractRow({ contractRef, index }: { contractRef: string; index: numbe
         {shortRef}
       </Code>
       <HStack gap={1}>
-        <Tooltip label={hasCopied ? t`Copied!` : t`Copy full address`}>
+        <Tooltip label={hasCopied ? "Copied!" : "Copy full address"}>
           <IconButton
             icon={hasCopied ? <CheckIcon color="green.400" /> : <CopyIcon />}
             onClick={onCopy}
             variant="ghost"
             size="xs"
-            aria-label={t`Copy contract address`}
+            aria-label={"Copy contract address"}
           />
         </Tooltip>
-        <Tooltip label={t`View on explorer`}>
+        <Tooltip label={"View on explorer"}>
           <IconButton
             as={RouterLink}
             to={createExplorerUrl(contractRef)}
@@ -100,7 +100,7 @@ function ContractRow({ contractRef, index }: { contractRef: string; index: numbe
             icon={<ExternalLinkIcon />}
             variant="ghost"
             size="xs"
-            aria-label={t`View on explorer`}
+            aria-label={"View on explorer"}
           />
         </Tooltip>
       </HStack>
@@ -127,7 +127,7 @@ export default function ContractAddresses({ linkRef, numContracts: initialCount 
       {!initialCount && (
         <FormControl mb={3}>
           <FormLabel fontSize="xs" color="gray.400">
-            {t`Number of contracts`}
+            {"Number of contracts"}
           </FormLabel>
           <NumberInput 
             size="sm" 
@@ -155,7 +155,7 @@ export default function ContractAddresses({ linkRef, numContracts: initialCount 
       
       {contractRefs.length === 0 && (
         <Text fontSize="sm" color="gray.500">
-          {t`Invalid link reference`}
+          {"Invalid link reference"}
         </Text>
       )}
     </Box>

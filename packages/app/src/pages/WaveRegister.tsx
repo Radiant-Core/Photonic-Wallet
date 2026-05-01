@@ -17,14 +17,21 @@ import {
   useToast,
   Spinner,
 } from "@chakra-ui/react";
-import { t, Trans } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import { wallet, feeRate } from "@app/signals";
 import { mintToken } from "@lib/mint";
-import { createWaveNameMetadata, validateWaveName, calculateNameCost } from "@lib/wave";
+import { 
+  createWaveNameMetadata, 
+  validateWaveName, 
+  calculateNameCost,
+  generateCommitment,
+  createWaveCommitMetadata,
+  verifyCommitment,
+} from "@lib/wave";
 import { photonsToRXD } from "@lib/format";
+import { p2pkhScript } from "@lib/script";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import { ContractType } from "@app/types";
@@ -34,11 +41,20 @@ export default function WaveRegister() {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [description, setDescription] = useState("");
-  const [expires, setExpires] = useState("");
   const [customData, setCustomData] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
+  const [serverCanVerify, setServerCanVerify] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Commit-reveal state
+  const [registrationPhase, setRegistrationPhase] = useState<"commit" | "reveal" | "complete">("commit");
+  const [commitmentData, setCommitmentData] = useState<{
+    commitment: string;
+    salt: string;
+    commitTxId?: string;
+    revealAfterHeight: number;
+  } | null>(null);
   
   const toast = useToast();
   const navigate = useNavigate();
@@ -60,13 +76,18 @@ export default function WaveRegister() {
       }
 
       setIsChecking(true);
+      setServerCanVerify(null);
       try {
-        // In production, this would query the indexer
-        // For now, just validate format
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setIsAvailable(true);
+        // Query RXinDexer for name availability
+        const available = await electrumWorker.value.checkWaveAvailable(fullName);
+        setIsAvailable(available);
+        setServerCanVerify(true);
       } catch (error) {
-        setIsAvailable(false);
+        // If the server doesn't support wave.check_available, fall back to assuming available
+        // The actual registration will fail on-chain if name is taken
+        console.warn("WAVE availability check failed:", error);
+        setIsAvailable(true);
+        setServerCanVerify(false);
       } finally {
         setIsChecking(false);
       }
@@ -76,29 +97,11 @@ export default function WaveRegister() {
     return () => clearTimeout(debounce);
   }, [fullName, validation.valid]);
 
-  const handleRegister = async () => {
+  const handleCommit = async () => {
     if (!wallet.value.wif || !utxos) {
       toast({
-        title: t`Error`,
-        description: t`Wallet not unlocked or UTXOs not loaded`,
-        status: "error",
-      });
-      return;
-    }
-
-    if (!validation.valid) {
-      toast({
-        title: t`Invalid Name`,
-        description: validation.error,
-        status: "error",
-      });
-      return;
-    }
-
-    if (!target) {
-      toast({
-        title: t`Target Required`,
-        description: t`Please enter a target address or reference`,
+        title: "Error",
+        description: "Wallet not unlocked or UTXOs not loaded",
         status: "error",
       });
       return;
@@ -107,42 +110,33 @@ export default function WaveRegister() {
     setIsLoading(true);
 
     try {
-      // Parse custom data JSON if provided
-      let parsedData;
-      if (customData) {
-        try {
-          parsedData = JSON.parse(customData);
-        } catch {
-          toast({
-            title: t`Invalid JSON`,
-            description: t`Custom data must be valid JSON`,
-            status: "error",
-          });
-          setIsLoading(false);
-          return;
-        }
-      }
+      // Generate commitment for name (prevents front-running)
+      const { commitment, salt } = generateCommitment(fullName);
+      
+      // Get current height for reveal timing
+      const currentHeight = await electrumWorker.value.getBlockHeight();
+      const revealAfterHeight = currentHeight + 1; // Minimum 1 block delay
 
-      // Create WAVE name metadata
-      const metadata = createWaveNameMetadata(fullName, wallet.value.address, {
-        target,
-        desc: description || `WAVE name: ${fullName}`,
-        expires: expires ? Math.floor(new Date(expires).getTime() / 1000) : undefined,
-        data: parsedData,
-      });
+      // Create commit metadata (temporary NFT holding the commitment)
+      const commitMetadata = createWaveCommitMetadata(
+        commitment,
+        wallet.value.address,
+        revealAfterHeight
+      );
 
-      // Mint WAVE name token
+      // Mint commit NFT (no registration fee yet - paid on reveal)
       const { commitTx, revealTx } = mintToken(
         "nft",
         { method: "direct", params: { address: wallet.value.address }, value: 1 },
         wallet.value.wif,
         utxos,
-        metadata,
+        commitMetadata,
         [],
-        feeRate.value
+        feeRate.value,
+        [] // No fee output for commit phase
       );
 
-      // Broadcast transactions
+      // Broadcast commit transaction
       const commitTxId = await electrumWorker.value.broadcast(commitTx.toString());
       await db.broadcast.put({
         txid: commitTxId,
@@ -150,6 +144,118 @@ export default function WaveRegister() {
         description: "wave_name_commit",
       });
 
+      // Store commitment data for reveal phase
+      await db.kvp.put({
+        key: `wave_commit_${commitTxId}`,
+        value: {
+          commitment,
+          salt,
+          fullName,
+          target,
+          description,
+          customData,
+          revealAfterHeight,
+          commitTxId,
+        },
+      });
+
+      setCommitmentData({
+        commitment,
+        salt,
+        commitTxId,
+        revealAfterHeight,
+      });
+      setRegistrationPhase("reveal");
+
+      toast({
+        title: "Commit Phase Complete",
+        description: (
+          <VStack align="start" spacing={1}>
+            <Text>Commitment broadcast. Waiting for confirmation...</Text>
+            <Text fontSize="sm">TXID: {commitTxId.slice(0, 20)}...</Text>
+            <Text fontSize="sm">You can reveal after block {revealAfterHeight}</Text>
+          </VStack>
+        ),
+        status: "success",
+        duration: 10000,
+      });
+    } catch (error) {
+      console.error("Commit failed:", error);
+      toast({
+        title: "Commit Failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        status: "error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReveal = async () => {
+    if (!wallet.value.wif || !utxos || !commitmentData) {
+      toast({
+        title: "Error",
+        description: "Missing wallet data or commitment",
+        status: "error",
+      });
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // Retrieve stored commitment data
+      const storedCommit = await db.kvp.get(`wave_commit_${commitmentData.commitTxId}`) as any;
+      if (!storedCommit) {
+        throw new Error("Commitment data not found");
+      }
+
+      // Verify commitment matches
+      if (!verifyCommitment(commitmentData.commitment, fullName, commitmentData.salt)) {
+        throw new Error("Commitment verification failed - name may have been tampered with");
+      }
+
+      // Check current height
+      const currentHeight = await electrumWorker.value.getBlockHeight();
+      if (currentHeight < storedCommit.revealAfterHeight) {
+        throw new Error(`Cannot reveal yet. Wait until block ${storedCommit.revealAfterHeight} (current: ${currentHeight})`);
+      }
+
+      // Parse custom data
+      let parsedData;
+      if (storedCommit.customData) {
+        parsedData = JSON.parse(storedCommit.customData);
+      }
+
+      // Create actual WAVE name metadata with 2-year default expiration
+      const metadata = createWaveNameMetadata(fullName, wallet.value.address, {
+        target: storedCommit.target,
+        desc: storedCommit.description || `WAVE name: ${fullName}`,
+        data: parsedData,
+      });
+
+      // Calculate registration fee
+      const registrationFee = calculateNameCost(fullName);
+      const feeAddress = "1GrwkQNJfjbEJjH25heszNZLpbZou8nfXG";
+      const feeOutput = { script: p2pkhScript(feeAddress), value: registrationFee };
+
+      // Record the commit txid in metadata (not the salt — keep salt off-chain)
+      const metaAttrs = metadata.attrs as Record<string, unknown>;
+      metaAttrs.commitTxId = commitmentData.commitTxId;
+
+      // Mint WAVE name token with registration fee
+      const { commitTx, revealTx } = mintToken(
+        "nft",
+        { method: "direct", params: { address: wallet.value.address }, value: 1 },
+        wallet.value.wif,
+        utxos,
+        metadata,
+        [],
+        feeRate.value,
+        [feeOutput]
+      );
+
+      // Broadcast reveal transaction
       const revealTxId = await electrumWorker.value.broadcast(revealTx.toString());
       await db.broadcast.put({
         txid: revealTxId,
@@ -157,32 +263,28 @@ export default function WaveRegister() {
         description: "wave_name_reveal",
       });
 
+      setRegistrationPhase("complete");
+
       toast({
-        title: t`WAVE Name Registered!`,
+        title: "WAVE Name Registered!",
         description: (
           <VStack align="start" spacing={1}>
-            <Text>
-              <Trans>Name: {fullName}</Trans>
-            </Text>
-            <Text fontSize="sm">
-              <Trans>Transaction: {revealTxId.substring(0, 16)}...</Trans>
-            </Text>
+            <Text>{fullName} is now yours for 2 years!</Text>
+            <Text fontSize="sm">Reveal TX: {revealTxId.slice(0, 16)}...</Text>
+            <Text fontSize="sm">Cost: {photonsToRXD(registrationFee)} RXD</Text>
           </VStack>
         ),
         status: "success",
-        duration: 10000,
-        isClosable: true,
+        duration: 15000,
       });
 
-      // Navigate to wallet or tokens page
-      navigate("/");
+      navigate("/wave-names");
     } catch (error) {
-      console.error("WAVE registration error:", error);
+      console.error("Reveal failed:", error);
       toast({
-        title: t`Registration Failed`,
-        description: String(error),
+        title: "Reveal Failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
         status: "error",
-        duration: 5000,
       });
     } finally {
       setIsLoading(false);
@@ -192,41 +294,49 @@ export default function WaveRegister() {
   return (
     <Container maxW="container.md" py={8}>
       <PageHeader>
-        {t`Register WAVE Name`}
+        {"Register WAVE Name"}
       </PageHeader>
 
       <ContentContainer>
         <VStack spacing={6} align="stretch">
           <FormControl isInvalid={!!name && !validation.valid}>
             <FormLabel>
-              <Trans>WAVE Name</Trans>
+              WAVE Name
             </FormLabel>
             <HStack>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value.toLowerCase())}
-                placeholder={t`alice`}
+                placeholder={"alice"}
                 flex={1}
               />
               <Text fontWeight="bold">.rxd</Text>
             </HStack>
             <FormHelperText>
-              {!name && <Trans>Enter a name (3-63 characters, lowercase alphanumeric and hyphens)</Trans>}
+              {!name && "Enter a name (3-63 characters, lowercase alphanumeric and hyphens)"}
               {name && !validation.valid && <Text color="red.400">{validation.error}</Text>}
               {name && validation.valid && isChecking && (
                 <HStack>
                   <Spinner size="xs" />
-                  <Trans>Checking availability...</Trans>
+                  Checking availability...
                 </HStack>
               )}
-              {name && validation.valid && !isChecking && isAvailable === true && (
+              {name && validation.valid && !isChecking && isAvailable === true && serverCanVerify === true && (
                 <Text color="green.400">
-                  <Trans>✓ Available</Trans>
+                  ✓ Available
                 </Text>
+              )}
+              {name && validation.valid && !isChecking && isAvailable === true && serverCanVerify === false && (
+                <Alert status="warning" size="sm" borderRadius="md" py={1}>
+                  <AlertIcon boxSize={4} />
+                  <AlertDescription fontSize="sm">
+                    Server cannot verify availability. Registration will fail if name is already taken.
+                  </AlertDescription>
+                </Alert>
               )}
               {name && validation.valid && !isChecking && isAvailable === false && (
                 <Text color="red.400">
-                  <Trans>✗ Name already registered</Trans>
+                  ✗ Name already registered
                 </Text>
               )}
             </FormHelperText>
@@ -238,13 +348,13 @@ export default function WaveRegister() {
               <AlertDescription>
                 <VStack align="start" spacing={1}>
                   <Text fontWeight="bold">
-                    <Trans>Registration Cost</Trans>
+                    Registration Cost
                   </Text>
                   <Text fontSize="lg" color="blue.300">
                     {photonsToRXD(cost)} RXD
                   </Text>
                   <Text fontSize="sm">
-                    <Trans>Shorter names cost more. This is a one-time fee.</Trans>
+                    Shorter names cost more. This is a one-time fee.
                   </Text>
                 </VStack>
               </AlertDescription>
@@ -255,67 +365,122 @@ export default function WaveRegister() {
 
           <FormControl>
             <FormLabel>
-              <Trans>Target Address/Reference</Trans>
+              Target Address/Reference
             </FormLabel>
             <Input
               value={target}
               onChange={(e) => setTarget(e.target.value)}
-              placeholder={t`1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`}
+              placeholder={"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"}
             />
             <FormHelperText>
-              <Trans>The address or token reference this name points to</Trans>
+              The address or token reference this name points to
             </FormHelperText>
           </FormControl>
 
           <FormControl>
             <FormLabel>
-              <Trans>Description (Optional)</Trans>
+              Description (Optional)
             </FormLabel>
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={t`My primary Radiant address`}
+              placeholder={"My primary Radiant address"}
             />
           </FormControl>
 
-          <FormControl>
-            <FormLabel>
-              <Trans>Expiration Date (Optional)</Trans>
-            </FormLabel>
-            <Input
-              type="datetime-local"
-              value={expires}
-              onChange={(e) => setExpires(e.target.value)}
-            />
-            <FormHelperText>
-              <Trans>Leave empty for no expiration</Trans>
-            </FormHelperText>
-          </FormControl>
+          <Alert status="info" borderRadius="md" variant="subtle">
+            <AlertIcon />
+            <AlertDescription>
+              <VStack align="start" spacing={1}>
+                <Text fontWeight="bold">Registration Info</Text>
+                <Text fontSize="sm">All WAVE names now have a default 2-year expiration with a 30-day grace period for renewal.</Text>
+                <Text fontSize="sm">Registration uses commit-reveal pattern to prevent front-running and ensure fair allocation.</Text>
+              </VStack>
+            </AlertDescription>
+          </Alert>
 
           <FormControl>
             <FormLabel>
-              <Trans>Custom Data (Optional JSON)</Trans>
+              Custom Data (Optional JSON)
             </FormLabel>
             <Input
               value={customData}
               onChange={(e) => setCustomData(e.target.value)}
-              placeholder={t`{"twitter": "@alice", "website": "alice.com"}`}
+              placeholder={'{"twitter": "@alice", "website": "alice.com"}'}
               fontFamily="mono"
             />
             <FormHelperText>
-              <Trans>Additional metadata in JSON format</Trans>
+              Additional metadata in JSON format
             </FormHelperText>
           </FormControl>
 
+          {registrationPhase === "commit" && (
+            <Button
+              colorScheme="blue"
+              size="lg"
+              onClick={handleCommit}
+              isLoading={isLoading}
+              isDisabled={!validation.valid || isAvailable !== true || !target}
+            >
+              {"Commit Name"}
+            </Button>
+          )}
+
+          {registrationPhase === "reveal" && commitmentData && (
+            <VStack spacing={4} align="stretch">
+              <Alert status="warning" borderRadius="md">
+                <AlertIcon />
+                <AlertDescription>
+                  <VStack align="start" spacing={1}>
+                    <Text fontWeight="bold">Ready to Reveal</Text>
+                    <Text fontSize="sm">Commit confirmed. Click reveal to complete registration.</Text>
+                    {commitmentData.revealAfterHeight > 0 && (
+                      <Text fontSize="sm">Minimum block: {commitmentData.revealAfterHeight}</Text>
+                    )}
+                  </VStack>
+                </AlertDescription>
+              </Alert>
+              <Button
+                colorScheme="green"
+                size="lg"
+                onClick={handleReveal}
+                isLoading={isLoading}
+              >
+                {"Reveal Name"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRegistrationPhase("commit");
+                  setCommitmentData(null);
+                }}
+              >
+                {"Cancel & Start Over"}
+              </Button>
+            </VStack>
+          )}
+
+          {registrationPhase === "complete" && (
+            <Alert status="success" borderRadius="md">
+              <AlertIcon />
+              <AlertDescription>
+                Registration complete! Redirecting to your WAVE names...
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Legacy button - should not be visible in new flow */}
           <Button
             colorScheme="blue"
             size="lg"
-            onClick={handleRegister}
+            display="none"
+            onClick={handleCommit}
             isLoading={isLoading}
             isDisabled={!validation.valid || isAvailable !== true || !target}
-            loadingText={t`Registering...`}
+            loadingText={"Registering..."}
           >
-            <Trans>Register WAVE Name</Trans>
+            Register WAVE Name
           </Button>
         </VStack>
       </ContentContainer>

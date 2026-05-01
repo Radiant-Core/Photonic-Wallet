@@ -39,6 +39,8 @@ import SwapLoad from "./pages/SwapLoad";
 import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
 import VaultPage from "./pages/Vault";
+import WaveRegister from "./pages/WaveRegister";
+import WaveNames from "./pages/WaveNames";
 
 dayjs.extend(localizedFormat);
 
@@ -335,12 +337,12 @@ function ErrorPage() {
   const error = useRouteError() as Error & { statusText?: string };
   console.error("[ErrorPage]", error);
   return (
-    <div style={{ padding: 24, color: "#fff", fontFamily: "monospace" }}>
+    <div className="error-page">
       <h1>Something went wrong</h1>
-      <pre style={{ whiteSpace: "pre-wrap", marginTop: 12 }}>
+      <pre className="error-page-pre">
         {error?.message || error?.statusText || JSON.stringify(error)}
       </pre>
-      <pre style={{ whiteSpace: "pre-wrap", marginTop: 12, opacity: 0.6 }}>
+      <pre className="error-page-stack">
         {error?.stack}
       </pre>
     </div>
@@ -460,7 +462,11 @@ const router = createHashRouter([
           },
           {
             path: "/names",
-            element: <Placeholder />,
+            element: <WaveRegister />,
+          },
+          {
+            path: "/wave-names",
+            element: <WaveNames />,
           },
           {
             element: <SettingsLayout />,

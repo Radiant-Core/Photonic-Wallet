@@ -34,12 +34,7 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
     <HStack spacing={2} flexWrap="wrap">
       {showRoyalty && (
         <Tooltip
-          label={
-            <Trans>
-              {metadata.royalty!.enforced ? "Enforced" : "Advisory"} Royalty:{" "}
-              {metadata.royalty!.bps / 100}%
-            </Trans>
-          }
+          label={`${metadata.royalty!.enforced ? "Enforced" : "Advisory"} Royalty: ${metadata.royalty!.bps / 100}%`}
         >
           <Badge
             colorScheme={metadata.royalty!.enforced ? "purple" : "gray"}
@@ -48,76 +43,71 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
             gap={1}
           >
             <Icon as={MdLocalFireDepartment} />
-            <Trans>{metadata.royalty!.bps / 100}% Royalty</Trans>
+            {metadata.royalty!.bps / 100}% Royalty
           </Badge>
         </Tooltip>
       )}
 
       {showSoulbound && (
-        <Tooltip label={<Trans>Non-transferable (Soulbound)</Trans>}>
+        <Tooltip label="Non-transferable (Soulbound)">
           <Badge colorScheme="orange" display="flex" alignItems="center" gap={1}>
             <Icon as={MdLock} />
-            <Trans>Soulbound</Trans>
+            Soulbound
           </Badge>
         </Tooltip>
       )}
 
       {showCreatorSig && (
-        <Tooltip label={<Trans>Creator signature verified</Trans>}>
+        <Tooltip label="Creator signature verified">
           <Badge colorScheme="green" display="flex" alignItems="center" gap={1}>
             <Icon as={MdVerified} />
-            <Trans>Verified</Trans>
+            Verified
           </Badge>
         </Tooltip>
       )}
 
       {showEncrypted && (
-        <Tooltip label={<Trans>Contains encrypted content</Trans>}>
+        <Tooltip label="Contains encrypted content">
           <Badge colorScheme="blue" display="flex" alignItems="center" gap={1}>
             <Icon as={MdSecurity} />
-            <Trans>Encrypted</Trans>
+            Encrypted
           </Badge>
         </Tooltip>
       )}
 
       {showTimelocked && (
-        <Tooltip label={<Trans>Timelocked reveal</Trans>}>
+        <Tooltip label="Timelocked reveal">
           <Badge colorScheme="cyan" display="flex" alignItems="center" gap={1}>
             <Icon as={MdTimer} />
-            <Trans>Timelocked</Trans>
+            Timelocked
           </Badge>
         </Tooltip>
       )}
 
       {showContainer && (
         <Tooltip
-          label={
-            <Trans>
-              Collection ({metadata.container?.minted || 0}/
-              {metadata.container?.max_items || "∞"})
-            </Trans>
-          }
+          label={`Collection (${metadata.container?.minted || 0}/${metadata.container?.max_items || "∞"})`}
         >
           <Badge colorScheme="teal" display="flex" alignItems="center" gap={1}>
             <Icon as={MdFolder} />
-            <Trans>Collection</Trans>
+            Collection
           </Badge>
         </Tooltip>
       )}
 
       {showAuthority && (
-        <Tooltip label={<Trans>Authority Token</Trans>}>
+        <Tooltip label="Authority Token">
           <Badge colorScheme="red" display="flex" alignItems="center" gap={1}>
             <Icon as={MdSecurity} />
-            <Trans>Authority</Trans>
+            Authority
           </Badge>
         </Tooltip>
       )}
 
       {showWave && (
-        <Tooltip label={<Trans>WAVE Name</Trans>}>
+        <Tooltip label="WAVE Name">
           <Badge colorScheme="pink" display="flex" alignItems="center" gap={1}>
-            <Trans>WAVE</Trans>
+            WAVE
           </Badge>
         </Tooltip>
       )}

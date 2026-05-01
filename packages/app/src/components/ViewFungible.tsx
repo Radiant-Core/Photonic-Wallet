@@ -183,7 +183,7 @@ export default function ViewFungible({
             />
           }
         >
-          {token.name || t`Unnamed token`}
+          {token.name || "Unnamed token"}
         </PageHeader>
         <Container maxW="container.xl" overflowY="auto" pb={4}>
           <Grid
@@ -230,11 +230,11 @@ export default function ViewFungible({
                 </Flex>
               </GridItem>
               {token.embed && !isKnownEmbed && (
-                <Warning>{t`Files may be unsafe and result in loss of funds`}</Warning>
+                <Warning>{"Files may be unsafe and result in loss of funds"}</Warning>
               )}
               {!token.embed && token.remote && !isIPFS && (
                 <Warning>
-                  {t`URLs may be unsafe and result in loss of funds`}
+                  {"URLs may be unsafe and result in loss of funds"}
                 </Warning>
               )}
               {!token.embed && token.remote && (
@@ -244,7 +244,7 @@ export default function ViewFungible({
                     onClick={onLinkCopy}
                     leftIcon={<CopyIcon />}
                   >
-                    {t`Copy URL`}
+                    {"Copy URL"}
                   </GridItem>
                 </>
               )}
@@ -254,7 +254,7 @@ export default function ViewFungible({
                   onClick={() => unlock(openSend)}
                   flexGrow={1}
                 >
-                  {t`Send`}
+                  {"Send"}
                 </Button>
                 <Menu>
                   <MenuButton

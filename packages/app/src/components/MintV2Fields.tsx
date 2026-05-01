@@ -60,14 +60,14 @@ export default function MintV2Fields({
         <AccordionButton>
           <Box flex="1" textAlign="left">
             <Text fontWeight="bold">
-              <Trans>Royalty Settings</Trans>
+              Royalty Settings
             </Text>
             <Text fontSize="sm" color="gray.400">
-              <Trans>Configure on-chain or advisory royalties</Trans>
+              Configure on-chain or advisory royalties
             </Text>
           </Box>
           <Badge colorScheme="purple" mr={2}>
-            <Trans>v2</Trans>
+            v2
           </Badge>
           <AccordionIcon />
         </AccordionButton>
@@ -80,14 +80,14 @@ export default function MintV2Fields({
         <AccordionButton>
           <Box flex="1" textAlign="left">
             <Text fontWeight="bold">
-              <Trans>Policy Settings</Trans>
+              Policy Settings
             </Text>
             <Text fontSize="sm" color="gray.400">
-              <Trans>Renderable, transferable, NSFW flags</Trans>
+              Renderable, transferable, NSFW flags
             </Text>
           </Box>
           <Badge colorScheme="purple" mr={2}>
-            <Trans>v2</Trans>
+            v2
           </Badge>
           <AccordionIcon />
         </AccordionButton>
@@ -100,14 +100,14 @@ export default function MintV2Fields({
         <AccordionButton>
           <Box flex="1" textAlign="left">
             <Text fontWeight="bold">
-              <Trans>Rights & Licensing</Trans>
+              Rights & Licensing
             </Text>
             <Text fontSize="sm" color="gray.400">
-              <Trans>License, terms, and attribution</Trans>
+              License, terms, and attribution
             </Text>
           </Box>
           <Badge colorScheme="purple" mr={2}>
-            <Trans>v2</Trans>
+            v2
           </Badge>
           <AccordionIcon />
         </AccordionButton>
@@ -115,35 +115,35 @@ export default function MintV2Fields({
           <VStack spacing={4} align="stretch">
             <FormControl>
               <FormLabel>
-                <Trans>License</Trans>
+                License
               </FormLabel>
               <Input
                 value={license}
                 onChange={(e) => setLicense(e.target.value)}
-                placeholder={t`CC BY 4.0, MIT, etc.`}
+                placeholder={"CC BY 4.0, MIT, etc."}
               />
             </FormControl>
 
             <FormControl>
               <FormLabel>
-                <Trans>Terms</Trans>
+                Terms
               </FormLabel>
               <Textarea
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
-                placeholder={t`Usage terms and conditions`}
+                placeholder={"Usage terms and conditions"}
                 rows={3}
               />
             </FormControl>
 
             <FormControl>
               <FormLabel>
-                <Trans>Attribution</Trans>
+                Attribution
               </FormLabel>
               <Input
                 value={attribution}
                 onChange={(e) => setAttribution(e.target.value)}
-                placeholder={t`How to credit the creator`}
+                placeholder={"How to credit the creator"}
               />
             </FormControl>
           </VStack>
@@ -154,21 +154,21 @@ export default function MintV2Fields({
         <AccordionButton>
           <Box flex="1" textAlign="left">
             <Text fontWeight="bold">
-              <Trans>Creator Signature</Trans>
+              Creator Signature
             </Text>
             <Text fontSize="sm" color="gray.400">
-              <Trans>Cryptographically sign this token</Trans>
+              Cryptographically sign this token
             </Text>
           </Box>
           <Badge colorScheme="purple" mr={2}>
-            <Trans>v2</Trans>
+            v2
           </Badge>
           <AccordionIcon />
         </AccordionButton>
         <AccordionPanel pb={4}>
           <FormControl display="flex" alignItems="center">
             <FormLabel mb={0} flex={1}>
-              <Trans>Sign with wallet key</Trans>
+              Sign with wallet key
             </FormLabel>
             <Switch
               isChecked={creatorSign}
@@ -176,10 +176,8 @@ export default function MintV2Fields({
             />
           </FormControl>
           <Text fontSize="sm" color="gray.400" mt={2}>
-            <Trans>
-              Adds a cryptographic signature proving you created this token.
-              This provides verifiable provenance.
-            </Trans>
+            Adds a cryptographic signature proving you created this token.
+            This provides verifiable provenance.
           </Text>
         </AccordionPanel>
       </AccordionItem>

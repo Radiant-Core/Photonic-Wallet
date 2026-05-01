@@ -88,7 +88,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
     <VStack spacing={4} align="stretch">
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0}>
-          <Trans>Enable Royalties</Trans>
+          Enable Royalties
         </FormLabel>
         <Switch
           isChecked={enabled}
@@ -100,24 +100,22 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
         <>
           <FormControl display="flex" alignItems="center">
             <FormLabel mb={0}>
-              <Trans>Enforce On-Chain</Trans>
+              Enforce On-Chain
             </FormLabel>
             <Switch
               isChecked={enforced}
               onChange={(e) => setEnforced(e.target.checked)}
             />
             <FormHelperText ml={3} mb={0}>
-              <Trans>
-                {enforced
-                  ? "Royalties enforced by smart contract"
-                  : "Advisory only"}
-              </Trans>
+              {enforced
+                ? "Royalties enforced by smart contract"
+                : "Advisory only"}
             </FormHelperText>
           </FormControl>
 
           <FormControl>
             <FormLabel>
-              <Trans>Royalty Percentage</Trans>
+              Royalty Percentage
             </FormLabel>
             <NumberInput
               value={bps / 100}
@@ -134,24 +132,24 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
               </NumberInputStepper>
             </NumberInput>
             <FormHelperText>
-              <Trans>{bps} basis points ({bps / 100}%)</Trans>
+              {bps} basis points ({bps / 100}%)
             </FormHelperText>
           </FormControl>
 
           <FormControl>
             <FormLabel>
-              <Trans>Royalty Recipient Address</Trans>
+              Royalty Recipient Address
             </FormLabel>
             <Input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              placeholder={t`Enter Radiant address`}
+              placeholder={"Enter Radiant address"}
             />
           </FormControl>
 
           <FormControl>
             <FormLabel>
-              <Trans>Minimum Royalty (photons)</Trans>
+              Minimum Royalty (photons)
             </FormLabel>
             <NumberInput
               value={minimum}
@@ -165,7 +163,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
               </NumberInputStepper>
             </NumberInput>
             <FormHelperText>
-              <Trans>Optional minimum royalty amount</Trans>
+              Optional minimum royalty amount
             </FormHelperText>
           </FormControl>
 
@@ -174,7 +172,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
           <VStack align="stretch" spacing={3}>
             <HStack justify="space-between">
               <Text fontWeight="bold">
-                <Trans>Royalty Splits (Optional)</Trans>
+                Royalty Splits (Optional)
               </Text>
               <Button
                 size="sm"
@@ -182,14 +180,14 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
                 onClick={addSplit}
                 variant="outline"
               >
-                <Trans>Add Split</Trans>
+                Add Split
               </Button>
             </HStack>
 
             {splits.map((split, index) => (
               <HStack key={index} spacing={2}>
                 <Input
-                  placeholder={t`Address`}
+                  placeholder={"Address"}
                   value={split.address}
                   onChange={(e) => updateSplit(index, "address", e.target.value)}
                   flex={2}
@@ -206,7 +204,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
                   <NumberInputField placeholder="%" />
                 </NumberInput>
                 <IconButton
-                  aria-label={t`Remove split`}
+                  aria-label={"Remove split"}
                   icon={<DeleteIcon />}
                   onClick={() => removeSplit(index)}
                   colorScheme="red"
@@ -217,10 +215,8 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
 
             {splitError && (
               <Text color="red.400" fontSize="sm">
-                <Trans>
-                  Split percentages must sum to {bps / 100}% (currently{" "}
-                  {totalSplitBps / 100}%)
-                </Trans>
+                Split percentages must sum to {bps / 100}% (currently{" "}
+                {totalSplitBps / 100}%)
               </Text>
             )}
           </VStack>

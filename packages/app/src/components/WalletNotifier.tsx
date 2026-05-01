@@ -48,9 +48,7 @@ function ReadyForNotifications({
       }
       if (notifyCount > maxNotifications) {
         toast({
-          title: t`Suppressed ${
-            notifyCount - maxNotifications
-          } more notifications`,
+          title: `Suppressed ${notifyCount - maxNotifications} more notifications`,
         });
       }
       if (maxId > 0) {

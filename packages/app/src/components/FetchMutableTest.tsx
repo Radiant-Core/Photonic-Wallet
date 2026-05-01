@@ -54,7 +54,7 @@ export default function FetchTokenTest({ token }: { token: SmartToken }) {
       leftIcon={<DownloadIcon />}
       colSpan={2}
     >
-      {t`Fetch`}
+      {"Fetch"}
     </GridItem>
   );
 }

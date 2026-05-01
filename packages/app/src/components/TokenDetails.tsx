@@ -41,7 +41,7 @@ function RefProperty({ tokenRef }: { tokenRef: Outpoint }) {
         {tokenRef.ref("i")}
       </Identifier>
       <IconButton
-        aria-label={t`Open in block explorer`}
+        aria-label={"Open in block explorer"}
         icon={<ExternalLinkIcon />}
         size="xs"
         variant="ghost"
@@ -75,25 +75,25 @@ export default function TokenDetails({
     <div>
       <Tabs>
         <TabList>
-          <Tab>{t`Details`}</Tab>
-          <Tab>{t`Inspect`}</Tab>
+          <Tab>{"Details"}</Tab>
+          <Tab>{"Inspect"}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel px={0}>
             {glyph.description && (
-              <PropertyCard heading={t`Description`} mb={4}>
+              <PropertyCard heading={"Description"} mb={4}>
                 {glyph.description.substring(0, 1000)}
               </PropertyCard>
             )}
-            <PropertyCard heading={t`Radiant ID`} mb={4}>
+            <PropertyCard heading={"Radiant ID"} mb={4}>
               <RefProperty tokenRef={ref} />
             </PropertyCard>
             {glyph.location && (
               <>
-                <PropertyCard heading={t`Link`} mb={4}>
+                <PropertyCard heading={"Link"} mb={4}>
                   <RefProperty tokenRef={Outpoint.fromString(glyph.location)} />
                 </PropertyCard>
-                <PropertyCard heading={t`Mining Contracts`} mb={4}>
+                <PropertyCard heading={"Mining Contracts"} mb={4}>
                   <ContractAddresses 
                     linkRef={Outpoint.fromString(glyph.location).ref()} 
                   />
@@ -101,13 +101,13 @@ export default function TokenDetails({
               </>
             )}
             {revealRef && (
-              <PropertyCard heading={t`Mint`} mb={4}>
+              <PropertyCard heading={"Mint"} mb={4}>
                 <div>
                   <Identifier showCopy copyValue={revealRef.ref()}>
                     {revealRef.ref("i")}
                   </Identifier>
                   <IconButton
-                    aria-label={t`Open in block explorer`}
+                    aria-label={"Open in block explorer"}
                     icon={<ExternalLinkIcon />}
                     size="xs"
                     variant="ghost"
@@ -119,7 +119,7 @@ export default function TokenDetails({
               </PropertyCard>
             )}
             {authorRef && (
-              <PropertyCard heading={t`Author`} mb={4}>
+              <PropertyCard heading={"Author"} mb={4}>
                 <Flex justifyContent="space-between" alignItems="center">
                   {author?.name ? (
                     <Text>{author.name}</Text>
@@ -142,7 +142,7 @@ export default function TokenDetails({
               </PropertyCard>
             )}
             {containerRef && (
-              <PropertyCard heading={t`Container`} mb={4}>
+              <PropertyCard heading={"Container"} mb={4}>
                 <Flex justifyContent="space-between" alignItems="center">
                   {container?.name ? (
                     <Text>{container.name}</Text>
@@ -166,7 +166,7 @@ export default function TokenDetails({
             )}
             <SimpleGrid columns={[1, 2]} spacing={4}>
               {isIPFS && (
-                <PropertyCard heading={t`IPFS CID`}>
+                <PropertyCard heading={"IPFS CID"}>
                   <div>
                     <Identifier showCopy>
                       {glyph.remote?.u.replace("ipfs://", "")}
@@ -176,10 +176,10 @@ export default function TokenDetails({
               )}
               {glyph.remote?.hs && (
                 <PropertyCard
-                  heading={t`HashStamp`}
+                  heading={"HashStamp"}
                   info={
                     <Tooltip
-                      label={t`A HashStamp is a compressed on-chain copy of the token image, displayed alongside the SHA-256 of the original file`}
+                      label={"A HashStamp is a compressed on-chain copy of the token image, displayed alongside the SHA-256 of the original file"}
                       placement="bottom-end"
                       hasArrow
                     >
@@ -213,10 +213,10 @@ export default function TokenDetails({
               )}
               {glyph.embed && (
                 <>
-                  <PropertyCard heading={t`Content length`}>
+                  <PropertyCard heading={"Content length"}>
                     {filesize(glyph.embed.b.byteLength) as string}
                   </PropertyCard>
-                  <PropertyCard heading={t`Content type`}>
+                  <PropertyCard heading={"Content type"}>
                     {glyph.embed.t || "Unknown"}
                   </PropertyCard>
                 </>

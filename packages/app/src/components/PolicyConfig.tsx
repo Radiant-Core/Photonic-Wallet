@@ -33,7 +33,7 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
     <VStack spacing={4} align="stretch">
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0} flex={1}>
-          <Trans>Renderable</Trans>
+          Renderable
         </FormLabel>
         <Switch
           isChecked={policy.renderable ?? true}
@@ -41,12 +41,12 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
         />
       </FormControl>
       <FormHelperText mt={-2}>
-        <Trans>Safe to display in wallets and explorers</Trans>
+        Safe to display in wallets and explorers
       </FormHelperText>
 
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0} flex={1}>
-          <Trans>Executable</Trans>
+          Executable
         </FormLabel>
         <Switch
           isChecked={policy.executable ?? false}
@@ -54,12 +54,12 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
         />
       </FormControl>
       <FormHelperText mt={-2}>
-        <Trans>Contains executable code (use with caution)</Trans>
+        Contains executable code (use with caution)
       </FormHelperText>
 
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0} flex={1}>
-          <Trans>NSFW Content</Trans>
+          NSFW Content
         </FormLabel>
         <Switch
           isChecked={policy.nsfw ?? false}
@@ -67,12 +67,12 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
         />
       </FormControl>
       <FormHelperText mt={-2}>
-        <Trans>Adult or sensitive content flag</Trans>
+        Adult or sensitive content flag
       </FormHelperText>
 
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0} flex={1}>
-          <Trans>Transferable</Trans>
+          Transferable
         </FormLabel>
         <Switch
           isChecked={policy.transferable ?? true}
@@ -80,21 +80,17 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
         />
       </FormControl>
       <FormHelperText mt={-2}>
-        <Trans>
-          {policy.transferable
-            ? "Token can be transferred normally"
-            : "Soulbound - cannot be transferred"}
-        </Trans>
+        {policy.transferable
+          ? "Token can be transferred normally"
+          : "Soulbound - cannot be transferred"}
       </FormHelperText>
 
       {!policy.transferable && (
         <Alert status="warning" borderRadius="md">
           <AlertIcon />
           <AlertDescription>
-            <Trans>
-              Soulbound tokens are permanently bound to the original owner and
-              can only be burned. This cannot be changed after minting.
-            </Trans>
+            Soulbound tokens are permanently bound to the original owner and
+            can only be burned. This cannot be changed after minting.
           </AlertDescription>
         </Alert>
       )}

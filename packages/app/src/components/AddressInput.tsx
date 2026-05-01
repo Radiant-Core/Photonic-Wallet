@@ -23,7 +23,7 @@ export default function AddressInput({
             </Box>
           </ModalBody>
           <ModalFooter>
-            <Button onClick={() => onClose()}>{t`Close`}</Button>
+            <Button onClick={() => onClose()}>{"Close"}</Button>
           </ModalFooter>
         </>
       )}

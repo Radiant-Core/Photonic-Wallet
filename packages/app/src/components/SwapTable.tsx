@@ -64,9 +64,9 @@ export default function SwapTable({
       <Thead>
         <Tr>
           <Th display={{ base: "none", lg: "table-cell" }} />
-          <Th>{t`TX ID`}</Th>
-          <Th>{t`Swap`}</Th>
-          <Th display={{ base: "none", md: "table-cell" }}>{t`Date`}</Th>
+          <Th>{"TX ID"}</Th>
+          <Th>{"Swap"}</Th>
+          <Th display={{ base: "none", md: "table-cell" }}>{"Date"}</Th>
           {ActionsComponent && <Th></Th>}
           <Th width="50px" />
           <Th display={{ base: "none", lg: "table-cell" }} />

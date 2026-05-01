@@ -162,11 +162,11 @@ export default function SwapMissing() {
           <Thead>
             <Tr>
               <Th display={{ base: "none", lg: "table-cell" }} />
-              <Th>{t`TX ID`}</Th>
-              <Th>{t`Swap`}</Th>
-              <Th>{t`Radiant ID`}</Th>
-              <Th>{t`Value`}</Th>
-              <Th>{t`Actions`}</Th>
+              <Th>{"TX ID"}</Th>
+              <Th>{"Swap"}</Th>
+              <Th>{"Radiant ID"}</Th>
+              <Th>{"Value"}</Th>
+              <Th>{"Actions"}</Th>
               <Th width="50px" />
               <Th display={{ base: "none", lg: "table-cell" }} />
             </Tr>

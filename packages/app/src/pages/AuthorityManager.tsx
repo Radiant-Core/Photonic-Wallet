@@ -65,8 +65,8 @@ export default function AuthorityManager() {
   const handleCreate = async () => {
     if (!wallet.value.wif || !utxos) {
       toast({
-        title: t`Error`,
-        description: t`Wallet not unlocked or UTXOs not loaded`,
+        title: "Error",
+        description: "Wallet not unlocked or UTXOs not loaded",
         status: "error",
       });
       return;
@@ -74,8 +74,8 @@ export default function AuthorityManager() {
 
     if (!name) {
       toast({
-        title: t`Name Required`,
-        description: t`Please enter an authority name`,
+        title: "Name Required",
+        description: "Please enter an authority name",
         status: "error",
       });
       return;
@@ -120,14 +120,14 @@ export default function AuthorityManager() {
       });
 
       toast({
-        title: t`Authority Token Created!`,
+        title: "Authority Token Created!",
         description: (
           <VStack align="start" spacing={1}>
             <Text>
-              <Trans>Authority: {name}</Trans>
+              Authority: {name}
             </Text>
             <Text fontSize="sm">
-              <Trans>Transaction: {revealTxId.substring(0, 16)}...</Trans>
+              Transaction: {revealTxId.substring(0, 16)}...
             </Text>
           </VStack>
         ),
@@ -145,7 +145,7 @@ export default function AuthorityManager() {
     } catch (error) {
       console.error("Authority creation error:", error);
       toast({
-        title: t`Creation Failed`,
+        title: "Creation Failed",
         description: String(error),
         status: "error",
         duration: 5000,
@@ -158,17 +158,17 @@ export default function AuthorityManager() {
   return (
     <Container maxW="container.md" py={8}>
       <PageHeader>
-        {t`Authority Token Manager`}
+        {"Authority Token Manager"}
       </PageHeader>
 
       <ContentContainer>
         <Tabs colorScheme="blue">
           <TabList>
             <Tab>
-              <Trans>Create Authority</Trans>
+              Create Authority
             </Tab>
             <Tab>
-              <Trans>My Authorities</Trans>
+              My Authorities
             </Tab>
           </TabList>
 
@@ -177,52 +177,52 @@ export default function AuthorityManager() {
               <VStack spacing={6} align="stretch">
                 <FormControl isRequired>
                   <FormLabel>
-                    <Trans>Authority Name</Trans>
+                    Authority Name
                   </FormLabel>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder={t`Admin Authority`}
+                    placeholder={"Admin Authority"}
                   />
                   <FormHelperText>
-                    <Trans>A descriptive name for this authority</Trans>
+                    A descriptive name for this authority
                   </FormHelperText>
                 </FormControl>
 
                 <FormControl>
                   <FormLabel>
-                    <Trans>Scope</Trans>
+                    Scope
                   </FormLabel>
                   <Input
                     value={scope}
                     onChange={(e) => setScope(e.target.value)}
-                    placeholder={t`marketplace, governance, etc.`}
+                    placeholder={"marketplace, governance, etc."}
                   />
                   <FormHelperText>
-                    <Trans>What this authority governs</Trans>
+                    What this authority governs
                   </FormHelperText>
                 </FormControl>
 
                 <FormControl>
                   <FormLabel>
-                    <Trans>Permissions</Trans>
+                    Permissions
                   </FormLabel>
                   <HStack>
                     <Input
                       value={newPermission}
                       onChange={(e) => setNewPermission(e.target.value)}
-                      placeholder={t`create_listing, approve_trades, etc.`}
+                      placeholder={"create_listing, approve_trades, etc."}
                       onKeyPress={(e) => e.key === "Enter" && addPermission()}
                     />
                     <IconButton
-                      aria-label={t`Add permission`}
+                      aria-label={"Add permission"}
                       icon={<AddIcon />}
                       onClick={addPermission}
                       colorScheme="blue"
                     />
                   </HStack>
                   <FormHelperText>
-                    <Trans>List of permissions granted by this authority</Trans>
+                    List of permissions granted by this authority
                   </FormHelperText>
                   
                   {permissions.length > 0 && (
@@ -240,7 +240,7 @@ export default function AuthorityManager() {
                           >
                             {perm}
                             <IconButton
-                              aria-label={t`Remove`}
+                              aria-label={"Remove"}
                               icon={<DeleteIcon />}
                               size="xs"
                               variant="ghost"
@@ -255,7 +255,7 @@ export default function AuthorityManager() {
 
                 <FormControl>
                   <FormLabel>
-                    <Trans>Expiration Date (Optional)</Trans>
+                    Expiration Date (Optional)
                   </FormLabel>
                   <Input
                     type="datetime-local"
@@ -263,13 +263,13 @@ export default function AuthorityManager() {
                     onChange={(e) => setExpires(e.target.value)}
                   />
                   <FormHelperText>
-                    <Trans>Leave empty for no expiration</Trans>
+                    Leave empty for no expiration
                   </FormHelperText>
                 </FormControl>
 
                 <FormControl display="flex" alignItems="center">
                   <FormLabel mb={0}>
-                    <Trans>Revocable</Trans>
+                    Revocable
                   </FormLabel>
                   <input
                     type="checkbox"
@@ -278,7 +278,7 @@ export default function AuthorityManager() {
                     aria-label="Revocable"
                   />
                   <FormHelperText ml={3} mb={0}>
-                    <Trans>Can this authority be revoked later?</Trans>
+                    Can this authority be revoked later?
                   </FormHelperText>
                 </FormControl>
 
@@ -290,9 +290,9 @@ export default function AuthorityManager() {
                   onClick={handleCreate}
                   isLoading={isLoading}
                   isDisabled={!name}
-                  loadingText={t`Creating...`}
+                  loadingText={"Creating..."}
                 >
-                  <Trans>Create Authority Token</Trans>
+                  Create Authority Token
                 </Button>
               </VStack>
             </TabPanel>
@@ -300,11 +300,9 @@ export default function AuthorityManager() {
             <TabPanel>
               <VStack spacing={4} align="stretch">
                 <Text color="gray.400">
-                  <Trans>
-                    Your authority tokens will appear here once created. This
-                    feature requires indexer integration to display existing
-                    authorities.
-                  </Trans>
+                  Your authority tokens will appear here once created. This
+                  feature requires indexer integration to display existing
+                  authorities.
                 </Text>
               </VStack>
             </TabPanel>

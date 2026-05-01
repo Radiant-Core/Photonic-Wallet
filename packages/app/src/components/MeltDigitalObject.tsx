@@ -75,7 +75,7 @@ export default function MeltDigitalObject({
       feeRate.value
     );
     if (!selected.inputs?.length) {
-      setErrorMessage(t`Insufficient funds`);
+      setErrorMessage("Insufficient funds");
       setSuccess(false);
       setLoading(false);
       return;
@@ -98,9 +98,9 @@ export default function MeltDigitalObject({
       console.log("[Melt] Broadcast result txid:", txid, "type:", typeof txid);
       db.broadcast.put({ txid, date: Date.now(), description: "nft_melt" });
       onSuccess && onSuccess(txid);
-      toast({ status: "success", title: t`Token melted` });
+      toast({ status: "success", title: "Token melted" });
     } catch (error) {
-      setErrorMessage(t`Transaction rejected`);
+      setErrorMessage("Transaction rejected");
       setSuccess(false);
       setLoading(false);
     }
@@ -111,7 +111,7 @@ export default function MeltDigitalObject({
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Melt token`}</ModalHeader>
+          <ModalHeader>{"Melt token"}</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
             {success || (
@@ -122,7 +122,7 @@ export default function MeltDigitalObject({
             )}
             <Flex direction="row" gap={4}>
               <WarningIcon fontSize="2xl" />
-              {t`This will destroy your token! Are you sure?`}
+              {"This will destroy your token! Are you sure?"}
             </Flex>
           </ModalBody>
           <ModalFooter>
@@ -133,9 +133,9 @@ export default function MeltDigitalObject({
               isLoading={loading}
               mr={4}
             >
-              {t`Melt`}
+              {"Melt"}
             </Button>
-            <Button onClick={onClose}>{t`Cancel`}</Button>
+            <Button onClick={onClose}>{"Cancel"}</Button>
           </ModalFooter>
         </ModalContent>
       </form>

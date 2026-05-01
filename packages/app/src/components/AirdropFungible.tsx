@@ -88,7 +88,7 @@ export default function AirdropFungible({
     setLoading(true);
 
     if (!amount.current?.value) {
-      return setFailure(t`Invalid amount`);
+      return setFailure("Invalid amount");
     }
 
     const addresses = splitAddresses(toAddresses.current?.value || "");
@@ -96,7 +96,7 @@ export default function AirdropFungible({
     const invalid = addresses.find((addr) => !isP2pkh(addr));
 
     if (!addresses.length || invalid) {
-      return setFailure(t`Invalid address` + (invalid ? ` "${invalid}"` : ""));
+      return setFailure("Invalid address" + (invalid ? ` "${invalid}"` : ""));
     }
 
     const value = parseInt(amount.current?.value, 10);
@@ -127,7 +127,7 @@ export default function AirdropFungible({
       db.broadcast.put({ txid, date: Date.now(), description: "ft_send" });
       console.debug("Result", txid);
       toast({
-        title: t`Sent ${value} ${ticker}`,
+        title: "Sent ${value} ${ticker}",
         status: "success",
       });
 
@@ -146,7 +146,7 @@ export default function AirdropFungible({
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
       } else {
-        setErrorMessage(t`Could not send transaction`);
+        setErrorMessage("Could not send transaction");
       }
       console.error(error);
       setSuccess(false);
@@ -184,7 +184,7 @@ export default function AirdropFungible({
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Airdrop ${glyph.name || ticker}`}</ModalHeader>
+          <ModalHeader>{"Airdrop ${glyph.name || ticker}"}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
@@ -200,7 +200,7 @@ export default function AirdropFungible({
                     thumbnail
                   />
                 </Box>
-                <Heading size="sm">{t`Balance`}</Heading>
+                <Heading size="sm">{"Balance"}</Heading>
                 <Box>
                   <FtBalance id={glyph.ref} />
                 </Box>
@@ -224,7 +224,7 @@ export default function AirdropFungible({
                 </Flex>
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Amount per address`}</FormLabel>
+                <FormLabel>{"Amount per address"}</FormLabel>
                 <InputGroup>
                   <Input
                     onChange={updateTotal}
@@ -247,9 +247,9 @@ export default function AirdropFungible({
                 isLoading={loading}
                 mr={4}
               >
-                {t`Send`}
+                {"Send"}
               </Button>
-              <Button onClick={onClose}>{t`Cancel`}</Button>
+              <Button onClick={onClose}>{"Cancel"}</Button>
             </ModalFooter>
           </AddressInput>
         </ModalContent>

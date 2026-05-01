@@ -81,11 +81,11 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     setLoading(true);
 
     if (!amount.current?.value) {
-      return setFailure(t`Invalid amount`);
+      return setFailure("Invalid amount");
     }
 
     if (!toAddress.current?.value || !isP2pkh(toAddress.current.value)) {
-      return setFailure(t`Invalid address`);
+      return setFailure("Invalid address");
     }
 
     const value = parseInt(amount.current?.value, 10);
@@ -115,7 +115,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       db.broadcast.put({ txid, date: Date.now(), description: "ft_send" });
       console.debug("Result", txid);
       toast({
-        title: t`Sent ${value} ${ticker}`,
+        title: "Sent ${value} ${ticker}",
         status: "success",
       });
 
@@ -134,7 +134,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
       } else {
-        setErrorMessage(t`Could not send transaction`);
+        setErrorMessage("Could not send transaction");
       }
       console.error(error);
       setSuccess(false);
@@ -164,7 +164,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t`Send ${glyph.name || ticker}`}</ModalHeader>
+          <ModalHeader>{"Send ${glyph.name || ticker}"}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
@@ -180,7 +180,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                     thumbnail
                   />
                 </Box>
-                <Heading size="sm">{t`Balance`}</Heading>
+                <Heading size="sm">{"Balance"}</Heading>
                 <Box>
                   <FtBalance id={glyph.ref} />
                 </Box>
@@ -207,7 +207,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                 </Flex>
               </FormControl>
               <FormControl>
-                <FormLabel>{t`Amount`}</FormLabel>
+                <FormLabel>{"Amount"}</FormLabel>
                 <InputGroup>
                   <Input ref={amount} type="number" placeholder="0" />
                   <InputRightAddon children={ticker} userSelect="none" />
@@ -222,9 +222,9 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                 isLoading={loading}
                 mr={4}
               >
-                {t`Send`}
+                {"Send"}
               </Button>
-              <Button onClick={onClose}>{t`Cancel`}</Button>
+              <Button onClick={onClose}>{"Cancel"}</Button>
             </ModalFooter>
           </AddressInput>
         </ModalContent>

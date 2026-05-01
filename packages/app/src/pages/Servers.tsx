@@ -31,7 +31,7 @@ function NewControls() {
   return (
     <IconButton
       icon={<AddIcon />}
-      aria-label={t`New`}
+      aria-label={"New"}
       size="sm"
       {...getEditButtonProps()}
     />
@@ -44,7 +44,7 @@ function EditableControls() {
   return (
     <IconButton
       icon={<EditIcon />}
-      aria-label={t`Edit`}
+      aria-label={"Edit"}
       size="sm"
       {...getEditButtonProps()}
     />
@@ -149,21 +149,21 @@ export default function Servers() {
               </Editable>
               <IconButton
                 icon={<ArrowUpIcon />}
-                aria-label={t`Move up`}
+                aria-label={"Move up"}
                 size="sm"
                 onClick={() => moveServer(index, true)}
                 isDisabled={index === 0}
               />
               <IconButton
                 icon={<ArrowDownIcon />}
-                aria-label={t`Move down`}
+                aria-label={"Move down"}
                 size="sm"
                 onClick={() => moveServer(index, false)}
                 isDisabled={index + 1 === servers.length}
               />
               <IconButton
                 icon={<DeleteIcon />}
-                aria-label={t`Delete`}
+                aria-label={"Delete"}
                 size="sm"
                 onClick={() => removeServer(index)}
               />

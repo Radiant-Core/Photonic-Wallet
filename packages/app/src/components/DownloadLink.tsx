@@ -30,7 +30,7 @@ export default function DownloadLink({
 
   return (
     <Button onClick={downloadUint8ArrayAsFile} {...rest}>
-      {children || t`Download`}
+      {children || "Download"}
     </Button>
   );
 }

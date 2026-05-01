@@ -64,8 +64,8 @@ export default function BurnTokenModal({
   const handleBurn = async () => {
     if (!wallet.value.wif) {
       toast({
-        title: t`Error`,
-        description: t`Wallet not unlocked`,
+        title: "Error",
+        description: "Wallet not unlocked",
         status: "error",
       });
       return;
@@ -94,8 +94,8 @@ export default function BurnTokenModal({
         // FT burn
         if (burnAmount <= 0 || burnAmount > tokenUtxo.value) {
           toast({
-            title: t`Invalid Amount`,
-            description: t`Burn amount must be between 1 and ${tokenUtxo.value}`,
+            title: "Invalid Amount",
+            description: "Burn amount must be between 1 and ${tokenUtxo.value}",
             status: "error",
           });
           setIsLoading(false);
@@ -124,16 +124,14 @@ export default function BurnTokenModal({
       });
 
       toast({
-        title: t`Token Burned Successfully`,
+        title: "Token Burned Successfully",
         description: (
           <VStack align="start" spacing={1}>
             <Text>
-              <Trans>Transaction ID: {txid.substring(0, 16)}...</Trans>
+              Transaction ID: {txid.substring(0, 16)}...
             </Text>
             <Text>
-              <Trans>
-                Photons returned: {photonsToRXD(result.photonsReturned)} RXD
-              </Trans>
+              Photons returned: {photonsToRXD(result.photonsReturned)} RXD
             </Text>
           </VStack>
         ),
@@ -147,7 +145,7 @@ export default function BurnTokenModal({
     } catch (error) {
       console.error("Burn error:", error);
       toast({
-        title: t`Burn Failed`,
+        title: "Burn Failed",
         description: String(error),
         status: "error",
         duration: 5000,
@@ -166,7 +164,7 @@ export default function BurnTokenModal({
       <ModalOverlay />
       <ModalContent bg="bg.500">
         <ModalHeader>
-          <Trans>Burn Token</Trans>
+          Burn Token
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody>
@@ -175,13 +173,11 @@ export default function BurnTokenModal({
               <AlertIcon />
               <VStack align="start" spacing={1}>
                 <AlertTitle>
-                  <Trans>Warning: This action is irreversible!</Trans>
+                  Warning: This action is irreversible!
                 </AlertTitle>
                 <AlertDescription>
-                  <Trans>
-                    Burning will permanently destroy this token. The photons
-                    will be returned to your wallet.
-                  </Trans>
+                  Burning will permanently destroy this token. The photons
+                  will be returned to your wallet.
                 </AlertDescription>
               </VStack>
             </Alert>
@@ -189,7 +185,7 @@ export default function BurnTokenModal({
             {tokenName && (
               <FormControl>
                 <FormLabel>
-                  <Trans>Token Name</Trans>
+                  Token Name
                 </FormLabel>
                 <Text fontWeight="bold">{tokenName}</Text>
               </FormControl>
@@ -198,7 +194,7 @@ export default function BurnTokenModal({
             {tokenType === "ft" && (
               <FormControl>
                 <FormLabel>
-                  <Trans>Amount to Burn</Trans>
+                  Amount to Burn
                 </FormLabel>
                 <NumberInput
                   value={burnAmount}
@@ -213,21 +209,19 @@ export default function BurnTokenModal({
                   </NumberInputStepper>
                 </NumberInput>
                 <Text fontSize="sm" color="gray.400" mt={1}>
-                  <Trans>
-                    Available: {tokenUtxo.value} tokens
-                  </Trans>
+                  Available: {tokenUtxo.value} tokens
                 </Text>
               </FormControl>
             )}
 
             <FormControl>
               <FormLabel>
-                <Trans>Reason (Optional)</Trans>
+                Reason (Optional)
               </FormLabel>
               <Textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder={t`e.g., Upgrading to v2, Reducing supply, etc.`}
+                placeholder={"e.g., Upgrading to v2, Reducing supply, etc."}
                 rows={3}
               />
             </FormControl>
@@ -236,7 +230,7 @@ export default function BurnTokenModal({
               <AlertIcon />
               <VStack align="start" spacing={1}>
                 <Text fontWeight="bold">
-                  <Trans>Photons to be returned:</Trans>
+                  Photons to be returned:
                 </Text>
                 <Text fontSize="lg" color="green.300">
                   {photonsToRXD(photonsReturned)} RXD
@@ -249,15 +243,15 @@ export default function BurnTokenModal({
         <ModalFooter>
           <HStack spacing={3}>
             <Button variant="ghost" onClick={onClose} isDisabled={isLoading}>
-              <Trans>Cancel</Trans>
+              Cancel
             </Button>
             <Button
               colorScheme="red"
               onClick={handleBurn}
               isLoading={isLoading}
-              loadingText={t`Burning...`}
+              loadingText={"Burning..."}
             >
-              <Trans>Burn Token</Trans>
+              Burn Token
             </Button>
           </HStack>
         </ModalFooter>

@@ -19,7 +19,7 @@ export default function RecoveryPhrase({ phrase }: { phrase: string }) {
       <Alert status="warning" mb={8}>
         <AlertIcon />
         <AlertDescription>
-          {t`Your recovery phrase is the only way to restore your wallet after logging out. Keep it in a safe place and never share it.`}
+          {"Your recovery phrase is the only way to restore your wallet after logging out. Keep it in a safe place and never share it."}
         </AlertDescription>
       </Alert>
       <RecoveryPhraseWords words={phrase.split(" ")} />
@@ -29,7 +29,7 @@ export default function RecoveryPhrase({ phrase }: { phrase: string }) {
           leftIcon={<ActionIcon as={CopyIcon} />}
           variant="ghost"
         >
-          {hasCopied ? t`Copied!` : t`Copy to clipboard`}
+          {hasCopied ? "Copied!" : "Copy to clipboard"}
         </Button>
       </Center>
     </>

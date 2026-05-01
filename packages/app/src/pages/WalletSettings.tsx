@@ -1,5 +1,4 @@
-import { useRef, useState, useMemo } from "react";
-import { t, Trans } from "@lingui/macro";
+import { useRef, useState } from "react";
 import {
   Button,
   Center,
@@ -61,7 +60,7 @@ export default function WalletSettings() {
     disclosure.onClose();
   };
 
-  const encPubkeyHex = useMemo(() => {
+  const encPubkeyHex = (() => {
     const m = wallet.value.mnemonic;
     if (!m) return "";
     try {
@@ -70,7 +69,7 @@ export default function WalletSettings() {
     } catch {
       return "";
     }
-  }, [wallet.value.mnemonic]);
+  })();
 
   const { onCopy: onCopyEncKey, hasCopied: hasCopiedEncKey } = useClipboard(encPubkeyHex);
   const languageRef = useRef<HTMLSelectElement>(null);
@@ -85,7 +84,7 @@ export default function WalletSettings() {
 
     db.kvp.bulkPut([languageRef.current?.value, feeRateNum], keys);
     toast({
-      title: t`Saved`,
+      title: "Saved",
       status: "success",
     });
 
@@ -116,7 +115,7 @@ export default function WalletSettings() {
   return (
     <Container maxW="container.md" px={4} display="grid" gap={8}>
       <FormSection>
-        <Heading size="md">{t`Address`}</Heading>
+        <Heading size="md">Address</Heading>
         <Text pt="2" fontSize="sm">
           Main: {wallet.value.address}
         </Text>
@@ -126,13 +125,11 @@ export default function WalletSettings() {
       </FormSection>
 
       <FormSection>
-        <Heading size="md">{t`Encryption Public Key`}</Heading>
+        <Heading size="md">Encryption Public Key</Heading>
         <Text pt={2} fontSize="sm" color="gray.400">
-          <Trans>
-            Share this key with anyone who wants to mint an encrypted NFT for you
-            (recipient mode). It is safe to share — it cannot be used to decrypt
-            your content.
-          </Trans>
+          Share this key with anyone who wants to mint an encrypted NFT for you
+          (recipient mode). It is safe to share — it cannot be used to decrypt
+          your content.
         </Text>
         {encPubkeyHex ? (
           <VStack align="stretch" spacing={3} mt={3}>
@@ -155,7 +152,7 @@ export default function WalletSettings() {
                 leftIcon={<Icon as={hasCopiedEncKey ? MdCheck : MdContentCopy} />}
                 onClick={onCopyEncKey}
               >
-                {hasCopiedEncKey ? t`Copied!` : t`Copy`}
+                {hasCopiedEncKey ? "Copied!" : "Copy"}
               </Button>
               <Button
                 size="xs"
@@ -163,7 +160,7 @@ export default function WalletSettings() {
                 leftIcon={<Icon as={MdQrCode} />}
                 onClick={qrDisclosure.onToggle}
               >
-                {qrDisclosure.isOpen ? t`Hide QR` : t`Show QR`}
+                {qrDisclosure.isOpen ? "Hide QR" : "Show QR"}
               </Button>
               {typeof navigator.share === "function" && (
                 <Button
@@ -172,12 +169,12 @@ export default function WalletSettings() {
                   leftIcon={<Icon as={MdShare} />}
                   onClick={() =>
                     navigator.share({
-                      title: t`My Encryption Public Key`,
+                      title: "My Encryption Public Key",
                       text: encPubkeyHex,
                     })
                   }
                 >
-                  {t`Share`}
+                  Share
                 </Button>
               )}
             </HStack>
@@ -198,7 +195,7 @@ export default function WalletSettings() {
                 />
               </Box>
               <Text fontSize="xs" color="gray.400" mt={2}>
-                <Trans>Recipient can scan this to add your key without typing</Trans>
+                Recipient can scan this to add your key without typing
               </Text>
             </Collapse>
           </VStack>
@@ -206,7 +203,7 @@ export default function WalletSettings() {
           <Alert status="info" mt={3} borderRadius="md" fontSize="sm">
             <AlertIcon as={MdKey} />
             <AlertDescription>
-              <Trans>Unlock your wallet to view your encryption public key.</Trans>
+              Unlock your wallet to view your encryption public key.
             </AlertDescription>
           </Alert>
         )}
@@ -214,19 +211,19 @@ export default function WalletSettings() {
 
       <FormSection>
         <Heading size="md" mb={8}>
-          {t`Recovery phrase`}
+          Recovery phrase
         </Heading>
         {showMnemonic ? (
           <RecoveryPhrase phrase={mnemonic} />
         ) : (
           <Center mt={8} mb={16}>
             <Button onClick={() => disclosure.onOpen()}>
-              {t`Show recovery phrase`}
+              Show recovery phrase
             </Button>
           </Center>
         )}
         <PasswordModal
-          header={t`Enter password`}
+          header="Enter password"
           allowClose
           onSuccess={passwordSuccess}
           isOpen={disclosure.isOpen}
@@ -235,19 +232,19 @@ export default function WalletSettings() {
       </FormSection>
 
       <FormSection>
-        <Heading size="md">{t`Manual Sync`}</Heading>
+        <Heading size="md">Manual Sync</Heading>
         {consolidationRequired === true &&
-          t`If your wallet fails to consolidate UTXOs, a resync may be required`}
+          "If your wallet fails to consolidate UTXOs, a resync may be required"}
         <Center mt={8} mb={16}>
           <Button onClick={() => electrumWorker.value.manualSync()}>
-            {t`Resync Wallet`}
+            Resync Wallet
           </Button>
         </Center>
       </FormSection>
 
       <FormSection>
         <FormControl>
-          <FormLabel id="language-label" htmlFor="language-select">{t`Language`}</FormLabel>
+          <FormLabel id="language-label" htmlFor="language-select">Language</FormLabel>
           <Select
             ref={languageRef}
             id="language-select"
@@ -264,7 +261,7 @@ export default function WalletSettings() {
           </Select>
         </FormControl>
         <FormControl>
-          <FormLabel>{t`Fee Rate`}</FormLabel>
+          <FormLabel>Fee Rate</FormLabel>
           <Input
             ref={feeRateRef}
             type="number"
@@ -281,7 +278,7 @@ export default function WalletSettings() {
       </FormSection>
       <Flex justifyContent="center" py={8} mb={16}>
         <Button size="lg" w="240px" maxW="100%" shadow="dark-md" onClick={save}>
-          {t`Save`}
+          Save
         </Button>
       </Flex>
     </Container>

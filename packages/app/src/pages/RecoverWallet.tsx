@@ -42,12 +42,12 @@ export default function RecoverWallet() {
     const passwordValue = password.current?.value || "";
     const confirmValue = confirm.current?.value || "";
     if (confirmValue !== passwordValue) {
-      setError(t`Passwords do not match`);
+      setError("Passwords do not match");
       return false;
     }
 
     if (!networkKeys.includes(network.current?.value || "")) {
-      setError(t`Select a valid network`);
+      setError("Select a valid network");
       return false;
     }
 
@@ -72,12 +72,12 @@ export default function RecoverWallet() {
         console.log(error);
         if (error instanceof Error) {
           if (error.message === "Invalid mnemonic") {
-            setError(t`Invalid recovery phrase`);
+            setError("Invalid recovery phrase");
           } else {
             setError(error.message);
           }
         } else {
-          setError(t`Unknown error`);
+          setError("Unknown error");
         }
       }
       setLoading(false);
@@ -95,7 +95,7 @@ export default function RecoverWallet() {
     >
       <Card mb={4} p={4} width="2xl">
         <Heading size="md" mb={4}>
-          {t`Recover your wallet`}
+          {"Recover your wallet"}
         </Heading>
         {error && (
           <Alert status="error" mb={4}>
@@ -105,25 +105,25 @@ export default function RecoverWallet() {
         )}
         <form onSubmit={submit}>
           <FormControl mb={4}>
-            <FormLabel>{t`Enter your 12 word recovery phrase`}</FormLabel>
+            <FormLabel>{"Enter your 12 word recovery phrase"}</FormLabel>
             <Textarea
               ref={phrase}
-              placeholder={t`Recovery phrase`}
+              placeholder={"Recovery phrase"}
               size="sm"
               resize="none"
               autoFocus
             />
           </FormControl>
           <FormControl mb={4}>
-            <FormLabel>{t`New password`}</FormLabel>
+            <FormLabel>{"New password"}</FormLabel>
             <Input ref={password} type="password" placeholder="Password" />
           </FormControl>
           <FormControl mb={4}>
-            <FormLabel>{t`Confirm password`}</FormLabel>
+            <FormLabel>{"Confirm password"}</FormLabel>
             <Input ref={confirm} type="password" placeholder="Password" />
           </FormControl>
           <FormControl mb={4}>
-            <FormLabel>{t`Network`}</FormLabel>
+            <FormLabel>{"Network"}</FormLabel>
             <Select ref={network}>
               {networkKeys.map((k) => (
                 <option key={k} value={k}>
@@ -136,16 +136,16 @@ export default function RecoverWallet() {
             width="full"
             type="submit"
             isLoading={loading}
-            loadingText={t`Recovering`}
+            loadingText={"Recovering"}
           >
-            {t`Submit`}
+            {"Submit"}
           </Button>
           <Center mt={4}>
             <Button
               variant="ghost"
               as={Link}
               to="/create-wallet"
-            >{t`Create a new wallet`}</Button>
+            >{"Create a new wallet"}</Button>
           </Center>
         </form>
       </Card>

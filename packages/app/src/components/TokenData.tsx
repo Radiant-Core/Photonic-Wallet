@@ -43,7 +43,7 @@ export default function TokenData({ glyph }: { glyph: SmartToken }) {
   }, [reveal]);
 
   return !reveal || !decoded || !tx ? (
-    <Box mx={4}>{t`Data not found`}</Box>
+    <Box mx={4}>{"Data not found"}</Box>
   ) : (
     <>
       <PropertyCard heading="Token Data" mb={4}>
@@ -73,7 +73,7 @@ export default function TokenData({ glyph }: { glyph: SmartToken }) {
             mimeType="application/octet-stream"
             filename={`${reveal.getTxid()}.txt`}
           >
-            {t`Download transaction`}
+            {"Download transaction"}
           </DownloadLink>
         )}
         {glyph.embed && (
@@ -83,7 +83,7 @@ export default function TokenData({ glyph }: { glyph: SmartToken }) {
             data={glyph.embed.b}
             filename={`main.${mime.getExtension(glyph.embed.t) || "dat"}`}
           >
-            {t`Download main file`}
+            {"Download main file"}
           </DownloadLink>
         )}
       </SimpleGrid>

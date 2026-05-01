@@ -475,6 +475,9 @@ export class NFTWorker implements Subscription {
       embed,
       remote,
       height: receivedTxo?.height || Infinity,
+      // Encrypted NFT fields — persisted so decryption UI can retrieve them
+      ...(payload.crypto !== undefined ? { crypto: payload.crypto } : {}),
+      ...(payload.main !== undefined ? { main: payload.main } : {}),
     };
 
     record.id = (await db.glyph.put(record)) as number;

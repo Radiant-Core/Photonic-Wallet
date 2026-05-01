@@ -32,13 +32,11 @@ export default function ReceiveRXD({ disclosure }: Props) {
     <Modal closeOnOverlayClick isOpen={isOpen} onClose={onClose} isCentered>
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>{t`Receive`}</ModalHeader>
+        <ModalHeader>{"Receive"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody alignItems="center" pb={8}>
           <Box mb={4}>
-            <Trans>
-              Send {network.value.name} coins and tokens to this address
-            </Trans>
+            Send {network.value.name} coins and tokens to this address
           </Box>
           <Box borderRadius="md" overflow="hidden" mb={4}>
             <QRCodeSVG size={256} value={address} includeMargin />
@@ -50,7 +48,7 @@ export default function ReceiveRXD({ disclosure }: Props) {
             variant="ghost"
             mt={2}
           >
-            {hasCopied ? t`Copied!` : t`Copy to clipboard`}
+            {hasCopied ? "Copied!" : "Copy to clipboard"}
           </Button>
         </ModalBody>
       </ModalContent>

@@ -165,7 +165,7 @@ function TokenGrid({ open }: { open: boolean }) {
             {container.name}
           </>
         ) : (
-          t`Non-Fungible Tokens`
+          "Non-Fungible Tokens"
         )}
       </PageHeader>
 
@@ -192,22 +192,22 @@ function TokenGrid({ open }: { open: boolean }) {
           <MenuButton
             as={Button}
             size="sm"
-            aria-label={t`Filter`}
+            aria-label={"Filter"}
             leftIcon={<ActionIcon as={MdFilterAlt} />}
             rightIcon={<ChevronDownIcon />}
           >
-            {t`Filter`}
+            {"Filter"}
           </MenuButton>
           <MenuList minWidth="260px">
             <MenuOptionGroup
-              title={t`Type`}
+              title={"Type"}
               type="checkbox"
               value={filterType}
               onChange={(types) => setFilterType(types as string[])}
             >
-              <MenuItemOption value="object">{t`Object`}</MenuItemOption>
-              <MenuItemOption value="container">{t`Container`}</MenuItemOption>
-              <MenuItemOption value="user">{t`User`}</MenuItemOption>
+              <MenuItemOption value="object">{"Object"}</MenuItemOption>
+              <MenuItemOption value="container">{"Container"}</MenuItemOption>
+              <MenuItemOption value="user">{"User"}</MenuItemOption>
             </MenuOptionGroup>
           </MenuList>
         </Menu>
@@ -289,7 +289,7 @@ function TokenGrid({ open }: { open: boolean }) {
       </Flex>
 
       {visible.length === 0 ? (
-        <NoContent>{t`No assets`}</NoContent>
+        <NoContent>{"No assets"}</NoContent>
       ) : viewMode === "list" ? (
         <VStack
           align="stretch"
