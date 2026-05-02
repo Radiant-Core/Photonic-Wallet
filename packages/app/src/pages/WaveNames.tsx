@@ -102,6 +102,8 @@ export default function WaveNames() {
   const [isResolving, setIsResolving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentLookups, setRecentLookups] = useState<RecentLookup[]>([]);
+  const [cachedNames, setCachedNames] = useState<WaveNameRecord[] | null>(null);
+  const [isLoadingNames, setIsLoadingNames] = useState(true);
   const toast = useToast();
 
   // Load recent lookups from localStorage
@@ -114,6 +116,21 @@ export default function WaveNames() {
         // ignore parse errors
       }
     }
+  }, []);
+
+  // Load cached names from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("waveCachedNames");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Convert date strings back to dates if needed
+        setCachedNames(parsed);
+      } catch {
+        // ignore parse errors
+      }
+    }
+    setIsLoadingNames(false);
   }, []);
 
   // Save recent lookups
@@ -217,12 +234,29 @@ export default function WaveNames() {
     return records.sort((a, b) => a.name.localeCompare(b.name));
   }, []);
 
+  // Save names to localStorage when they load
+  useEffect(() => {
+    if (waveNames && waveNames.length > 0) {
+      localStorage.setItem("waveCachedNames", JSON.stringify(waveNames));
+      setCachedNames(waveNames);
+      setIsLoadingNames(false);
+    } else if (waveNames !== undefined) {
+      // If waveNames is empty array (not undefined), still update cache
+      localStorage.setItem("waveCachedNames", JSON.stringify(waveNames));
+      setCachedNames(waveNames);
+      setIsLoadingNames(false);
+    }
+  }, [waveNames]);
+
+  // Use cached names while loading, or live data when available
+  const displayNames = waveNames ?? cachedNames ?? [];
+
   // Filter names based on search
-  const filteredNames = waveNames?.filter(record =>
+  const filteredNames = displayNames.filter(record =>
     searchQuery === "" ||
     record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     record.target.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  );
 
   const handleResolve = async () => {
     if (!resolveQuery.trim()) return;
@@ -249,7 +283,7 @@ export default function WaveNames() {
       } else {
         toast({
           title: "Name not found",
-          description: "${fullName} is not registered",
+          description: `${fullName} is not registered`,
           status: "warning",
         });
         setResolveResult(null);
@@ -280,7 +314,12 @@ export default function WaveNames() {
           {/* My Names Tab */}
           <TabPanel>
             <ContentContainer>
-              {!waveNames?.length ? (
+              {isLoadingNames && displayNames.length === 0 ? (
+                <VStack spacing={4} align="center" py={8}>
+                  <Spinner size="lg" color="brand.400" />
+                  <Text color="gray.400">Loading your WAVE names...</Text>
+                </VStack>
+              ) : !displayNames.length ? (
                 <Alert status="info" borderRadius="md">
                   <AlertIcon />
                   <VStack align="start" spacing={2}>
@@ -296,6 +335,14 @@ export default function WaveNames() {
                 </Alert>
               ) : (
                 <VStack spacing={4} align="stretch">
+                  {/* Loading indicator for cached data */}
+                  {isLoadingNames && cachedNames && !waveNames && (
+                    <HStack spacing={2} color="gray.500">
+                      <Spinner size="xs" />
+                      <Text fontSize="xs">Refreshing names...</Text>
+                    </HStack>
+                  )}
+
                   {/* Search */}
                   <InputGroup>
                     <InputLeftElement pointerEvents="none">
@@ -309,11 +356,11 @@ export default function WaveNames() {
                   </InputGroup>
 
                   {/* Results count */}
-                  {searchQuery && (
+                  {(searchQuery || isLoadingNames) && (
                     <Text fontSize="sm" color="gray.500">
                       {filteredNames.length === 0
                         ? "No names found"
-                        : "Showing ${filteredNames.length} of ${waveNames.length} names"}
+                        : `Showing ${filteredNames.length} of ${displayNames.length} names${isLoadingNames ? " (loading...)" : ""}`}
                     </Text>
                   )}
 
@@ -716,7 +763,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
       toast({
         title: "Target updated",
-        description: "Transaction: ${txid.slice(0, 16)}...",
+        description: `Transaction: ${txid.slice(0, 16)}...`,
         status: "success",
       });
       onClose();
