@@ -150,7 +150,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
       console.debug("Result", txid);
       toast({
-        title: "Sent ${photonsToRXD(value)} ${network.value.ticker}",
+        title: `Sent ${photonsToRXD(value)} ${network.value.ticker}`,
         status: "success",
       });
 

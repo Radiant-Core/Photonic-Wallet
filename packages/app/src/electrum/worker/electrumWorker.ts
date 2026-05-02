@@ -157,43 +157,89 @@ const worker = {
     }
   },
   async resolveWaveName(name: string): Promise<{ target: string } | null> {
+    // Normalize input: strip .rxd suffix if present to get bare name
+    const parts = name.toLowerCase().split(".");
+    const bareName = parts[0];
+    const domain = parts[1] || "rxd";
+
     try {
-      // Query RXinDexer WAVE resolution endpoint
-      const result = await electrum.client?.request(
-        "wave.resolve",
-        name
-      ) as { target: string } | undefined;
-      return result || null;
+      // Query local DB first — all synced NFTs (including other wallets' names)
+      // are stored in db.glyph by the indexer sync
+      const GLYPH_WAVE = 11;
+      const match = await db.glyph
+        .filter((glyph) => {
+          if (!glyph.p?.includes(GLYPH_WAVE)) return false;
+          if (glyph.spent !== 0) return false;
+          const attrs = glyph.attrs as Record<string, string> | undefined;
+          if (!attrs) return false;
+          const glyphName = (attrs.name || "").toLowerCase();
+          const glyphDomain = (attrs.domain || "rxd").toLowerCase();
+          return glyphName === bareName && glyphDomain === domain;
+        })
+        .first();
+
+      if (match) {
+        const attrs = match.attrs as Record<string, string>;
+        const target = attrs.target || "";
+        if (target) return { target };
+      }
+
+      // Fall back to RPC (RXinDexer supports this natively)
+      try {
+        const result = await electrum.client?.request("wave.resolve", bareName) as {
+          target?: string;
+          zone?: { address?: string };
+        } | null | undefined;
+        if (result) {
+          // RXinDexer returns {target, zone: {address}} — accept either
+          const target = result.target || result.zone?.address;
+          if (target) return { target };
+        }
+      } catch {
+        // RPC not supported — ignore
+      }
+
+      return null;
     } catch {
       return null;
     }
   },
   async checkWaveAvailable(name: string): Promise<boolean> {
+    // Try RPC first
     try {
       const result = await electrum.client?.request(
         "wave.check_available",
         name
       ) as boolean | undefined;
 
-      // If server returns undefined/null, the method is not supported
-      if (result === undefined || result === null) {
-        throw new Error("Server does not support WAVE availability checking");
+      if (result !== undefined && result !== null) {
+        return result;
       }
-
-      return result;
-    } catch (error: any) {
-      // Handle both RPC errors (unknown method) and connection errors
-      const errorMessage = error?.message || error?.toString() || "";
-      if (
-        errorMessage.includes("unknown method") ||
-        errorMessage.includes("not supported") ||
-        errorMessage.includes("method not found")
-      ) {
-        throw new Error("Server does not support WAVE availability checking");
-      }
-      // Re-throw other errors
-      throw error;
+    } catch {
+      // RPC not supported — fall through to local DB check
     }
+
+    // Fall back to local DB check
+    const parts = name.toLowerCase().split(".");
+    const bareName = parts[0];
+    const domain = parts[1] || "rxd";
+    const GLYPH_WAVE = 11;
+
+    const existing = await db.glyph
+      .filter((glyph) => {
+        if (!glyph.p?.includes(GLYPH_WAVE)) return false;
+        if (glyph.spent !== 0) return false;
+        const attrs = glyph.attrs as Record<string, string> | undefined;
+        if (!attrs) return false;
+        return (attrs.name || "").toLowerCase() === bareName &&
+               (attrs.domain || "rxd").toLowerCase() === domain;
+      })
+      .first();
+
+    // If found in local DB, it's taken; if not found locally, we can't be sure
+    // (the name might exist on chain but not synced), so throw to signal uncertainty
+    if (existing) return false;
+    throw new Error("Server does not support WAVE availability checking");
   },
 };
 
