@@ -52,7 +52,7 @@ const wrapped = wrap<{
   getTransaction: (txid: string) => string;
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
-  discoverVaults: (wif: string) => number;
+  discoverVaults: (wif: string, address: string) => number;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
   fetchGlyph: (refBE: string) => SmartToken | undefined;
@@ -123,26 +123,41 @@ export default function Electrum() {
   }, [stableServers, wallet.value.address]);
 
   // Discover vaults when wallet is unlocked and connected
+  const discoveryRanRef = useRef(false);
   useEffect(() => {
-    let discoveryInitiated = false;
-
     const discover = async () => {
       if (
-        !discoveryInitiated &&
-        wallet.value.wif &&
-        wallet.value.address &&
-        electrumStatus.value === ElectrumStatus.CONNECTED
+        discoveryRanRef.current ||
+        !wallet.value.wif ||
+        !wallet.value.address ||
+        electrumStatus.value !== ElectrumStatus.CONNECTED
       ) {
-        discoveryInitiated = true;
-        console.debug("[Electrum] Starting vault discovery");
-        try {
-          const count = await electrumWorker.value.discoverVaults(wallet.value.wif);
-          if (count > 0) {
-            console.log(`[Electrum] Discovered ${count} vault(s)`);
-          }
-        } catch (error) {
-          console.warn("[Electrum] Vault discovery failed:", error);
+        return;
+      }
+      discoveryRanRef.current = true;
+      console.debug("[Electrum] Starting vault discovery");
+      try {
+        // Scan main address
+        const mainCount = await electrumWorker.value.discoverVaults(
+          wallet.value.wif,
+          wallet.value.address
+        );
+        if (mainCount > 0) {
+          console.log(`[Electrum] Discovered ${mainCount} vault(s) on main address`);
         }
+
+        // Scan swap address if different from main
+        if (wallet.value.swapWif && wallet.value.swapAddress) {
+          const swapCount = await electrumWorker.value.discoverVaults(
+            wallet.value.swapWif,
+            wallet.value.swapAddress
+          );
+          if (swapCount > 0) {
+            console.log(`[Electrum] Discovered ${swapCount} vault(s) on swap address`);
+          }
+        }
+      } catch (error) {
+        console.warn("[Electrum] Vault discovery failed:", error);
       }
     };
 

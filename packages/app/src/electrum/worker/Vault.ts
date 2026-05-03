@@ -231,19 +231,21 @@ export class VaultWorker implements Subscription {
    * This is called during wallet restore to find vaults created previously.
    *
    * @param wif The wallet's WIF private key (for decrypting vault OP_RETURN)
+   * @param address The address to scan (defaults to registered address if not provided)
    * @returns Number of vaults discovered and added to the database
    */
-  async discoverVaults(wif: string): Promise<number> {
-    if (!this.address) {
-      console.warn("[Vault] Cannot discover vaults: no address registered");
+  async discoverVaults(wif: string, address?: string): Promise<number> {
+    const scanAddress = address || this.address;
+    if (!scanAddress) {
+      console.warn("[Vault] Cannot discover vaults: no address provided");
       return 0;
     }
 
     try {
-      console.debug("[Vault] Starting vault discovery for", this.address);
+      console.debug("[Vault] Starting vault discovery for", scanAddress);
 
       // Get P2PKH script hash for this address to fetch its history
-      const scriptHash = p2pkhScriptHash(this.address);
+      const scriptHash = p2pkhScriptHash(scanAddress);
 
       // Fetch transaction history for this address
       const history = (await this.electrum.client?.request(
@@ -261,8 +263,15 @@ export class VaultWorker implements Subscription {
       let discoveredCount = 0;
 
       // Check each transaction for vault outputs
+      let scanned = 0;
       for (const { tx_hash: txid, height } of history) {
         try {
+          scanned++;
+          // Log progress every 500 transactions
+          if (scanned % 500 === 0) {
+            console.debug(`[Vault] Scanned ${scanned}/${history.length} transactions...`);
+          }
+
           // Skip if we already have this vault in the database
           const existingVault = await db.vault.where("txid").equals(txid).first();
           if (existingVault) {
@@ -275,13 +284,16 @@ export class VaultWorker implements Subscription {
             txid
           )) as string | undefined;
 
-          if (!rawTx) continue;
+          if (!rawTx) {
+            console.warn(`[Vault] Could not fetch tx ${txid}`);
+            continue;
+          }
 
           // Try to recover vaults from this transaction
-          const recovered = recoverVaultsFromTx(rawTx, txid, wif, this.address);
+          const recovered = recoverVaultsFromTx(rawTx, txid, wif, scanAddress);
 
           if (recovered.length > 0) {
-            console.debug(`[Vault] Recovered ${recovered.length} vault(s) from ${txid}`);
+            console.log(`[Vault] Recovered ${recovered.length} vault(s) from ${txid}`);
 
             // Convert recovered vault data to VaultRecords and store
             for (const vaultData of recovered) {
@@ -293,7 +305,7 @@ export class VaultWorker implements Subscription {
                 mode: vaultData.params.mode,
                 locktime: vaultData.params.locktime,
                 recipientAddress: vaultData.params.recipientAddress,
-                senderAddress: this.address, // We sent this vault
+                senderAddress: scanAddress, // We sent this vault
                 ref: vaultData.params.ref,
                 label: vaultData.params.label,
                 redeemScriptHex: vaultData.redeemScriptHex,
@@ -312,6 +324,8 @@ export class VaultWorker implements Subscription {
           // Continue with next transaction
         }
       }
+
+      console.debug(`[Vault] Scanned ${scanned} transactions total`);
 
       if (discoveredCount > 0) {
         console.log(`[Vault] Discovered ${discoveredCount} vault(s) from history`);

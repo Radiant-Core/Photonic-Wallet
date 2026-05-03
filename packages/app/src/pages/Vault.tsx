@@ -711,11 +711,26 @@ export default function VaultPage() {
 
     setScanning(true);
     try {
-      const count = await electrumWorker.value.discoverVaults(wallet.value.wif);
-      if (count > 0) {
+      // Scan main address
+      const mainCount = await electrumWorker.value.discoverVaults(
+        wallet.value.wif,
+        wallet.value.address
+      );
+
+      // Scan swap address if different
+      let swapCount = 0;
+      if (wallet.value.swapWif && wallet.value.swapAddress) {
+        swapCount = await electrumWorker.value.discoverVaults(
+          wallet.value.swapWif,
+          wallet.value.swapAddress
+        );
+      }
+
+      const totalCount = mainCount + swapCount;
+      if (totalCount > 0) {
         toast({
           title: "Vaults Discovered",
-          description: `Found ${count} vault(s) in transaction history`,
+          description: `Found ${totalCount} vault(s) in transaction history`,
           status: "success",
           duration: 5000,
         });
