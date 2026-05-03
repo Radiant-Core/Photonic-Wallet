@@ -63,7 +63,7 @@ export class VaultWorker implements Subscription {
    * present on-chain. Repairs false positives from the old updateTxos bug.
    */
   async revalidateClaimed() {
-    const claimed = await db.vault.where({ claimed: 1 }).toArray();
+    const claimed = await db.vault.where("claimed").equals(1).toArray();
     const relevant = claimed.filter(
       (v) =>
         v.recipientAddress === this.address ||
@@ -73,16 +73,31 @@ export class VaultWorker implements Subscription {
     for (const vault of relevant) {
       try {
         const scriptHash = vaultScriptHash(vault.redeemScriptHex);
+
+        // Check confirmed UTXOs
         const utxos = (await this.electrum.client?.request(
           "blockchain.scripthash.listunspent",
           scriptHash
         )) as ElectrumUtxo[];
 
-        const isStillUnspent = utxos?.some(
+        const isConfirmedUnspent = utxos?.some(
           (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
         );
 
-        if (isStillUnspent) {
+        // Also check mempool — vault tx may be unconfirmed
+        let isInMempool = false;
+        try {
+          const mempoolEntries = (await this.electrum.client?.request(
+            "blockchain.scripthash.get_mempool",
+            scriptHash
+          )) as { tx_hash: string; fee: number; height: number }[] | undefined;
+          isInMempool =
+            mempoolEntries?.some((e) => e.tx_hash === vault.txid) ?? false;
+        } catch {
+          // Mempool query not supported — only rely on confirmed check
+        }
+
+        if (isConfirmedUnspent || isInMempool) {
           // Was incorrectly marked claimed — restore it
           await db.vault
             .where("[txid+vout]")
@@ -104,7 +119,7 @@ export class VaultWorker implements Subscription {
     if (!this.address) return;
 
     const vaults = await db.vault
-      .where({ claimed: 0 })
+      .where("claimed").equals(0)
       .toArray();
 
     // Filter to vaults involving this wallet address
@@ -160,18 +175,40 @@ export class VaultWorker implements Subscription {
         scriptHash
       )) as ElectrumUtxo[];
 
-      const isStillUnspent = utxos?.some(
+      if (utxos === undefined) return;
+
+      const isConfirmedUnspent = utxos.some(
         (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
       );
 
-      if (!isStillUnspent && utxos !== undefined) {
-        // UTXO is gone — vault has been claimed on-chain
-        await db.vault
-          .where("[txid+vout]")
-          .equals([vault.txid, vault.vout])
-          .modify({ claimed: 1 });
-        console.debug(`[Vault] Marked claimed: ${vault.txid}:${vault.vout}`);
+      if (isConfirmedUnspent) return; // Still in the UTXO set — not spent
+
+      // Not in confirmed UTXO set — check mempool before concluding it's spent.
+      // listunspent only returns confirmed UTXOs; an unconfirmed vault tx
+      // would appear in get_mempool instead.
+      let isInMempool = false;
+      try {
+        const mempoolEntries = (await this.electrum.client?.request(
+          "blockchain.scripthash.get_mempool",
+          scriptHash
+        )) as { tx_hash: string; fee: number; height: number }[] | undefined;
+
+        isInMempool =
+          mempoolEntries?.some((e) => e.tx_hash === vault.txid) ?? false;
+      } catch {
+        // If mempool query fails, do NOT mark as claimed — err on the side of safety
+        console.debug(`[Vault] Mempool query failed for ${vault.txid}:${vault.vout}, skipping claim check`);
+        return;
       }
+
+      if (isInMempool) return; // Still unconfirmed — not spent
+
+      // UTXO is absent from both confirmed set and mempool — vault has been claimed
+      await db.vault
+        .where("[txid+vout]")
+        .equals([vault.txid, vault.vout])
+        .modify({ claimed: 1 });
+      console.debug(`[Vault] Marked claimed: ${vault.txid}:${vault.vout}`);
     } catch (error) {
       console.warn(`[Vault] checkVaultSpent error for ${vault.txid}:${vault.vout}:`, error);
     }
