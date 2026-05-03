@@ -52,6 +52,7 @@ const wrapped = wrap<{
   getTransaction: (txid: string) => string;
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
+  discoverVaults: (wif: string) => number;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
   fetchGlyph: (refBE: string) => SmartToken | undefined;
@@ -120,6 +121,33 @@ export default function Electrum() {
       electrumWorker.value.connect(wallet.value.address);
     }
   }, [stableServers, wallet.value.address]);
+
+  // Discover vaults when wallet is unlocked and connected
+  useEffect(() => {
+    let discoveryInitiated = false;
+
+    const discover = async () => {
+      if (
+        !discoveryInitiated &&
+        wallet.value.wif &&
+        wallet.value.address &&
+        electrumStatus.value === ElectrumStatus.CONNECTED
+      ) {
+        discoveryInitiated = true;
+        console.debug("[Electrum] Starting vault discovery");
+        try {
+          const count = await electrumWorker.value.discoverVaults(wallet.value.wif);
+          if (count > 0) {
+            console.log(`[Electrum] Discovered ${count} vault(s)`);
+          }
+        } catch (error) {
+          console.warn("[Electrum] Vault discovery failed:", error);
+        }
+      }
+    };
+
+    discover();
+  }, [wallet.value.wif, wallet.value.address, electrumStatus.value]);
 
   return null;
 }

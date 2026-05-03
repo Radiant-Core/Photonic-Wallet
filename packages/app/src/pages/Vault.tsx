@@ -199,6 +199,9 @@ export default function VaultPage() {
   // List filter state
   const [showClaimed, setShowClaimed] = useState(false);
 
+  // Vault discovery state
+  const [scanning, setScanning] = useState(false);
+
   // Sort state
   type SortCol = "status" | "type" | "value" | "locktime" | "remaining" | "label";
   const [sortCol, setSortCol] = useState<SortCol>("locktime");
@@ -698,6 +701,44 @@ export default function VaultPage() {
   };
 
   // ────────────────────────────────────────────────────────
+  // Scan for vaults (manual discovery)
+  // ────────────────────────────────────────────────────────
+  const handleScan = async () => {
+    if (wallet.value.locked || !wallet.value.wif) {
+      openModal.value = { modal: "unlock" };
+      return;
+    }
+
+    setScanning(true);
+    try {
+      const count = await electrumWorker.value.discoverVaults(wallet.value.wif);
+      if (count > 0) {
+        toast({
+          title: "Vaults Discovered",
+          description: `Found ${count} vault(s) in transaction history`,
+          status: "success",
+          duration: 5000,
+        });
+      } else {
+        toast({
+          title: "No Vaults Found",
+          description: "No timelocked coins found in transaction history",
+          status: "info",
+          duration: 3000,
+        });
+      }
+    } catch (err: unknown) {
+      toast({
+        title: "Scan Failed",
+        description: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // ────────────────────────────────────────────────────────
   // Render
   // ────────────────────────────────────────────────────────
   return (
@@ -1096,26 +1137,53 @@ export default function VaultPage() {
         <Box overflowX="auto">
           {/* Filter controls */}
           {vaults && vaults.length > 0 && (
-            <HStack mb={3} gap={3}>
-              <FormControl display="flex" alignItems="center" gap={2} w="auto">
-                <Switch
-                  size="sm"
-                  isChecked={showClaimed}
-                  onChange={(e) => setShowClaimed(e.target.checked)}
-                />
-                <FormLabel mb={0} fontSize="xs">{"Show Claimed"}</FormLabel>
-              </FormControl>
-              <Text fontSize="xs" color="whiteAlpha.500">
-                {vaults.filter((v) => !v.claimed).length} {"active"}
-                {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${"claimed"}`}
-              </Text>
+            <HStack mb={3} gap={3} justify="space-between">
+              <HStack gap={3}>
+                <FormControl display="flex" alignItems="center" gap={2} w="auto">
+                  <Switch
+                    size="sm"
+                    isChecked={showClaimed}
+                    onChange={(e) => setShowClaimed(e.target.checked)}
+                  />
+                  <FormLabel mb={0} fontSize="xs">{"Show Claimed"}</FormLabel>
+                </FormControl>
+                <Text fontSize="xs" color="whiteAlpha.500">
+                  {vaults.filter((v) => !v.claimed).length} {"active"}
+                  {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${"claimed"}`}
+                </Text>
+              </HStack>
+              <Button
+                size="xs"
+                variant="ghost"
+                leftIcon={<Icon as={TbWand} />}
+                onClick={handleScan}
+                isLoading={scanning}
+                loadingText="Scanning..."
+              >
+                {"Scan for Vaults"}
+              </Button>
             </HStack>
           )}
 
           {!vaults || vaults.length === 0 ? (
-            <Text color="whiteAlpha.500" py={8} textAlign="center">
-              {"No vaults yet. Create one to get started."}
-            </Text>
+            <VStack gap={4} py={8} align="center">
+              <Text color="whiteAlpha.500" textAlign="center">
+                {"No vaults yet. Create one to get started."}
+              </Text>
+              <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
+                {"Or scan your transaction history for existing timelocked coins."}
+              </Text>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Icon as={TbWand} />}
+                onClick={handleScan}
+                isLoading={scanning}
+                loadingText="Scanning..."
+              >
+                {"Scan for Vaults"}
+              </Button>
+            </VStack>
           ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
               {"All vaults claimed. Toggle \u201cShow Claimed\u201d to view history."}

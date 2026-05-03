@@ -131,6 +131,9 @@ const worker = {
     await nft.manualSync();
     await vault.manualSync();
   },
+  async discoverVaults(wif: string) {
+    return vault.discoverVaults(wif);
+  },
   setActive(active: boolean) {
     this.active = active;
   },

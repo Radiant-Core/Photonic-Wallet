@@ -6,7 +6,8 @@ import {
 import db from "@app/db";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import { Worker } from "./electrumWorker";
-import { vaultScriptHash } from "@lib/vault";
+import { vaultScriptHash, recoverVaultsFromTx } from "@lib/vault";
+import { p2pkhScriptHash } from "@lib/script";
 import { ElectrumUtxo } from "@lib/types";
 
 /**
@@ -221,5 +222,109 @@ export class VaultWorker implements Subscription {
   async addVault(record: VaultRecord) {
     await db.vault.put(record);
     await this.subscribeToAllVaults();
+  }
+
+  /**
+   * Discover vaults from transaction history by scanning for vault creation
+   * transactions and recovering vault metadata from OP_RETURN outputs.
+   *
+   * This is called during wallet restore to find vaults created previously.
+   *
+   * @param wif The wallet's WIF private key (for decrypting vault OP_RETURN)
+   * @returns Number of vaults discovered and added to the database
+   */
+  async discoverVaults(wif: string): Promise<number> {
+    if (!this.address) {
+      console.warn("[Vault] Cannot discover vaults: no address registered");
+      return 0;
+    }
+
+    try {
+      console.debug("[Vault] Starting vault discovery for", this.address);
+
+      // Get P2PKH script hash for this address to fetch its history
+      const scriptHash = p2pkhScriptHash(this.address);
+
+      // Fetch transaction history for this address
+      const history = (await this.electrum.client?.request(
+        "blockchain.scripthash.get_history",
+        scriptHash
+      )) as { tx_hash: string; height: number }[] | undefined;
+
+      if (!history || history.length === 0) {
+        console.debug("[Vault] No transaction history found");
+        return 0;
+      }
+
+      console.debug(`[Vault] Found ${history.length} transactions to scan`);
+
+      let discoveredCount = 0;
+
+      // Check each transaction for vault outputs
+      for (const { tx_hash: txid, height } of history) {
+        try {
+          // Skip if we already have this vault in the database
+          const existingVault = await db.vault.where("txid").equals(txid).first();
+          if (existingVault) {
+            continue;
+          }
+
+          // Fetch the raw transaction
+          const rawTx = (await this.electrum.client?.request(
+            "blockchain.transaction.get",
+            txid
+          )) as string | undefined;
+
+          if (!rawTx) continue;
+
+          // Try to recover vaults from this transaction
+          const recovered = recoverVaultsFromTx(rawTx, txid, wif, this.address);
+
+          if (recovered.length > 0) {
+            console.debug(`[Vault] Recovered ${recovered.length} vault(s) from ${txid}`);
+
+            // Convert recovered vault data to VaultRecords and store
+            for (const vaultData of recovered) {
+              const record: VaultRecord = {
+                txid,
+                vout: vaultData.vout,
+                value: vaultData.params.value,
+                assetType: vaultData.params.assetType,
+                mode: vaultData.params.mode,
+                locktime: vaultData.params.locktime,
+                recipientAddress: vaultData.params.recipientAddress,
+                senderAddress: this.address, // We sent this vault
+                ref: vaultData.params.ref,
+                label: vaultData.params.label,
+                redeemScriptHex: vaultData.redeemScriptHex,
+                p2shScriptHex: vaultData.p2shScriptHex,
+                claimed: 0,
+                height: height > 0 ? height : undefined,
+                date: Date.now(), // Approximation - could parse from block time
+              };
+
+              await db.vault.put(record);
+              discoveredCount++;
+            }
+          }
+        } catch (error) {
+          console.warn(`[Vault] Error scanning tx ${txid}:`, error);
+          // Continue with next transaction
+        }
+      }
+
+      if (discoveredCount > 0) {
+        console.log(`[Vault] Discovered ${discoveredCount} vault(s) from history`);
+        // Subscribe to newly discovered vaults
+        await this.subscribeToAllVaults();
+      } else {
+        console.debug("[Vault] No vaults discovered in transaction history");
+      }
+
+      return discoveredCount;
+    } catch (error) {
+      console.warn("[Vault] Discovery failed:", error);
+      return 0;
+    }
   }
 }
