@@ -1154,7 +1154,8 @@ export function recoverVaultsFromTx(
   rawTxHex: string,
   txid: string,
   wif: string,
-  walletAddress: string
+  walletAddress: string,
+  debug = false
 ): {
   vout: number;
   redeemScriptHex: string;
@@ -1170,13 +1171,35 @@ export function recoverVaultsFromTx(
     params: VaultParams;
   }[] = [];
 
+  if (debug) {
+    console.debug(`[recoverVaults] ${txid}: ${tx.outputs.length} outputs`);
+  }
+
   // Find OP_RETURN outputs with vault magic
   for (let i = 0; i < tx.outputs.length; i++) {
     const scriptHex = tx.outputs[i].script.toHex();
+
+    if (debug) {
+      console.debug(`[recoverVaults] ${txid}: output ${i} script starts with: ${scriptHex.slice(0, 20)}...`);
+    }
+
     if (!scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)) continue;
+
+    if (debug) {
+      console.debug(`[recoverVaults] ${txid}: output ${i} has vault magic bytes!`);
+    }
 
     // Try decrypting with this wallet as sender, using own address as recipient
     const parsed = parseVaultOpReturn(scriptHex, wif, walletAddress);
+
+    if (debug) {
+      if (parsed) {
+        console.debug(`[recoverVaults] ${txid}: output ${i} decrypted successfully`, parsed);
+      } else {
+        console.debug(`[recoverVaults] ${txid}: output ${i} decryption FAILED - wrong key?`);
+      }
+    }
+
     if (!parsed) continue;
 
     // Reconstruct the redeem script from decoded metadata

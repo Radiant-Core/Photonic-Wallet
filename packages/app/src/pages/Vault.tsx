@@ -49,6 +49,7 @@ import {
   formatLocktime,
   vaultTimeRemaining,
   claimVaultTx,
+  recoverVaultsFromTx,
   VAULT_MAX_LOCKTIME_BLOCKS,
   VAULT_MAX_TRANCHES,
   type VaultParams,
@@ -201,6 +202,10 @@ export default function VaultPage() {
 
   // Vault discovery state
   const [scanning, setScanning] = useState(false);
+
+  // Manual transaction check state
+  const [checkTxId, setCheckTxId] = useState("");
+  const [checkingTx, setCheckingTx] = useState(false);
 
   // Sort state
   type SortCol = "status" | "type" | "value" | "locktime" | "remaining" | "label";
@@ -754,6 +759,94 @@ export default function VaultPage() {
   };
 
   // ────────────────────────────────────────────────────────
+  // Check specific transaction for vault (debug helper)
+  // ────────────────────────────────────────────────────────
+  const handleCheckTx = async () => {
+    if (wallet.value.locked || !wallet.value.wif) {
+      openModal.value = { modal: "unlock" };
+      return;
+    }
+    if (!checkTxId.trim()) {
+      toast({
+        title: "Enter Transaction ID",
+        description: "Please paste a transaction ID to check",
+        status: "warning",
+      });
+      return;
+    }
+
+    setCheckingTx(true);
+    try {
+      const txid = checkTxId.trim();
+      console.log(`[Vault Check] Checking transaction: ${txid}`);
+
+      // Fetch the raw transaction
+      const rawTx = await electrumWorker.value.getTransaction(txid);
+      if (!rawTx) {
+        toast({
+          title: "Transaction Not Found",
+          description: `Could not fetch tx ${txid}`,
+          status: "error",
+        });
+        return;
+      }
+
+      console.log(`[Vault Check] Raw tx length: ${rawTx.length}`);
+
+      // Try to recover vaults with full debug
+      const recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.wif, wallet.value.address, true);
+
+      if (recovered.length > 0) {
+        console.log(`[Vault Check] ✅ Found ${recovered.length} vault(s):`, recovered);
+        toast({
+          title: "Vault Found!",
+          description: `Found ${recovered.length} vault(s) in this transaction. Check console for details.`,
+          status: "success",
+          duration: 10000,
+        });
+
+        // Save to database
+        for (const vaultData of recovered) {
+          const record: VaultRecord = {
+            txid,
+            vout: vaultData.vout,
+            value: vaultData.params.value,
+            assetType: vaultData.params.assetType,
+            mode: vaultData.params.mode,
+            locktime: vaultData.params.locktime,
+            recipientAddress: vaultData.params.recipientAddress,
+            senderAddress: wallet.value.address,
+            ref: vaultData.params.ref,
+            label: vaultData.params.label,
+            redeemScriptHex: vaultData.redeemScriptHex,
+            p2shScriptHex: vaultData.p2shScriptHex,
+            claimed: 0,
+            date: Date.now(),
+          };
+          await db.vault.put(record);
+        }
+      } else {
+        console.log(`[Vault Check] ❌ No vaults found in transaction ${txid}`);
+        toast({
+          title: "No Vault Found",
+          description: "This transaction does not contain a recoverable vault. Check console for debug info.",
+          status: "info",
+          duration: 5000,
+        });
+      }
+    } catch (err: unknown) {
+      console.error("[Vault Check] Error:", err);
+      toast({
+        title: "Check Failed",
+        description: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    } finally {
+      setCheckingTx(false);
+    }
+  };
+
+  // ────────────────────────────────────────────────────────
   // Render
   // ────────────────────────────────────────────────────────
   return (
@@ -1198,6 +1291,29 @@ export default function VaultPage() {
               >
                 {"Scan for Vaults"}
               </Button>
+
+              <Divider my={4} />
+
+              <Text color="whiteAlpha.400" fontSize="xs" textAlign="center">
+                {"Know a specific vault transaction? Paste the TXID below:"}
+              </Text>
+              <HStack w="100%" maxW="md">
+                <Input
+                  size="sm"
+                  placeholder="Paste transaction ID (txid)"
+                  value={checkTxId}
+                  onChange={(e) => setCheckTxId(e.target.value)}
+                  fontFamily="mono"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleCheckTx}
+                  isLoading={checkingTx}
+                  loadingText="Checking..."
+                >
+                  {"Check"}
+                </Button>
+              </HStack>
             </VStack>
           ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
