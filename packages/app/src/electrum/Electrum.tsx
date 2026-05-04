@@ -52,7 +52,7 @@ const wrapped = wrap<{
   getTransaction: (txid: string) => string;
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
-  discoverVaults: (wif: string, address: string) => number;
+  discoverVaults: (wif: string, address: string, swapWif?: string) => number;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
   fetchGlyph: (refBE: string) => SmartToken | undefined;
@@ -137,10 +137,11 @@ export default function Electrum() {
       discoveryRanRef.current = true;
       console.debug("[Electrum] Starting vault discovery");
       try {
-        // Scan main address
+        // Scan main address - also try swapWif for decryption if main fails
         const mainCount = await electrumWorker.value.discoverVaults(
           wallet.value.wif,
-          wallet.value.address
+          wallet.value.address,
+          wallet.value.swapWif // Try swap WIF if main fails to decrypt
         );
         if (mainCount > 0) {
           console.log(`[Electrum] Discovered ${mainCount} vault(s) on main address`);
@@ -150,7 +151,8 @@ export default function Electrum() {
         if (wallet.value.swapWif && wallet.value.swapAddress) {
           const swapCount = await electrumWorker.value.discoverVaults(
             wallet.value.swapWif,
-            wallet.value.swapAddress
+            wallet.value.swapAddress,
+            wallet.value.wif // Try main WIF if swap fails to decrypt
           );
           if (swapCount > 0) {
             console.log(`[Electrum] Discovered ${swapCount} vault(s) on swap address`);

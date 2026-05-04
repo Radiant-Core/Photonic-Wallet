@@ -187,6 +187,13 @@ export default function VaultPage() {
 
   // Vesting-specific state
   const [vestingInputMode, setVestingInputMode] = useState<VestingInputMode>("manual");
+
+  // Default recipient to self when create tab is opened
+  useEffect(() => {
+    if (tab === "create" && wallet.value.address && !recipient) {
+      setRecipient(wallet.value.address);
+    }
+  }, [tab, wallet.value.address, recipient]);
   const [totalVestingAmount, setTotalVestingAmount] = useState("");
 
   // Interval auto-fill state
@@ -521,8 +528,11 @@ export default function VaultPage() {
         // Simple vault
         const lt = parseInt(locktime, 10);
         const val = Math.round(parseFloat(amount) * 1e8);
-        if (!lt || !val || !recipient) {
-          throw new Error("Fill in all fields");
+        if (!lt || !val) {
+          throw new Error("Fill in locktime and amount");
+        }
+        if (!recipient) {
+          throw new Error("Recipient address is required. Click 'Self' to use your own address.");
         }
         if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
           throw new Error(`Block must be greater than current height (${currentHeight})`);
@@ -716,10 +726,11 @@ export default function VaultPage() {
 
     setScanning(true);
     try {
-      // Scan main address
+      // Scan main address - also try swapWif for decryption if main fails
       const mainCount = await electrumWorker.value.discoverVaults(
         wallet.value.wif,
-        wallet.value.address
+        wallet.value.address,
+        wallet.value.swapWif // Try swap WIF if main fails to decrypt
       );
 
       // Scan swap address if different
@@ -727,7 +738,8 @@ export default function VaultPage() {
       if (wallet.value.swapWif && wallet.value.swapAddress) {
         swapCount = await electrumWorker.value.discoverVaults(
           wallet.value.swapWif,
-          wallet.value.swapAddress
+          wallet.value.swapAddress,
+          wallet.value.wif // Try main WIF if swap fails to decrypt
         );
       }
 
@@ -793,8 +805,15 @@ export default function VaultPage() {
 
       console.log(`[Vault Check] Raw tx length: ${rawTx.length}`);
 
-      // Try to recover vaults with full debug
-      const recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.wif, wallet.value.address, true);
+      // Try to recover vaults with main address first
+      console.log(`[Vault Check] Trying with main address: ${wallet.value.address}`);
+      let recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.wif, wallet.value.address, true);
+
+      // If no vaults found and we have a swap address, try that too
+      if (recovered.length === 0 && wallet.value.swapAddress && wallet.value.swapWif) {
+        console.log(`[Vault Check] Trying with swap address: ${wallet.value.swapAddress}`);
+        recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.swapWif, wallet.value.swapAddress, true);
+      }
 
       if (recovered.length > 0) {
         console.log(`[Vault Check] ✅ Found ${recovered.length} vault(s):`, recovered);

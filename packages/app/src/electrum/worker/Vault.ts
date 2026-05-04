@@ -233,9 +233,10 @@ export class VaultWorker implements Subscription {
    *
    * @param wif The wallet's WIF private key (for decrypting vault OP_RETURN)
    * @param address The address to scan (defaults to registered address if not provided)
+   * @param swapWif Optional swap WIF to also try for decryption (vault may be encrypted with swap key)
    * @returns Number of vaults discovered and added to the database
    */
-  async discoverVaults(wif: string, address?: string): Promise<number> {
+  async discoverVaults(wif: string, address?: string, swapWif?: string): Promise<number> {
     // Prevent concurrent discovery runs
     if (this.discovering) {
       console.warn("[Vault] Discovery already in progress, skipping");
@@ -313,7 +314,15 @@ export class VaultWorker implements Subscription {
           // Try to recover vaults from this transaction
           // Enable debug mode for first few transactions to trace issues
           const enableDebug = debugLogCount < 3;
-          const recovered = recoverVaultsFromTx(rawTx, txid, wif, scanAddress, enableDebug);
+          let recovered = recoverVaultsFromTx(rawTx, txid, wif, scanAddress, enableDebug);
+
+          // If no vaults found with main WIF and swapWif provided, try swap WIF
+          if (recovered.length === 0 && swapWif) {
+            if (enableDebug) {
+              console.debug(`[Vault] Debug: Trying swapWif for ${txid}`);
+            }
+            recovered = recoverVaultsFromTx(rawTx, txid, swapWif, scanAddress, enableDebug);
+          }
 
           if (isDebug) {
             console.debug(`[Vault] Debug: ${txid} - recovered: ${recovered.length}`);

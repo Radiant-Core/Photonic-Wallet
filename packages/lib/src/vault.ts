@@ -609,7 +609,8 @@ export function decodeVaultMetadata(data: Uint8Array): VaultParams | null {
 export function parseVaultOpReturn(
   scriptHex: string,
   senderWif: string,
-  recipientAddress: string
+  recipientAddress: string,
+  debug = false
 ): VaultParams | null {
   try {
     // OP_RETURN (6a) + push "vault" (05 7661756c74) + push <encrypted>
@@ -633,19 +634,44 @@ export function parseVaultOpReturn(
         (parseInt(afterMagic.slice(4, 6), 16) << 8);
       payloadHex = afterMagic.slice(6, 6 + len * 2);
     } else {
+      if (debug) console.debug(`[parseVaultOpReturn] Unsupported push byte: ${pushByte}`);
       return null;
     }
 
     const payload = Buffer.from(payloadHex, "hex");
-    if (payload.length < 25) return null; // nonce(24) + at least 1 byte
+    if (debug) console.debug(`[parseVaultOpReturn] Payload length: ${payload.length}`);
+    if (payload.length < 25) {
+      if (debug) console.debug(`[parseVaultOpReturn] Payload too short: ${payload.length} < 25`);
+      return null;
+    }
 
     const nonce = new Uint8Array(payload.slice(0, 24));
     const ciphertext = new Uint8Array(payload.slice(24));
-    const key = deriveVaultMetadataKey(senderWif, recipientAddress);
-    const plaintext = decryptXChaCha20Poly1305(ciphertext, key, nonce);
+    if (debug) console.debug(`[parseVaultOpReturn] Nonce: ${bytesToHex(nonce.slice(0, 8))}..., Ciphertext length: ${ciphertext.length}`);
 
-    return decodeVaultMetadata(plaintext);
-  } catch {
+    const key = deriveVaultMetadataKey(senderWif, recipientAddress);
+    if (debug) console.debug(`[parseVaultOpReturn] Derived key (first 8 bytes): ${bytesToHex(key.slice(0, 8))}...`);
+
+    let plaintext: Uint8Array;
+    try {
+      plaintext = decryptXChaCha20Poly1305(ciphertext, key, nonce);
+      if (debug) console.debug(`[parseVaultOpReturn] Decryption successful, plaintext length: ${plaintext.length}`);
+    } catch (decryptErr) {
+      if (debug) console.debug(`[parseVaultOpReturn] Decryption failed:`, decryptErr);
+      return null;
+    }
+
+    const metadata = decodeVaultMetadata(plaintext);
+    if (debug) {
+      if (metadata) {
+        console.debug(`[parseVaultOpReturn] Metadata decoded successfully:`, metadata);
+      } else {
+        console.debug(`[parseVaultOpReturn] Metadata decode failed - version check failed or format error`);
+      }
+    }
+    return metadata;
+  } catch (err) {
+    if (debug) console.debug(`[parseVaultOpReturn] Unexpected error:`, err);
     return null;
   }
 }
@@ -1190,14 +1216,13 @@ export function recoverVaultsFromTx(
     }
 
     // Try decrypting with this wallet as sender, using own address as recipient
-    const parsed = parseVaultOpReturn(scriptHex, wif, walletAddress);
+    const parsed = parseVaultOpReturn(scriptHex, wif, walletAddress, debug);
 
     if (debug) {
       if (parsed) {
-        console.debug(`[recoverVaults] ${txid}: output ${i} decrypted successfully`, parsed);
-      } else {
-        console.debug(`[recoverVaults] ${txid}: output ${i} decryption FAILED - wrong key?`);
+        console.debug(`[recoverVaults] ${txid}: output ${i} full recovery successful`, parsed);
       }
+      // Detailed debug is now inside parseVaultOpReturn
     }
 
     if (!parsed) continue;
