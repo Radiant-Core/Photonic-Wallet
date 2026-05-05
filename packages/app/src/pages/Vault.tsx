@@ -947,6 +947,7 @@ export default function VaultPage() {
               <Select
                 size="sm"
                 value={assetType}
+                title="Asset Type"
                 aria-label="Asset Type"
                 onChange={(e) =>
                   setAssetType(e.target.value as VaultAssetType)
@@ -963,6 +964,7 @@ export default function VaultPage() {
               <Select
                 size="sm"
                 value={mode}
+                title="Lock Mode"
                 aria-label="Lock Mode"
                 onChange={(e) => setMode(e.target.value as VaultMode)}
               >
