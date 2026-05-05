@@ -620,6 +620,19 @@ export default function VaultPage() {
           throw new Error("Percentages must sum to 100%");
         }
 
+        for (let i = 0; i < resolvedTranches.length; i++) {
+          const lt = resolvedTranches[i].locktime;
+          if (!lt || lt <= 0) {
+            throw new Error(`Tranche ${i + 1}: ${mode === "block" ? "Block number" : "Timestamp"} is required`);
+          }
+          if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
+            throw new Error(`Tranche ${i + 1}: Block ${lt} must be greater than current height (${currentHeight})`);
+          }
+          if (mode === "time" && lt <= currentTimestamp) {
+            throw new Error(`Tranche ${i + 1}: Timestamp must be in the future`);
+          }
+        }
+
         const vestingTranches: VestingTranche[] = resolvedTranches.map((rt) => ({
           mode,
           locktime: rt.locktime,
@@ -1155,7 +1168,14 @@ export default function VaultPage() {
               <Divider borderColor="whiteAlpha.200" />
 
               {/* Tranche rows */}
-              {tranches.map((tr, i) => (
+              {tranches.map((tr, i) => {
+                const lt = parseInt(tr.locktime, 10);
+                const locktimeEmpty = !tr.locktime;
+                const locktimePast = mode === "block"
+                  ? (currentHeight > 0 && !!lt && lt <= currentHeight)
+                  : (!!lt && lt <= currentTimestamp);
+                const locktimeInvalidRow = locktimeEmpty || locktimePast;
+                return (
                 <HStack key={i} gap={2}>
                   <Input
                     flex={1}
@@ -1167,6 +1187,8 @@ export default function VaultPage() {
                     placeholder={
                       mode === "block" ? `Block #${i + 1}` : `Timestamp #${i + 1}`
                     }
+                    isInvalid={locktimeInvalidRow}
+                    borderColor={locktimeInvalidRow ? "red.400" : undefined}
                   />
                   {vestingInputMode === "manual" ? (
                     <Input
@@ -1206,7 +1228,8 @@ export default function VaultPage() {
                     onClick={() => removeTranche(i)}
                   />
                 </HStack>
-              ))}
+                );
+              })}
 
               {/* Add tranche button */}
               {tranches.length < VAULT_MAX_TRANCHES && (
