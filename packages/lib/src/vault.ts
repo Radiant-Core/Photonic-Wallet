@@ -462,21 +462,37 @@ export function parseVaultRedeemScript(
  * Both sender and recipient can derive this key from the shared ECDH secret,
  * but for simplicity we use the recipient's pubkey directly.
  */
-function deriveVaultMetadataKey(senderWif: string, recipientAddress: string): Uint8Array {
+function deriveVaultMetadataKey(senderWif: string, recipientAddress: string, debug = false): Uint8Array {
   const privKey = PrivateKey.fromWIF(senderWif);
   const recipientAddr = new Address(recipientAddress);
+  const pubKeyBuffer = privKey.toPublicKey().toBuffer();
   const ikm = new Uint8Array(
     Buffer.concat([
-      privKey.toPublicKey().toBuffer(),
+      pubKeyBuffer,
       recipientAddr.hashBuffer,
     ])
   );
-  return deriveKeyHKDF(
+
+  if (debug) {
+    console.debug(`[deriveVaultMetadataKey] WIF (first 10 chars): ${senderWif.slice(0, 10)}...`);
+    console.debug(`[deriveVaultMetadataKey] Recipient: ${recipientAddress}`);
+    console.debug(`[deriveVaultMetadataKey] PubKey length: ${pubKeyBuffer.length}, hash: ${bytesToHex(pubKeyBuffer.slice(0, 8))}...`);
+    console.debug(`[deriveVaultMetadataKey] Recipient hash (first 8 bytes): ${bytesToHex(recipientAddr.hashBuffer.slice(0, 8))}...`);
+    console.debug(`[deriveVaultMetadataKey] IKM length: ${ikm.length}`);
+  }
+
+  const key = deriveKeyHKDF(
     ikm,
     undefined,
     new TextEncoder().encode("radiant-vault-v1"),
     32
   );
+
+  if (debug) {
+    console.debug(`[deriveVaultMetadataKey] Derived key (first 8 bytes): ${bytesToHex(key.slice(0, 8))}...`);
+  }
+
+  return key;
 }
 
 /**
@@ -649,8 +665,8 @@ export function parseVaultOpReturn(
     const ciphertext = new Uint8Array(payload.slice(24));
     if (debug) console.debug(`[parseVaultOpReturn] Nonce: ${bytesToHex(nonce.slice(0, 8))}..., Ciphertext length: ${ciphertext.length}`);
 
-    const key = deriveVaultMetadataKey(senderWif, recipientAddress);
-    if (debug) console.debug(`[parseVaultOpReturn] Derived key (first 8 bytes): ${bytesToHex(key.slice(0, 8))}...`);
+    const key = deriveVaultMetadataKey(senderWif, recipientAddress, debug);
+    // Debug logging is now inside deriveVaultMetadataKey
 
     let plaintext: Uint8Array;
     try {
