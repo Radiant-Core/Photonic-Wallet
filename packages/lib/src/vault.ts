@@ -504,19 +504,33 @@ function deriveVaultMetadataKey(senderWif: string, recipientAddress: string, deb
  */
 export function buildVaultOpReturn(
   params: VaultParams,
-  senderWif: string
+  senderWif: string,
+  debug = false
 ): string {
   const metadata = encodeVaultMetadata(params);
-  const key = deriveVaultMetadataKey(senderWif, params.recipientAddress);
+  const key = deriveVaultMetadataKey(senderWif, params.recipientAddress, debug);
   const nonce = randomBytes(24);
   const { ciphertext } = encryptXChaCha20Poly1305(metadata, key, nonce);
   const payload = Buffer.concat([Buffer.from(nonce), Buffer.from(ciphertext)]);
+
+  if (debug) {
+    console.debug("[buildVaultOpReturn] Metadata length:", metadata.length);
+    console.debug("[buildVaultOpReturn] Payload length:", payload.length);
+    console.debug("[buildVaultOpReturn] Magic bytes:", VAULT_MAGIC_BYTES);
+  }
 
   const script = new Script();
   script.add(Opcode.OP_RETURN);
   script.add(Buffer.from(VAULT_MAGIC_BYTES, "hex")); // "vault"
   script.add(payload);
-  return script.toHex();
+  const scriptHex = script.toHex();
+
+  if (debug) {
+    console.debug("[buildVaultOpReturn] Script starts with:", scriptHex.slice(0, 20));
+    console.debug("[buildVaultOpReturn] Has vault magic:", scriptHex.includes(VAULT_MAGIC_BYTES));
+  }
+
+  return scriptHex;
 }
 
 /**
@@ -635,7 +649,9 @@ export function parseVaultOpReturn(
     }
 
     // Extract encrypted payload after magic bytes
-    const afterMagic = scriptHex.slice(4 + 2 + VAULT_MAGIC_BYTES.length);
+    // Script: 6a (OP_RETURN) + 05 (PUSHBYTES_5) + 7661756c74 ("vault") + <push> <payload>
+    // Offset = len("6a05") + len("7661756c74") = 4 + 10 = 14 hex chars
+    const afterMagic = scriptHex.slice(4 + VAULT_MAGIC_BYTES.length);
     // Parse the push data length
     const pushByte = parseInt(afterMagic.slice(0, 2), 16);
     let payloadHex: string;
@@ -720,7 +736,7 @@ export function buildVaultTx(
 ): { rawTx: string; txid: string; redeemScriptHex: string; p2shAddr: string } {
   const redeemScriptHex = buildRedeemScript(params);
   const p2shScript = p2shOutputScript(redeemScriptHex);
-  const opReturnScript = buildVaultOpReturn(params, wif);
+  const opReturnScript = buildVaultOpReturn(params, wif, true); // Debug mode on
   const p2shAddr = p2shAddress(redeemScriptHex);
 
   const tx = new Transaction();

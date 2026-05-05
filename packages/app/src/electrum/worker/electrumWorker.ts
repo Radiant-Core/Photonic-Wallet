@@ -3,7 +3,7 @@ import { expose } from "comlink";
 import ElectrumManager from "../ElectrumManager";
 import { FTWorker, NFTWorker, RXDWorker, VaultWorker } from "./index";
 import db from "@app/db";
-import { ElectrumStatus } from "@app/types";
+import { ElectrumStatus, VaultRecord } from "@app/types";
 import { ElectrumRefResponse } from "@lib/types";
 import { findSwaps } from "./findSwaps";
 import { isUtxoUnspent } from "./isUtxoUnspent";
@@ -133,6 +133,9 @@ const worker = {
   },
   async discoverVaults(wif: string, address: string, swapWif?: string) {
     return vault.discoverVaults(wif, address, swapWif);
+  },
+  async addVault(record: VaultRecord) {
+    return vault.addVault(record);
   },
   setActive(active: boolean) {
     this.active = active;

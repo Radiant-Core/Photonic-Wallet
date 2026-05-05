@@ -270,11 +270,14 @@ export class VaultWorker implements Subscription {
       console.debug(`[Vault] Found ${history.length} transactions to scan`);
 
       let discoveredCount = 0;
+      let timeoutCount = 0;
 
       // Check each transaction for vault outputs
       let scanned = 0;
       let debugLogCount = 0;
       const MAX_DEBUG_LOGS = 5; // Log details for first 5 transactions
+      const BATCH_SIZE = 50; // Process in batches with delays
+      const DELAY_MS = 10; // Small delay between requests
 
       for (const { tx_hash: txid, height } of history) {
         try {
@@ -284,26 +287,43 @@ export class VaultWorker implements Subscription {
           // Log progress every 500 transactions
           if (scanned % 500 === 0) {
             console.log(`[Vault] Scanned ${scanned}/${history.length} transactions...`);
+            // Add small delay every 500 to avoid overwhelming server
+            await new Promise(r => setTimeout(r, 100));
           }
 
-          // Skip if we already have this vault in the database
-          const existingVault = await db.vault.where("txid").equals(txid).first();
-          if (existingVault) {
-            if (isDebug) {
-              console.debug(`[Vault] Debug: ${txid} - already in DB`);
-              debugLogCount++;
+          // Add small delay between individual requests
+          if (scanned % BATCH_SIZE === 0) {
+            await new Promise(r => setTimeout(r, DELAY_MS));
+          }
+
+          // Skip individual outputs already in DB (important for vesting txs
+          // with multiple tranches sharing the same txid)
+          const existingVaultsForTx = await db.vault.where("txid").equals(txid).toArray();
+          const knownVouts = new Set(existingVaultsForTx.map((v) => v.vout));
+
+          // Fetch the raw transaction with retry logic for timeouts
+          let rawTx: string | undefined;
+          let retries = 2;
+          while (retries > 0) {
+            try {
+              rawTx = (await this.electrum.client?.request(
+                "blockchain.transaction.get",
+                txid
+              )) as string | undefined;
+              break;
+            } catch (err) {
+              retries--;
+              if (retries === 0) {
+                console.warn(`[Vault] Timeout fetching tx ${txid}, skipping`);
+                break;
+              }
+              // Wait before retry
+              await new Promise(r => setTimeout(r, 500));
             }
-            continue;
           }
-
-          // Fetch the raw transaction
-          const rawTx = (await this.electrum.client?.request(
-            "blockchain.transaction.get",
-            txid
-          )) as string | undefined;
 
           if (!rawTx) {
-            console.warn(`[Vault] Could not fetch tx ${txid}`);
+            timeoutCount++;
             continue;
           }
 
@@ -339,6 +359,13 @@ export class VaultWorker implements Subscription {
 
             // Convert recovered vault data to VaultRecords and store
             for (const vaultData of recovered) {
+              if (knownVouts.has(vaultData.vout)) {
+                if (isDebug) {
+                  console.debug(`[Vault] Debug: ${txid}:${vaultData.vout} already in DB, skipping`);
+                }
+                continue;
+              }
+
               const record: VaultRecord = {
                 txid,
                 vout: vaultData.vout,
@@ -367,7 +394,7 @@ export class VaultWorker implements Subscription {
         }
       }
 
-      console.log(`[Vault] ✅ Scanned ${scanned}/${history.length} transactions, found ${discoveredCount} vault(s)`);
+      console.log(`[Vault] ✅ Scanned ${scanned}/${history.length} transactions, found ${discoveredCount} vault(s), ${timeoutCount} timeouts`);
 
       if (discoveredCount > 0) {
         console.log(`[Vault] Discovered ${discoveredCount} vault(s) from history`);

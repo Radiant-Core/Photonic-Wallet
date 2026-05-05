@@ -8,6 +8,7 @@ import { ContractType, ElectrumStatus, SmartToken } from "@app/types";
 import { wrap } from "comlink";
 import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
+import type { VaultRecord } from "@app/types";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
 // TEMP: Force dedicated worker for debugging (SharedWorker logs go to separate console)
@@ -53,6 +54,7 @@ const wrapped = wrap<{
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
   discoverVaults: (wif: string, address: string, swapWif?: string) => number;
+  addVault: (record: VaultRecord) => void;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
   fetchGlyph: (refBE: string) => SmartToken | undefined;

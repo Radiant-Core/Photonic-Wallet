@@ -234,7 +234,13 @@ export default function VaultPage() {
   // Vault list from DB (live query)
   // ────────────────────────────────────────────────────────
   const vaultsRaw = useLiveQuery(
-    () => db.vault.orderBy("date").reverse().toArray(),
+    () => db.vault.orderBy("date").reverse().toArray().then(vaults => {
+      console.log("[Vault List] Loaded from DB:", vaults?.length || 0, "vaults");
+      if (vaults?.length) {
+        console.log("[Vault List] First vault:", vaults[0].txid, vaults[0].recipientAddress);
+      }
+      return vaults;
+    }),
     []
   );
 
@@ -444,10 +450,17 @@ export default function VaultPage() {
     setVestingInputMode("percentage");
 
     // Build tranches with percentages, locktimes left for interval auto-fill
-    const newTranches: Tranche[] = pcts.map((pct) => ({
+    const formatted = pcts.map((pct) => pct.toFixed(2));
+    const sumFormatted = formatted.reduce((s, p) => s + parseFloat(p), 0);
+    const diff = parseFloat((100 - sumFormatted).toFixed(2));
+    if (diff !== 0 && formatted.length > 0) {
+      const lastVal = parseFloat(formatted[formatted.length - 1]) + diff;
+      formatted[formatted.length - 1] = lastVal.toFixed(2);
+    }
+    const newTranches: Tranche[] = formatted.map((pct) => ({
       locktime: "",
       value: "",
-      pct: pct.toFixed(2),
+      pct,
     }));
     setTranches(newTranches);
 
@@ -579,7 +592,11 @@ export default function VaultPage() {
           claimed: 0,
           date: Date.now(),
         };
+        console.log("[Vault Create] Storing record:", record);
         await db.vault.put(record);
+        await electrumWorker.value.addVault(record);
+        const verifyRecord = await db.vault.where({ txid }).first();
+        console.log("[Vault Create] Verified stored record:", verifyRecord);
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_create" });
 
         toast({
@@ -599,7 +616,7 @@ export default function VaultPage() {
         setTab("list");
       } else {
         // Vesting schedule
-        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.01) {
+        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.1) {
           throw new Error("Percentages must sum to 100%");
         }
 
@@ -642,6 +659,7 @@ export default function VaultPage() {
             date: Date.now(),
           };
           await db.vault.put(record);
+          await electrumWorker.value.addVault(record);
         }
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_vesting" });
 
