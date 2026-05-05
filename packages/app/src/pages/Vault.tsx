@@ -255,34 +255,34 @@ export default function VaultPage() {
   const [apiHeight, setApiHeight] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelledRef = { current: false };
     let retryId: ReturnType<typeof setTimeout>;
     let pollId: ReturnType<typeof setInterval>;
 
     const tryFetch = async () => {
       try {
         const h = await electrumWorker.value.getBlockHeight();
-        if (!cancelled && h > 0) {
+        if (!cancelledRef.current && h > 0) {
           setApiHeight(h);
           // Got a valid height — now just refresh every 60s
           pollId = setInterval(async () => {
             try {
               const next = await electrumWorker.value.getBlockHeight();
-              if (!cancelled && next > 0) setApiHeight(next);
+              if (!cancelledRef.current && next > 0) setApiHeight(next);
             } catch { /* ignore */ }
           }, 60_000);
-        } else if (!cancelled) {
+        } else if (!cancelledRef.current) {
           // Worker not ready yet — retry in 5s
           retryId = setTimeout(tryFetch, 5_000);
         }
       } catch {
-        if (!cancelled) retryId = setTimeout(tryFetch, 5_000);
+        if (!cancelledRef.current) retryId = setTimeout(tryFetch, 5_000);
       }
     };
 
     tryFetch();
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       clearTimeout(retryId);
       clearInterval(pollId);
     };
@@ -337,86 +337,98 @@ export default function VaultPage() {
   const locktimeHint = useMemo(() => {
     if (mode === "block") {
       const lt = parseInt(locktime, 10);
-      if (!currentHeight) return "Waiting for block data…";
-      if (!lt) return `${"Current block"}: ${currentHeight.toLocaleString()}`;
+      if (!currentHeight) return t`Waiting for block data…`;
+      if (!lt) return t`Current block: ${currentHeight.toLocaleString()}`;
       const diff = lt - currentHeight;
-      if (diff <= 0) return `⚠ ${"Must be greater than current block"} (${currentHeight.toLocaleString()})`;
-      return `${"Current block"}: ${currentHeight.toLocaleString()} — ${"locks for"} ${blocksToDuration(diff)}`;
+      if (diff <= 0) return t`⚠ Must be greater than current block (${currentHeight.toLocaleString()})`;
+      return t`Current block: ${currentHeight.toLocaleString()} — locks for ${blocksToDuration(diff)}`;
     }
     const lt = parseInt(locktime, 10);
-    if (!lt) return `${"Current time"}: ${new Date().toLocaleString()}`;
+    if (!lt) return t`Current time: ${new Date().toLocaleString()}`;
     const diff = lt - currentTimestamp;
-    if (diff <= 0) return `⚠ ${"Must be in the future"}`;
-    return `${"Current time"}: ${new Date().toLocaleString()} — ${"locks for"} ${secsToDuration(diff)}`;
+    if (diff <= 0) return t`⚠ Must be in the future`;
+    return t`Current time: ${new Date().toLocaleString()} — locks for ${secsToDuration(diff)}`;
   }, [mode, locktime, currentHeight, currentTimestamp]);
 
   // ────────────────────────────────────────────────────────
   // Date picker <-> UNIX timestamp sync
   // ────────────────────────────────────────────────────────
-  const handleLocktimeChange = (val: string) => {
+  const handleLocktimeChange = useCallback((val: string) => {
     setLocktime(val);
     if (mode === "time") {
       const ts = parseInt(val, 10);
       setDatePickerValue(ts > 0 ? unixToDateInput(ts) : "");
     }
-  };
+  }, [mode]);
 
-  const handleDatePickerChange = (val: string) => {
+  const handleDatePickerChange = useCallback((val: string) => {
     setDatePickerValue(val);
     const ts = dateInputToUnix(val);
     if (ts > 0) setLocktime(String(ts));
-  };
+  }, []);
 
   // ────────────────────────────────────────────────────────
   // Self-fill recipient
   // ────────────────────────────────────────────────────────
   const fillSelf = useCallback(() => {
     setRecipient(wallet.value.address);
-  }, []);
+  }, [wallet.value.address]);
 
   // ────────────────────────────────────────────────────────
   // Tranche helpers
   // ────────────────────────────────────────────────────────
-  const addTranche = () => {
+  const addTranche = useCallback(() => {
     if (tranches.length < VAULT_MAX_TRANCHES) {
-      setTranches([...tranches, { locktime: "", value: "", pct: "" }]);
+      setTranches(prev => [...prev, { locktime: "", value: "", pct: "" }]);
     }
-  };
+  }, [tranches.length]);
 
-  const removeTranche = (index: number) => {
+  const removeTranche = useCallback((index: number) => {
     if (tranches.length > 1) {
-      setTranches(tranches.filter((_, i) => i !== index));
+      setTranches(prev => prev.filter((_, i) => i !== index));
     }
-  };
+  }, [tranches.length]);
 
-  const updateTranche = (
+  const updateTranche = useCallback((
     index: number,
     field: keyof Tranche,
     val: string
   ) => {
-    const updated = [...tranches];
-    updated[index] = { ...updated[index], [field]: val };
-    setTranches(updated);
-  };
+    setTranches(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: val };
+      return updated;
+    });
+  }, []);
 
   // ────────────────────────────────────────────────────────
   // Percentage mode: compute amounts from total + pct
+  // Using basis points (1/100 of a percent) to avoid floating-point errors
   // ────────────────────────────────────────────────────────
   const pctAllocated = useMemo(() => {
-    return tranches.reduce((sum, tr) => sum + (parseFloat(tr.pct) || 0), 0);
+    // Use basis points (divide by 100 for display, multiply for calculation)
+    const totalBps = tranches.reduce((sum, tr) => {
+      const bps = Math.round((parseFloat(tr.pct) || 0) * 100);
+      return sum + bps;
+    }, 0);
+    return totalBps / 100;
   }, [tranches]);
 
   const pctRemaining = Math.max(0, 100 - pctAllocated);
 
-  const autoFillLastPct = () => {
+  const autoFillLastPct = useCallback(() => {
     if (tranches.length === 0 || pctRemaining <= 0) return;
-    const updated = [...tranches];
-    updated[updated.length - 1] = {
-      ...updated[updated.length - 1],
-      pct: String(parseFloat(updated[updated.length - 1].pct || "0") + pctRemaining),
-    };
-    setTranches(updated);
-  };
+    setTranches(prev => {
+      const updated = [...prev];
+      const lastIdx = updated.length - 1;
+      const currentPct = parseFloat(updated[lastIdx].pct || "0");
+      updated[lastIdx] = {
+        ...updated[lastIdx],
+        pct: (currentPct + pctRemaining).toFixed(2),
+      };
+      return updated;
+    });
+  }, [tranches.length, pctRemaining]);
 
   // Resolve tranche amounts: in percentage mode, compute from total
   const resolvedTranches = useMemo((): { locktime: number; value: number }[] => {
@@ -450,13 +462,14 @@ export default function VaultPage() {
     setVestingInputMode("percentage");
 
     // Build tranches with percentages, locktimes left for interval auto-fill
-    const formatted = pcts.map((pct) => pct.toFixed(2));
-    const sumFormatted = formatted.reduce((s, p) => s + parseFloat(p), 0);
-    const diff = parseFloat((100 - sumFormatted).toFixed(2));
-    if (diff !== 0 && formatted.length > 0) {
-      const lastVal = parseFloat(formatted[formatted.length - 1]) + diff;
-      formatted[formatted.length - 1] = lastVal.toFixed(2);
+    // Use basis points to avoid floating-point precision issues
+    const bpsValues = pcts.map((pct) => Math.round(pct * 100));
+    const sumBps = bpsValues.reduce((s, p) => s + p, 0);
+    const diffBps = 10000 - sumBps; // 100% = 10000 basis points
+    if (diffBps !== 0 && bpsValues.length > 0) {
+      bpsValues[bpsValues.length - 1] += diffBps;
     }
+    const formatted = bpsValues.map((bps) => (bps / 100).toFixed(2));
     const newTranches: Tranche[] = formatted.map((pct) => ({
       locktime: "",
       value: "",
@@ -477,7 +490,7 @@ export default function VaultPage() {
 
     toast({
       title: preset.label,
-      description: `${count} ${"tranches generated"}`,
+      description: t`${count} tranches generated`,
       status: "info",
       duration: 2000,
     });
@@ -486,7 +499,7 @@ export default function VaultPage() {
   // ────────────────────────────────────────────────────────
   // Interval auto-fill: generate tranche locktimes
   // ────────────────────────────────────────────────────────
-  const generateIntervalTranches = () => {
+  const generateIntervalTranches = useCallback(() => {
     const count = tranches.length;
     if (count === 0) return;
 
@@ -500,7 +513,7 @@ export default function VaultPage() {
     }
 
     if (!start || !step || step <= 0) {
-      toast({ title: "Error", description: "Fill in start and interval", status: "error" });
+      toast({ title: t`Error`, description: t`Fill in start and interval`, status: "error" });
       return;
     }
 
@@ -509,7 +522,7 @@ export default function VaultPage() {
       locktime: String(start + step * (i + 1)),
     }));
     setTranches(updated);
-  };
+  }, [tranches, mode, intervalStart, intervalStartDate, intervalStep, toast]);
 
   // ────────────────────────────────────────────────────────
   // Create vault
@@ -545,13 +558,13 @@ export default function VaultPage() {
           throw new Error("Fill in locktime and amount");
         }
         if (!recipient) {
-          throw new Error("Recipient address is required. Click 'Self' to use your own address.");
+          throw new Error(t`Recipient address is required. Click 'Self' to use your own address.`);
         }
         if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
-          throw new Error(`Block must be greater than current height (${currentHeight})`);
+          throw new Error(t`Block must be greater than current height (${currentHeight})`);
         }
         if (mode === "time" && lt <= currentTimestamp) {
-          throw new Error("Timestamp must be in the future");
+          throw new Error(t`Timestamp must be in the future`);
         }
 
         const params: VaultParams = {
@@ -600,7 +613,7 @@ export default function VaultPage() {
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_create" });
 
         toast({
-          title: "Vault Created",
+          title: t`Vault Created`,
           description: txid,
           status: "success",
           duration: 8000,
@@ -616,20 +629,20 @@ export default function VaultPage() {
         setTab("list");
       } else {
         // Vesting schedule
-        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.1) {
-          throw new Error("Percentages must sum to 100%");
+        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.01) {
+          throw new Error(t`Percentages must sum to 100% (currently ${pctAllocated.toFixed(2)}%)`);
         }
 
         for (let i = 0; i < resolvedTranches.length; i++) {
           const lt = resolvedTranches[i].locktime;
           if (!lt || lt <= 0) {
-            throw new Error(`Tranche ${i + 1}: ${mode === "block" ? "Block number" : "Timestamp"} is required`);
+            throw new Error(t`Tranche ${i + 1}: ${mode === "block" ? t`Block number` : t`Timestamp`} is required`);
           }
           if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
-            throw new Error(`Tranche ${i + 1}: Block ${lt} must be greater than current height (${currentHeight})`);
+            throw new Error(t`Tranche ${i + 1}: Block ${lt} must be greater than current height (${currentHeight})`);
           }
           if (mode === "time" && lt <= currentTimestamp) {
-            throw new Error(`Tranche ${i + 1}: Timestamp must be in the future`);
+            throw new Error(t`Tranche ${i + 1}: Timestamp must be in the future`);
           }
         }
 
@@ -677,8 +690,8 @@ export default function VaultPage() {
         await db.broadcast.put({ txid, date: Date.now(), description: "vault_vesting" });
 
         toast({
-          title: "Vesting Schedule Created",
-          description: `${txid} — ${vestingTranches.length} tranches`,
+          title: t`Vesting Schedule Created`,
+          description: t`${txid} — ${vestingTranches.length} tranches`,
           status: "success",
           duration: 8000,
           isClosable: true,
@@ -692,7 +705,7 @@ export default function VaultPage() {
       }
     } catch (err: unknown) {
       toast({
-        title: "Error",
+        title: t`Error`,
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
@@ -731,7 +744,7 @@ export default function VaultPage() {
       await db.broadcast.put({ txid, date: Date.now(), description: "vault_claim" });
 
       toast({
-        title: "Vault Claimed",
+        title: t`Vault Claimed`,
         description: txid,
         status: "success",
         duration: 8000,
@@ -739,7 +752,7 @@ export default function VaultPage() {
       });
     } catch (err: unknown) {
       toast({
-        title: "Claim Failed",
+        title: t`Claim Failed`,
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
@@ -777,22 +790,22 @@ export default function VaultPage() {
       const totalCount = mainCount + swapCount;
       if (totalCount > 0) {
         toast({
-          title: "Vaults Discovered",
-          description: `Found ${totalCount} vault(s) in transaction history`,
+          title: t`Vaults Discovered`,
+          description: t`Found ${totalCount} vault(s) in transaction history`,
           status: "success",
           duration: 5000,
         });
       } else {
         toast({
-          title: "No Vaults Found",
-          description: "No timelocked coins found in transaction history",
+          title: t`No Vaults Found`,
+          description: t`No timelocked coins found in transaction history`,
           status: "info",
           duration: 3000,
         });
       }
     } catch (err: unknown) {
       toast({
-        title: "Scan Failed",
+        title: t`Scan Failed`,
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
@@ -803,16 +816,15 @@ export default function VaultPage() {
 
   // ────────────────────────────────────────────────────────
   // Check specific transaction for vault (debug helper)
-  // ────────────────────────────────────────────────────────
-  const handleCheckTx = async () => {
+  const handleCheckTx = useCallback(async () => {
     if (wallet.value.locked || !wallet.value.wif) {
       openModal.value = { modal: "unlock" };
       return;
     }
     if (!checkTxId.trim()) {
       toast({
-        title: "Enter Transaction ID",
-        description: "Please paste a transaction ID to check",
+        title: t`Enter Transaction ID`,
+        description: t`Please paste a transaction ID to check`,
         status: "warning",
       });
       return;
@@ -827,8 +839,8 @@ export default function VaultPage() {
       const rawTx = await electrumWorker.value.getTransaction(txid);
       if (!rawTx) {
         toast({
-          title: "Transaction Not Found",
-          description: `Could not fetch tx ${txid}`,
+          title: t`Transaction Not Found`,
+          description: t`Could not fetch tx ${txid}`,
           status: "error",
         });
         return;
@@ -847,10 +859,10 @@ export default function VaultPage() {
       }
 
       if (recovered.length > 0) {
-        console.log(`[Vault Check] ✅ Found ${recovered.length} vault(s):`, recovered);
+        console.log(`[Vault Check] Found ${recovered.length} vault(s):`, recovered);
         toast({
-          title: "Vault Found!",
-          description: `Found ${recovered.length} vault(s) in this transaction. Check console for details.`,
+          title: t`Vault Found!`,
+          description: t`Found ${recovered.length} vault(s) in this transaction. Check console for details.`,
           status: "success",
           duration: 10000,
         });
@@ -876,10 +888,10 @@ export default function VaultPage() {
           await db.vault.put(record);
         }
       } else {
-        console.log(`[Vault Check] ❌ No vaults found in transaction ${txid}`);
+        console.log(`[Vault Check] No vaults found in transaction ${txid}`);
         toast({
-          title: "No Vault Found",
-          description: "This transaction does not contain a recoverable vault. Check console for debug info.",
+          title: t`No Vault Found`,
+          description: t`This transaction does not contain a recoverable vault. Check console for debug info.`,
           status: "info",
           duration: 5000,
         });
@@ -887,14 +899,14 @@ export default function VaultPage() {
     } catch (err: unknown) {
       console.error("[Vault Check] Error:", err);
       toast({
-        title: "Check Failed",
+        title: t`Check Failed`,
         description: err instanceof Error ? err.message : String(err),
         status: "error",
       });
     } finally {
       setCheckingTx(false);
     }
-  };
+  }, [checkTxId, wallet.value.locked, wallet.value.wif, wallet.value.address, wallet.value.swapAddress, wallet.value.swapWif, toast]);
 
   // ────────────────────────────────────────────────────────
   // Render
@@ -902,7 +914,7 @@ export default function VaultPage() {
   return (
     <ContentContainer>
       <Container maxW="container.md" px={4}>
-      <PageHeader>{"Vault"}</PageHeader>
+      <PageHeader>{t`Vault`}</PageHeader>
 
       {/* Tabs */}
       <HStack mb={6} gap={2}>
@@ -911,14 +923,14 @@ export default function VaultPage() {
           variant={tab === "list" ? "primary" : "ghost"}
           onClick={() => setTab("list")}
         >
-          {"My Vaults"}
+          {t`My Vaults`}
         </Button>
         <Button
           size="sm"
           variant={tab === "create" ? "primary" : "ghost"}
           onClick={() => setTab("create")}
         >
-          {"Create Vault"}
+          {t`Create Vault`}
         </Button>
       </HStack>
 
@@ -926,61 +938,61 @@ export default function VaultPage() {
       {tab === "create" && (
         <VStack gap={4} align="stretch">
           <FormControl>
-            <FormLabel>{"Recipient Address"}</FormLabel>
+            <FormLabel>{t`Recipient Address`}</FormLabel>
             <HStack>
               <Input
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
-                placeholder="Radiant address"
+                placeholder={t`Radiant address`}
                 fontFamily="mono"
                 size="sm"
               />
               <Button size="sm" onClick={fillSelf} variant="solid">
-                {"Self"}
+                {t`Self`}
               </Button>
             </HStack>
           </FormControl>
 
           <SimpleGrid columns={2} gap={4}>
             <FormControl>
-              <FormLabel>{"Asset Type"}</FormLabel>
+              <FormLabel>{t`Asset Type`}</FormLabel>
               <Select
                 size="sm"
                 value={assetType}
-                title="Asset Type"
-                aria-label="Asset Type"
+                title={t`Asset Type`}
+                aria-label={t`Asset Type`}
                 onChange={(e) =>
                   setAssetType(e.target.value as VaultAssetType)
                 }
               >
-                <option value="rxd">RXD</option>
-                <option value="nft">NFT</option>
-                <option value="ft">FT</option>
+                <option value="rxd">{t`RXD`}</option>
+                <option value="nft">{t`NFT`}</option>
+                <option value="ft">{t`FT`}</option>
               </Select>
             </FormControl>
 
             <FormControl>
-              <FormLabel>{"Lock Mode"}</FormLabel>
+              <FormLabel>{t`Lock Mode`}</FormLabel>
               <Select
                 size="sm"
                 value={mode}
-                title="Lock Mode"
-                aria-label="Lock Mode"
+                title={t`Lock Mode`}
+                aria-label={t`Lock Mode`}
                 onChange={(e) => setMode(e.target.value as VaultMode)}
               >
-                <option value="block">{"Block Height"}</option>
-                <option value="time">{"Unix Timestamp"}</option>
+                <option value="block">{t`Block Height`}</option>
+                <option value="time">{t`Unix Timestamp`}</option>
               </Select>
             </FormControl>
           </SimpleGrid>
 
           {assetType !== "rxd" && (
             <FormControl>
-              <FormLabel>{"Token Ref (LE hex)"}</FormLabel>
+              <FormLabel>{t`Token Ref (LE hex)`}</FormLabel>
               <Input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
-                placeholder="72 character hex"
+                placeholder={t`72 character hex`}
                 fontFamily="mono"
                 size="sm"
               />
@@ -992,7 +1004,7 @@ export default function VaultPage() {
               isChecked={vesting}
               onChange={(e) => setVesting(e.target.checked)}
             />
-            <FormLabel mb={0}>{"Vesting Schedule"}</FormLabel>
+            <FormLabel mb={0}>{t`Vesting Schedule`}</FormLabel>
           </FormControl>
 
           {!vesting ? (
@@ -1001,7 +1013,7 @@ export default function VaultPage() {
               <SimpleGrid columns={2} gap={4}>
                 <FormControl isInvalid={locktimeInvalid}>
                   <FormLabel>
-                    {mode === "block" ? "Lock Until Block" : "Lock Until (Unix)"}
+                    {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
                   </FormLabel>
                   <Input
                     size="sm"
@@ -1009,10 +1021,9 @@ export default function VaultPage() {
                     onChange={(e) => handleLocktimeChange(e.target.value)}
                     placeholder={
                       mode === "block"
-                        ? (currentHeight ? `e.g. ${currentHeight + 8640}` : `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
-                        : "Unix timestamp"
+                        ? (currentHeight ? t`e.g. ${currentHeight + 8640}` : t`Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
+                        : t`Unix timestamp`
                     }
-                    min={mode === "block" ? (currentHeight + 1) : (currentTimestamp + 1)}
                     type="number"
                   />
                   <FormHelperText fontSize="xs" color={locktimeInvalid ? "red.300" : "whiteAlpha.500"}>
@@ -1020,7 +1031,7 @@ export default function VaultPage() {
                   </FormHelperText>
                 </FormControl>
                 <FormControl>
-                  <FormLabel>{"Amount (RXD)"}</FormLabel>
+                  <FormLabel>{t`Amount (RXD)`}</FormLabel>
                   <Input
                     size="sm"
                     value={amount}
@@ -1033,7 +1044,7 @@ export default function VaultPage() {
               {/* Date picker for timestamp mode */}
               {mode === "time" && (
                 <FormControl>
-                  <FormLabel>{"Pick a Date"}</FormLabel>
+                  <FormLabel>{t`Pick a Date`}</FormLabel>
                   <Input
                     type="datetime-local"
                     size="sm"
@@ -1049,7 +1060,7 @@ export default function VaultPage() {
               {/* Mode toggle + total amount (percentage mode) */}
               <HStack justify="space-between" align="center">
                 <Heading size="xs">
-                  {"Tranches"} ({tranches.length}/{VAULT_MAX_TRANCHES})
+                  {t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})
                 </Heading>
                 <HStack gap={1}>
                   <Button
@@ -1057,14 +1068,14 @@ export default function VaultPage() {
                     variant={vestingInputMode === "manual" ? "solid" : "ghost"}
                     onClick={() => setVestingInputMode("manual")}
                   >
-                    {"Manual"}
+                    {t`Manual`}
                   </Button>
                   <Button
                     size="xs"
                     variant={vestingInputMode === "percentage" ? "solid" : "ghost"}
                     onClick={() => setVestingInputMode("percentage")}
                   >
-                    {"Percentage"}
+                    {t`Percentage`}
                   </Button>
                 </HStack>
               </HStack>
@@ -1076,7 +1087,7 @@ export default function VaultPage() {
                 borderColor="whiteAlpha.200"
                 borderRadius="md"
               >
-                <Text fontSize="xs" fontWeight="bold" mb={2}>{"Preset Templates"}</Text>
+                <Text fontSize="xs" fontWeight="bold" mb={2}>{t`Preset Templates`}</Text>
                 <SimpleGrid columns={2} gap={2}>
                   {PRESETS.map((p) => (
                     <Button
@@ -1100,12 +1111,12 @@ export default function VaultPage() {
 
               {vestingInputMode === "percentage" && (
                 <FormControl>
-                  <FormLabel>{"Total Vesting Amount (RXD)"}</FormLabel>
+                  <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
                   <Input
                     size="sm"
                     value={totalVestingAmount}
                     onChange={(e) => setTotalVestingAmount(e.target.value)}
-                    placeholder="e.g. 10000"
+                    placeholder={t`e.g. 10000`}
                   />
                 </FormControl>
               )}
@@ -1119,7 +1130,7 @@ export default function VaultPage() {
               >
                 <HStack mb={2}>
                   <Icon as={TbWand} />
-                  <Text fontSize="xs" fontWeight="bold">{"Auto-fill Schedule"}</Text>
+                  <Text fontSize="xs" fontWeight="bold">{t`Auto-fill Schedule`}</Text>
                 </HStack>
                 <SimpleGrid columns={2} gap={2}>
                   {mode === "block" ? (
@@ -1127,7 +1138,7 @@ export default function VaultPage() {
                       size="xs"
                       value={intervalStart}
                       onChange={(e) => setIntervalStart(e.target.value)}
-                      placeholder={"Start block" + (currentHeight ? ` (${"now"}: ${currentHeight})` : "")}
+                      placeholder={t`Start block` + (currentHeight ? ` (${t`now`}: ${currentHeight})` : "")}
                     />
                   ) : (
                     <Input
@@ -1142,18 +1153,18 @@ export default function VaultPage() {
                     value={intervalStep}
                     onChange={(e) => setIntervalStep(e.target.value)}
                     placeholder={
-                      mode === "block" ? "Interval (blocks)" : "Interval (seconds)"
+                      mode === "block" ? t`Interval (blocks)` : t`Interval (seconds)`
                     }
                   />
                 </SimpleGrid>
                 {mode === "block" && intervalStep && (
                   <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {"Interval"}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
+                    {t`Interval`}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
                   </Text>
                 )}
                 {mode === "time" && intervalStep && (
                   <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {"Interval"}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
+                    {t`Interval`}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
                   </Text>
                 )}
                 <Button
@@ -1163,7 +1174,7 @@ export default function VaultPage() {
                   onClick={generateIntervalTranches}
                   mt={2}
                 >
-                  {"Generate"}
+                  {t`Generate`}
                 </Button>
               </Box>
 
@@ -1187,7 +1198,7 @@ export default function VaultPage() {
                       updateTranche(i, "locktime", e.target.value)
                     }
                     placeholder={
-                      mode === "block" ? `Block #${i + 1}` : `Timestamp #${i + 1}`
+                      mode === "block" ? t`Block #${i + 1}` : t`Timestamp #${i + 1}`
                     }
                     isInvalid={locktimeInvalidRow}
                     borderColor={locktimeInvalidRow ? "red.400" : undefined}
@@ -1200,7 +1211,7 @@ export default function VaultPage() {
                       onChange={(e) =>
                         updateTranche(i, "value", e.target.value)
                       }
-                      placeholder={"Amount (RXD)"}
+                      placeholder={t`Amount (RXD)`}
                     />
                   ) : (
                     <Input
@@ -1210,7 +1221,7 @@ export default function VaultPage() {
                       onChange={(e) =>
                         updateTranche(i, "pct", e.target.value)
                       }
-                      placeholder={`% ${"of total"}`}
+                      placeholder={`% ${t`of total`}`}
                     />
                   )}
                   {vestingInputMode === "percentage" && (
@@ -1218,11 +1229,11 @@ export default function VaultPage() {
                       {resolvedTranches[i]
                         ? (resolvedTranches[i].value / 1e8).toFixed(2)
                         : "0.00"}{" "}
-                      RXD
+                      {t`RXD`}
                     </Text>
                   )}
                   <IconButton
-                    aria-label="Remove"
+                    aria-label={t`Remove`}
                     icon={<TbTrash />}
                     size="sm"
                     variant="ghost"
@@ -1242,7 +1253,7 @@ export default function VaultPage() {
                   onClick={addTranche}
                   alignSelf="flex-start"
                 >
-                  {"Add Tranche"}
+                  {t`Add Tranche`}
                 </Button>
               )}
 
@@ -1251,15 +1262,15 @@ export default function VaultPage() {
                 <Box>
                   <HStack justify="space-between" mb={1}>
                     <Text fontSize="xs" color="whiteAlpha.600">
-                      {"Allocated"}: {pctAllocated.toFixed(1)}%
+                      {t`Allocated`}: {pctAllocated.toFixed(1)}%
                     </Text>
                     <HStack gap={2}>
                       <Text fontSize="xs" color="whiteAlpha.600">
-                        {"Remaining"}: {pctRemaining.toFixed(1)}%
+                        {t`Remaining`}: {pctRemaining.toFixed(1)}%
                       </Text>
                       {pctRemaining > 0 && (
                         <Button size="xs" variant="ghost" onClick={autoFillLastPct}>
-                          {"Auto-fill"}
+                          {t`Auto-fill`}
                         </Button>
                       )}
                     </HStack>
@@ -1282,12 +1293,12 @@ export default function VaultPage() {
           )}
 
           <FormControl>
-            <FormLabel>{"Label (optional)"}</FormLabel>
+            <FormLabel>{t`Label (optional)`}</FormLabel>
             <Input
               size="sm"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Savings, Vesting Q1"
+              placeholder={t`e.g. Savings, Vesting Q1`}
             />
           </FormControl>
 
@@ -1297,7 +1308,7 @@ export default function VaultPage() {
             onClick={handleCreate}
             mt={2}
           >
-            {vesting ? "Create Vesting Schedule" : "Lock in Vault"}
+            {vesting ? t`Create Vesting Schedule` : t`Lock in Vault`}
           </Button>
         </VStack>
       )}
@@ -1315,11 +1326,11 @@ export default function VaultPage() {
                     isChecked={showClaimed}
                     onChange={(e) => setShowClaimed(e.target.checked)}
                   />
-                  <FormLabel mb={0} fontSize="xs">{"Show Claimed"}</FormLabel>
+                  <FormLabel mb={0} fontSize="xs">{t`Show Claimed`}</FormLabel>
                 </FormControl>
                 <Text fontSize="xs" color="whiteAlpha.500">
-                  {vaults.filter((v) => !v.claimed).length} {"active"}
-                  {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${"claimed"}`}
+                  {vaults.filter((v) => !v.claimed).length} {t`active`}
+                  {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${t`claimed`}`}
                 </Text>
               </HStack>
               <Button
@@ -1328,9 +1339,9 @@ export default function VaultPage() {
                 leftIcon={<Icon as={TbWand} />}
                 onClick={handleScan}
                 isLoading={scanning}
-                loadingText="Scanning..."
+                loadingText={t`Scanning...`}
               >
-                {"Scan for Vaults"}
+                {t`Scan for Vaults`}
               </Button>
             </HStack>
           )}
@@ -1338,10 +1349,10 @@ export default function VaultPage() {
           {!vaults || vaults.length === 0 ? (
             <VStack gap={4} py={8} align="center">
               <Text color="whiteAlpha.500" textAlign="center">
-                {"No vaults yet. Create one to get started."}
+                {t`No vaults yet. Create one to get started.`}
               </Text>
               <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
-                {"Or scan your transaction history for existing timelocked coins."}
+                {t`Or scan your transaction history for existing timelocked coins.`}
               </Text>
               <Button
                 size="sm"
@@ -1349,20 +1360,20 @@ export default function VaultPage() {
                 leftIcon={<Icon as={TbWand} />}
                 onClick={handleScan}
                 isLoading={scanning}
-                loadingText="Scanning..."
+                loadingText={t`Scanning...`}
               >
-                {"Scan for Vaults"}
+                {t`Scan for Vaults`}
               </Button>
 
               <Divider my={4} />
 
               <Text color="whiteAlpha.400" fontSize="xs" textAlign="center">
-                {"Know a specific vault transaction? Paste the TXID below:"}
+                {t`Know a specific vault transaction? Paste the TXID below:`}
               </Text>
               <HStack w="100%" maxW="md">
                 <Input
                   size="sm"
-                  placeholder="Paste transaction ID (txid)"
+                  placeholder={t`Paste transaction ID (txid)`}
                   value={checkTxId}
                   onChange={(e) => setCheckTxId(e.target.value)}
                   fontFamily="mono"
@@ -1371,27 +1382,27 @@ export default function VaultPage() {
                   size="sm"
                   onClick={handleCheckTx}
                   isLoading={checkingTx}
-                  loadingText="Checking..."
+                  loadingText={t`Checking...`}
                 >
-                  {"Check"}
+                  {t`Check`}
                 </Button>
               </HStack>
             </VStack>
           ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
             <Text color="whiteAlpha.500" py={8} textAlign="center">
-              {"All vaults claimed. Toggle \u201cShow Claimed\u201d to view history."}
+              {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
             </Text>
           ) : (
             <Table size="sm" variant="simple">
               <Thead>
                 <Tr>
                   {([
-                    ["status",    "Status"],
-                    ["type",      "Type"],
-                    ["value",     "Value"],
-                    ["locktime",  "Unlock At"],
-                    ["remaining", "Remaining"],
-                    ["label",     "Label"],
+                    ["status",    t`Status`],
+                    ["type",      t`Type`],
+                    ["value",     t`Value`],
+                    ["locktime",  t`Unlock At`],
+                    ["remaining", t`Remaining`],
+                    ["label",     t`Label`],
                   ] as [SortCol, string][]).map(([col, label]) => (
                     <Th
                       key={col}
@@ -1433,17 +1444,17 @@ export default function VaultPage() {
                       <Td>
                         {v.claimed ? (
                           <Tag size="sm" colorScheme="gray">
-                            {"Claimed"}
+                            {t`Claimed`}
                           </Tag>
                         ) : unlockable ? (
                           <Tag size="sm" colorScheme="green">
                             <Icon as={TbLockOpen} mr={1} />
-                            {"Unlockable"}
+                            {t`Unlockable`}
                           </Tag>
                         ) : (
                           <Tag size="sm" colorScheme="orange">
                             <Icon as={TbLock} mr={1} />
-                            {"Locked"}
+                            {t`Locked`}
                           </Tag>
                         )}
                       </Td>
@@ -1456,10 +1467,10 @@ export default function VaultPage() {
                         {v.claimed ? (
                           "—"
                         ) : remaining.value === 0 ? (
-                          "Now"
+                          t`Now`
                         ) : remaining.unit === "blocks" ? (
                           <Tooltip
-                            label={`${remaining.value.toLocaleString()} blocks`}
+                            label={t`${remaining.value.toLocaleString()} blocks`}
                             placement="top"
                           >
                             <Text as="span" cursor="default">
@@ -1495,12 +1506,12 @@ export default function VaultPage() {
                                 variant="primary"
                                 onClick={() => handleClaim(v)}
                               >
-                                {"Claim"}
+                                {t`Claim`}
                               </Button>
                             ) : (
-                              <Tooltip label={"You are not the recipient"} placement="top">
+                              <Tooltip label={t`You are not the recipient`} placement="top">
                                 <Button size="xs" variant="outline" isDisabled>
-                                  {"Claim"}
+                                  {t`Claim`}
                                 </Button>
                               </Tooltip>
                             )
@@ -1508,8 +1519,8 @@ export default function VaultPage() {
                           {!v.claimed && !unlockable && currentHeight > 0 && (
                             <Tooltip
                               label={v.mode === "block"
-                                ? `${"Unlocks at block"} ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} ${"remaining"}`
-                                : `${"Unlocks"} ${new Date(v.locktime * 1000).toLocaleString()}`
+                                ? t`Unlocks at block ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} remaining`
+                                : t`Unlocks ${new Date(v.locktime * 1000).toLocaleString()}`
                               }
                               placement="top"
                             >
