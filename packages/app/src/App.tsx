@@ -19,6 +19,7 @@ import WalletNotifier from "./components/WalletNotifier";
 import { loadWalletFromSaved } from "./wallet";
 import useActivityDetector from "./hooks/useActivityDetector";
 import ConsolidationModal from "./components/ConsolidationModal";
+import ActivityNotifications from "./components/ActivityNotifications";
 
 const MIN_FEE_RATE = 10000;
 
@@ -47,6 +48,7 @@ function Main() {
           <Unlock />
           <SendReceive />
           <ConsolidationModal />
+          <ActivityNotifications />
         </>
       )}
       <ReloadPrompt />

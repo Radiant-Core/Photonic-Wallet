@@ -260,107 +260,100 @@ export class NFTWorker implements Subscription {
     const foundDelegates = new Set<string>();
 
     // Fetch reveals, object is indexed by txid
-    const revealTxs = Object.fromEntries(
-      (
-        await Promise.all(
-          revealTxIds.map(async (revealTxId) => {
-            // Check if it's cached
-            let hex = await opfs.getTx(revealTxId);
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const revealTxResults: [string, { tx: Transaction; delegates: string[] }][] = [];
+    for (const revealTxId of revealTxIds) {
+      // Check if it's cached
+      let hex = await opfs.getTx(revealTxId);
 
-            if (!hex) {
-              hex = (await this.electrum.client?.request(
-                "blockchain.transaction.get",
-                revealTxId
-              )) as string;
+      if (!hex) {
+        hex = (await this.electrum.client?.request(
+          "blockchain.transaction.get",
+          revealTxId
+        )) as string;
 
-              // Store in cache
-              await opfs.putTx(revealTxId, hex);
-            }
+        // Store in cache
+        await opfs.putTx(revealTxId, hex);
+      }
 
-            if (hex) {
-              const tx = new Transaction(hex);
+      if (hex) {
+        const tx = new Transaction(hex);
 
-              // Look for delegate burn
-              const delegates = tx.outputs
-                .map((o: { script: { toHex: () => string } }) => parseDelegateBurnScript(o.script.toHex()) as string)
-                .filter(Boolean);
-              delegates.length && console.debug(`Found delegates`, delegates);
-              delegates.forEach(foundDelegates.add, foundDelegates);
+        // Look for delegate burn
+        const delegates = tx.outputs
+          .map((o: { script: { toHex: () => string } }) => parseDelegateBurnScript(o.script.toHex()) as string)
+          .filter(Boolean);
+        delegates.length && console.debug(`Found delegates`, delegates);
+        delegates.forEach(foundDelegates.add, foundDelegates);
 
-              // Also save delegates so we don't need to look for them again later in saveGlyph
-              return [revealTxId, { tx, delegates }];
-            }
-
-            console.warn("Reveal tx not found", revealTxId);
-            return undefined;
-          })
-        )
-      ).filter(Boolean) as [string, { tx: Transaction; delegates: string[] }][]
-    );
+        // Also save delegates so we don't need to look for them again later in saveGlyph
+        revealTxResults.push([revealTxId, { tx, delegates }]);
+      } else {
+        console.warn("Reveal tx not found", revealTxId);
+      }
+    }
+    const revealTxs = Object.fromEntries(revealTxResults);
 
     // Fetch any delegate refs that were found
-    // foundDelegates is deduped so Promise.all can be used
-    const delegateRefMap = Object.fromEntries(
-      (
-        await Promise.all(
-          Array.from(foundDelegates).map(async (delegateRef) => {
-            // Check if it's cached
-            // FIXME should this use txid instead of ref?
-            const refBE = Outpoint.fromString(delegateRef).reverse();
-            let hex = await opfs.getTx(refBE.toString());
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const delegateRefResults: [string, string[]][] = [];
+    for (const delegateRef of Array.from(foundDelegates)) {
+      // Check if it's cached
+      // FIXME should this use txid instead of ref?
+      const refBE = Outpoint.fromString(delegateRef).reverse();
+      let hex = await opfs.getTx(refBE.toString());
 
-            // Fetch
-            if (!hex) {
-              hex = (await this.electrum.client?.request(
-                "blockchain.transaction.get",
-                refBE.getTxid()
-              )) as string;
-              // Store in cache
-              hex && (await opfs.putTx(refBE.toString(), hex));
-            }
+      // Fetch
+      if (!hex) {
+        hex = (await this.electrum.client?.request(
+          "blockchain.transaction.get",
+          refBE.getTxid()
+        )) as string;
+        // Store in cache
+        hex && (await opfs.putTx(refBE.toString(), hex));
+      }
 
-            if (hex) {
-              const tx = new Transaction(hex);
-              const requiredRefs = parseDelegateBaseScript(
-                tx.outputs[refBE.getVout()].script.toHex()
-              );
-              if (requiredRefs.length) {
-                return [delegateRef, requiredRefs];
-              }
-            }
-
-            return undefined;
-          })
-        )
-      ).filter(Boolean) as [string, string[]][]
-    );
+      if (hex) {
+        const tx = new Transaction(hex);
+        const requiredRefs = parseDelegateBaseScript(
+          tx.outputs[refBE.getVout()].script.toHex()
+        );
+        if (requiredRefs.length) {
+          delegateRefResults.push([delegateRef, requiredRefs]);
+        }
+      }
+    }
+    const delegateRefMap = Object.fromEntries(delegateRefResults);
 
     Object.keys(delegateRefMap).length &&
       console.debug("Delegate refs", delegateRefMap);
 
     const accepted: { [key: string]: SmartToken } = {};
-    const relatedArrs = await Promise.all(
-      refEntries.map(async ([ref, txo]) => {
-        const delegatedRefs =
-          revealTxs[refReveals[ref]]?.delegates.flatMap(
-            (r) => delegateRefMap[r]
-          ) || [];
-        const revealTx = revealTxs[refReveals[ref]]?.tx;
-        // Will be undefined if the token wasn't found
-        if (!revealTx) return [];
-        const { related, valid, glyph } = await this.saveGlyph(
-          ref,
-          txo,
-          revealTx,
-          delegatedRefs,
-          fresh.includes(ref)
-        );
-        if (valid && glyph) {
-          accepted[glyph.ref] = glyph;
-        }
-        return related;
-      })
-    );
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const relatedArrs: string[][] = [];
+    for (const [ref, txo] of refEntries) {
+      const delegatedRefs =
+        revealTxs[refReveals[ref]]?.delegates.flatMap(
+          (r) => delegateRefMap[r]
+        ) || [];
+      const revealTx = revealTxs[refReveals[ref]]?.tx;
+      // Will be undefined if the token wasn't found
+      if (!revealTx) {
+        relatedArrs.push([]);
+        continue;
+      }
+      const { related, valid, glyph } = await this.saveGlyph(
+        ref,
+        txo,
+        revealTx,
+        delegatedRefs,
+        fresh.includes(ref)
+      );
+      if (valid && glyph) {
+        accepted[glyph.ref] = glyph;
+      }
+      relatedArrs.push(related);
+    }
 
     // Flatten and dedup related arrays
     const related = Array.from(new Set(relatedArrs.flat()));
@@ -491,13 +484,14 @@ export class NFTWorker implements Subscription {
 
   async addRelated(related: string[]) {
     // Check if there are any new related tokens to fetch
-    const newRelated = (
-      await Promise.all(
-        related.map(async (ref) =>
-          (await db.glyph.get({ ref })) ? undefined : ref
-        )
-      )
-    ).filter(Boolean) as string[];
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const newRelated: string[] = [];
+    for (const ref of related) {
+      const exists = await db.glyph.get({ ref });
+      if (!exists) {
+        newRelated.push(ref);
+      }
+    }
 
     // Fetch containers and authors
     if (newRelated.length > 0) {

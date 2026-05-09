@@ -47,7 +47,12 @@ export async function batchRequests<ParamType, ValueType>(
 
   for (const paramBatch of paramBatches) {
     console.debug(`Fetching batch ${new Date().getTime()}`);
-    responseBatches.push(await Promise.all(paramBatch.map(callback)));
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const batchResults: [string, ValueType | undefined][] = [];
+    for (const param of paramBatch) {
+      batchResults.push(await callback(param));
+    }
+    responseBatches.push(batchResults);
   }
   return Object.fromEntries(responseBatches.flat().filter(([, v]) => v)) as {
     [key: string]: ValueType;

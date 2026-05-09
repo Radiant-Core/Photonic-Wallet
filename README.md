@@ -17,6 +17,8 @@ This is alpha software in active development. If you would like to test it, plea
 - On-chain image thumbnail generation
 - CLI for batch minting
 
+> **V3.0.0 (Derivation Path Upgrade):** Photonic Wallet now uses the SLIP-0044 registered coin type 512 (`m/44'/512'/0'/0/x`) as the default derivation path, aligning with Radiant Core 3.0.0 and Electron Wallet 3.0.0. Legacy wallets using coin type 0 (`m/44'/0'/0'/0/x`) remain fully supported.
+>
 > **V2 Hard Fork (Radiant Core 2.1, Block 410,000):** Photonic Wallet supports Glyph v2 dMint contracts with per-algorithm bytecodes. After the fork activation, tokens using Blake3 and KangarooTwelve PoW are validated on-chain via OP_BLAKE3/OP_K12 consensus opcodes.
 
 ## Roadmap

@@ -366,6 +366,7 @@ export class VaultWorker implements Subscription {
                 continue;
               }
 
+              const discoveryDate = Date.now();
               const record: VaultRecord = {
                 txid,
                 vout: vaultData.vout,
@@ -381,7 +382,14 @@ export class VaultWorker implements Subscription {
                 p2shScriptHex: vaultData.p2shScriptHex,
                 claimed: 0,
                 height: height > 0 ? height : undefined,
-                date: Date.now(), // Approximation - could parse from block time
+                date: discoveryDate,
+                activityLog: [{
+                  timestamp: discoveryDate,
+                  action: "discovered",
+                  txid,
+                  details: `Discovered ${vaultData.params.assetType.toUpperCase()} vault from transaction history`,
+                  height: height > 0 ? height : undefined,
+                }],
               };
 
               await db.vault.put(record);
@@ -403,6 +411,14 @@ export class VaultWorker implements Subscription {
       } else {
         console.log("[Vault] ℹ️ No vaults discovered in transaction history");
         console.debug("[Vault] Debug: Sample txids checked:", history.slice(0, 3).map(h => h.tx_hash));
+      }
+
+      // Store scan timestamp for this address
+      try {
+        const scanKey = `vaultLastScan_${scanAddress}`;
+        await db.kvp.put({ timestamp: Date.now(), address: scanAddress, discovered: discoveredCount }, scanKey);
+      } catch (e) {
+        console.warn("[Vault] Failed to store scan timestamp:", e);
       }
 
       return discoveredCount;

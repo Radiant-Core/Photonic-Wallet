@@ -6,6 +6,11 @@
 
 import { vi } from 'vitest';
 
+// Mock @lingui/macro
+vi.mock('@lingui/macro', () => ({
+  t: (str: string) => str,
+}));
+
 // Mock localStorage
 const localStorageMock = {
   getItem: vi.fn(),
@@ -22,6 +27,46 @@ global.indexedDB = {
   open: vi.fn(),
   deleteDatabase: vi.fn(),
 } as unknown as IDBFactory;
+
+// Mock database for tests
+vi.mock('@app/db', () => ({
+  default: {
+    kvp: {
+      get: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockResolvedValue(undefined),
+    },
+    broadcast: {
+      orderBy: vi.fn(() => ({
+        reverse: vi.fn(() => ({
+          toArray: vi.fn().mockResolvedValue([]),
+          limit: vi.fn(() => ({
+            toArray: vi.fn().mockResolvedValue([]),
+          })),
+        })),
+      })),
+      add: vi.fn(),
+      put: vi.fn(),
+    },
+    vault: {
+      orderBy: vi.fn(() => ({
+        reverse: vi.fn(() => ({
+          toArray: vi.fn().mockResolvedValue([]),
+        })),
+      })),
+      where: vi.fn(() => ({
+        first: vi.fn().mockResolvedValue(undefined),
+        toArray: vi.fn().mockResolvedValue([]),
+      })),
+      add: vi.fn(),
+      put: vi.fn(),
+    },
+    txo: {
+      where: vi.fn(() => ({
+        toArray: vi.fn().mockResolvedValue([]),
+      })),
+    },
+  },
+}));
 
 // Mock crypto.getRandomValues
 Object.defineProperty(global, 'crypto', {

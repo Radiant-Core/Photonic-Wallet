@@ -12,6 +12,7 @@ import setSubscriptionStatus from "./setSubscriptionStatus";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 import { updateRxdBalances } from "@app/utxos";
+import { arrayChunks } from "@lib/util";
 
 export class RXDWorker implements Subscription {
   protected worker: Worker;
@@ -73,7 +74,14 @@ export class RXDWorker implements Subscription {
 
     const { added } = await this.updateTXOs(scriptHash, status, manual);
 
-    added.map((txo) => db.txo.put(txo).catch());
+    // Batch insert txos to avoid Safari IndexedDB "out of memory" errors
+    // from too many concurrent transactions
+    const chunks = arrayChunks(added, 1000);
+    for (const chunk of chunks) {
+      await db.transaction("rw", db.txo, async () => {
+        await db.txo.bulkPut(chunk);
+      });
+    }
 
     updateRxdBalances(this.address);
 

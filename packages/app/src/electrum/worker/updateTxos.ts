@@ -75,27 +75,26 @@ export const buildUpdateTXOs =
 
     // Check if txo table is empty so queries can be skipped
     const emptyTxoTable = (await db.txo.where({ contractType }).count()) === 0;
-    await Promise.all(
-      utxos.map(async (utxo) => {
-        outpoints.push(`${utxo.tx_hash}${utxo.tx_pos}`);
-        const exist = emptyTxoTable
-          ? false
-          : await db.txo
-              .where({ txid: utxo.tx_hash, vout: utxo.tx_pos })
-              .first();
-        if (!exist) {
-          newTxIds.add(utxo.tx_hash);
-          newUtxos.push(utxo);
-        } else if (
-          exist.id &&
-          exist.height != utxo.height // Reset spent if necessary
-        ) {
-          confs.set(exist.id, utxo);
-        } else if (exist.id && exist.spent === 1) {
-          conflict.set(exist.id, exist.script);
-        }
-      })
-    );
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    for (const utxo of utxos) {
+      outpoints.push(`${utxo.tx_hash}${utxo.tx_pos}`);
+      const exist = emptyTxoTable
+        ? false
+        : await db.txo
+            .where({ txid: utxo.tx_hash, vout: utxo.tx_pos })
+            .first();
+      if (!exist) {
+        newTxIds.add(utxo.tx_hash);
+        newUtxos.push(utxo);
+      } else if (
+        exist.id &&
+        exist.height != utxo.height // Reset spent if necessary
+      ) {
+        confs.set(exist.id, utxo);
+      } else if (exist.id && exist.spent === 1) {
+        conflict.set(exist.id, exist.script);
+      }
+    }
 
     // Update spent UTXOs
     const spent = emptyTxoTable
@@ -117,34 +116,32 @@ export const buildUpdateTXOs =
       });
     }
 
-    const added = (
-      await Promise.all(
-        newUtxos.map(async (utxo) => {
-          const script = scriptBuilder(utxo);
-          if (!script) return undefined;
+    // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
+    const added: TxO[] = [];
+    for (const utxo of newUtxos) {
+      const script = scriptBuilder(utxo);
+      if (!script) continue;
 
-          // Check if this is our own tx. User won't be notified for these.
-          const isOwnTx =
-            (await db.broadcast.get(utxo.tx_hash)) === undefined ? 0 : 1;
+      // Check if this is our own tx. User won't be notified for these.
+      const isOwnTx =
+        (await db.broadcast.get(utxo.tx_hash)) === undefined ? 0 : 1;
 
-          const txo: TxO = {
-            txid: utxo.tx_hash,
-            vout: utxo.tx_pos,
-            script,
-            value: utxo.value,
-            // FIXME find a better way to store date
-            // Maybe when block header subscription is finished it can be used
-            // date: newTxs[utxo.tx_hash].raw.time || undefined,
-            height: utxo.height || Infinity,
-            spent: 0,
-            change: isOwnTx,
-            contractType,
-          };
+      const txo: TxO = {
+        txid: utxo.tx_hash,
+        vout: utxo.tx_pos,
+        script,
+        value: utxo.value,
+        // FIXME find a better way to store date
+        // Maybe when block header subscription is finished it can be used
+        // date: newTxs[utxo.tx_hash].raw.time || undefined,
+        height: utxo.height || Infinity,
+        spent: 0,
+        change: isOwnTx,
+        contractType,
+      };
 
-          return txo;
-        })
-      )
-    ).filter(Boolean) as TxO[];
+      added.push(txo);
+    }
 
     if (!emptyTxoTable) {
       // Update confirmations and conflicting utxos

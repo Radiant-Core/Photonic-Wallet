@@ -20,13 +20,17 @@ import db from "@app/db";
 import { NetworkKey } from "@lib/types";
 import { SavedWallet } from "@app/types";
 
-const derivationPath = "m/44'/0'/0'/0/0";
-const swapDerivationPath = "m/44'/0'/0'/0/1";
-const encryptionDerivationPath = "m/44'/0'/0'/2/0";
+// SLIP-0044 registered coin type for Radiant (512)
+// See: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+const RADIANT_COIN_TYPE = 512;
+
+const derivationPath = `m/44'/${RADIANT_COIN_TYPE}'/0'/0/0`;
+const swapDerivationPath = `m/44'/${RADIANT_COIN_TYPE}'/0'/0/1`;
+const encryptionDerivationPath = `m/44'/${RADIANT_COIN_TYPE}'/0'/2/0`;
 
 /**
  * Derive a deterministic encryption keypair for self-as-recipient (backup key).
- * Uses HD path m/44'/0'/0'/2/0 — dedicated to encryption, never reused for spending.
+ * Uses HD path m/44'/512'/0'/2/0 — dedicated to encryption, never reused for spending.
  *
  * The secp256k1 child key is converted to an X25519 key and ML-KEM-768 seed
  * via HKDF so the curve mismatch is resolved without cross-package imports.

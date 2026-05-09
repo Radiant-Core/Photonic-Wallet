@@ -127,6 +127,37 @@ export class Database extends Dexie {
       vault:
         "++id, &[txid+vout], claimed, [recipientAddress+claimed], [senderAddress+claimed], locktime, assetType, date",
     });
+
+    // Add vault claim tracking fields and activity log
+    this.version(12).stores({
+      vault:
+        "++id, &[txid+vout], claimed, [recipientAddress+claimed], [senderAddress+claimed], locktime, assetType, date, claimTxid",
+    }).upgrade(async (transaction) => {
+      // Initialize activityLog and claim fields for existing vaults
+      await transaction.table("vault").toCollection().modify((vault) => {
+        if (!vault.activityLog) {
+          vault.activityLog = [{
+            timestamp: vault.date,
+            action: "created",
+            txid: vault.txid,
+            details: "Vault created",
+            height: vault.height,
+          }];
+        }
+        // claim fields are undefined by default (vault not yet claimed)
+      });
+    });
+
+    // Add vault scan tracking key-value pair
+    this.version(13).upgrade(async (transaction) => {
+      // Initialize vault scan timestamp tracking
+      await transaction.table("kvp").put({ timestamp: 0 }, "vaultLastScan");
+    });
+
+    // Add date index to broadcast table for ActivityNotifications query
+    this.version(14).stores({
+      broadcast: "txid, date",
+    });
   }
 }
 

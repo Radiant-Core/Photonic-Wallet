@@ -201,6 +201,15 @@ export class SwapError extends Error {
   }
 }
 
+// Vault activity log entry for tracking vault lifecycle events
+export interface VaultActivity {
+  timestamp: number;
+  action: "created" | "discovered" | "claimed" | "unlockable" | "restored";
+  txid: string;
+  details?: string;
+  height?: number;
+}
+
 // Radiant Vault record — stored in IndexedDB for recovery and UI display
 export interface VaultRecord {
   id?: number;
@@ -234,6 +243,14 @@ export interface VaultRecord {
   height?: number;
   /** Creation timestamp */
   date: number;
+  /** Claim transaction txid (when claimed) */
+  claimTxid?: string;
+  /** When the vault was claimed */
+  claimDate?: number;
+  /** Block height when claimed */
+  claimHeight?: number;
+  /** Activity log for this vault */
+  activityLog?: VaultActivity[];
 }
 
 export {};

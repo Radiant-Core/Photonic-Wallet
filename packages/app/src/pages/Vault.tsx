@@ -35,6 +35,7 @@ import { ExternalLinkIcon } from "@chakra-ui/icons";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import Photons from "@app/components/Photons";
+import VaultDetailModal from "@app/components/VaultDetailModal";
 import { wallet, feeRate, openModal } from "@app/signals";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -94,6 +95,17 @@ function secsToDuration(secs: number): string {
   if (secs < 86400) return `~${(secs / 3600).toFixed(1)}h`;
   if (secs < 86400 * 365) return `~${(secs / 86400).toFixed(1)} days`;
   return `~${(secs / (86400 * 365)).toFixed(1)} years`;
+}
+
+/** Format a timestamp for human-readable display */
+function formatScanTime(timestamp: number): string {
+  if (!timestamp || timestamp <= 0) return "Never";
+  const diff = Date.now() - timestamp;
+  if (diff < 60000) return "Just now";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+  return new Date(timestamp).toLocaleDateString();
 }
 
 // ── Types ──────────────────────────────────────────────────
@@ -207,12 +219,19 @@ export default function VaultPage() {
   // List filter state
   const [showClaimed, setShowClaimed] = useState(false);
 
+  // Scan tracking state
+  const [lastScan, setLastScan] = useState<{ timestamp: number; discovered: number } | null>(null);
+
   // Vault discovery state
   const [scanning, setScanning] = useState(false);
 
   // Manual transaction check state
   const [checkTxId, setCheckTxId] = useState("");
   const [checkingTx, setCheckingTx] = useState(false);
+
+  // Vault detail modal state
+  const [selectedVault, setSelectedVault] = useState<VaultRecord | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   // Sort state
   type SortCol = "status" | "type" | "value" | "locktime" | "remaining" | "label";
@@ -231,6 +250,19 @@ export default function VaultPage() {
   }, []);
 
   // ────────────────────────────────────────────────────────
+  // Vault detail modal handlers
+  // ────────────────────────────────────────────────────────
+  const handleVaultClick = useCallback((vault: VaultRecord) => {
+    setSelectedVault(vault);
+    setIsDetailModalOpen(true);
+  }, []);
+
+  const handleCloseDetailModal = useCallback(() => {
+    setIsDetailModalOpen(false);
+    setSelectedVault(null);
+  }, []);
+
+  // ────────────────────────────────────────────────────────
   // Vault list from DB (live query)
   // ────────────────────────────────────────────────────────
   const vaultsRaw = useLiveQuery(
@@ -243,6 +275,25 @@ export default function VaultPage() {
     }),
     []
   );
+
+  // ────────────────────────────────────────────────────────
+  // Load last scan timestamp
+  // ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const loadLastScan = async () => {
+      if (!wallet.value.address) return;
+      try {
+        const scanKey = `vaultLastScan_${wallet.value.address}`;
+        const scanData = await db.kvp.get(scanKey) as { timestamp: number; discovered: number } | undefined;
+        if (scanData) {
+          setLastScan(scanData);
+        }
+      } catch (e) {
+        console.warn("[Vault] Failed to load last scan:", e);
+      }
+    };
+    loadLastScan();
+  }, [wallet.value.address]);
 
   // ────────────────────────────────────────────────────────
   // Current blockchain height
@@ -589,6 +640,7 @@ export default function VaultPage() {
         const txid = await electrumWorker.value.broadcast(result.rawTx);
 
         // Store vault record
+        const now = Date.now();
         const record: VaultRecord = {
           txid,
           vout: 0,
@@ -603,7 +655,13 @@ export default function VaultPage() {
           redeemScriptHex: result.redeemScriptHex,
           p2shScriptHex: p2shOutputScript(result.redeemScriptHex),
           claimed: 0,
-          date: Date.now(),
+          date: now,
+          activityLog: [{
+            timestamp: now,
+            action: "created",
+            txid,
+            details: `Created ${assetType.toUpperCase()} vault with ${val / 1e8} ${assetType.toUpperCase()}`,
+          }],
         };
         console.log("[Vault Create] Storing record:", record);
         await db.vault.put(record);
@@ -636,7 +694,8 @@ export default function VaultPage() {
         for (let i = 0; i < resolvedTranches.length; i++) {
           const lt = resolvedTranches[i].locktime;
           if (!lt || lt <= 0) {
-            throw new Error(t`Tranche ${i + 1}: ${mode === "block" ? t`Block number` : t`Timestamp`} is required`);
+            const lockTypeLabel = mode === "block" ? "Block number" : "Timestamp";
+            throw new Error(t`Tranche ${i + 1}: ${lockTypeLabel} is required`);
           }
           if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
             throw new Error(t`Tranche ${i + 1}: Block ${lt} must be greater than current height (${currentHeight})`);
@@ -667,6 +726,7 @@ export default function VaultPage() {
         const txid = await electrumWorker.value.broadcast(result.rawTx);
 
         // Store vault records for each tranche
+        const vestingDate = Date.now();
         for (let i = 0; i < vestingTranches.length; i++) {
           const record: VaultRecord = {
             txid,
@@ -682,7 +742,13 @@ export default function VaultPage() {
             redeemScriptHex: result.redeemScripts[i],
             p2shScriptHex: p2shOutputScript(result.redeemScripts[i]),
             claimed: 0,
-            date: Date.now(),
+            date: vestingDate,
+            activityLog: [{
+              timestamp: vestingDate,
+              action: "created",
+              txid,
+              details: `Created ${assetType.toUpperCase()} vesting tranche ${i + 1}/${vestingTranches.length} with ${vestingTranches[i].value / 1e8} ${assetType.toUpperCase()}`,
+            }],
           };
           await db.vault.put(record);
           await electrumWorker.value.addVault(record);
@@ -739,13 +805,30 @@ export default function VaultPage() {
         feeRate.value
       );
 
-      const txid = await electrumWorker.value.broadcast(result.rawTx);
-      await db.vault.where({ txid: vault.txid, vout: vault.vout }).modify({ claimed: 1 });
-      await db.broadcast.put({ txid, date: Date.now(), description: "vault_claim" });
+      const claimTxid = await electrumWorker.value.broadcast(result.rawTx);
+      const claimDate = Date.now();
+
+      // Update vault with claim information and activity log
+      await db.vault.where({ txid: vault.txid, vout: vault.vout }).modify((v) => {
+        v.claimed = 1;
+        v.claimTxid = claimTxid;
+        v.claimDate = claimDate;
+        // claimHeight will be set when we receive confirmation
+        if (!v.activityLog) {
+          v.activityLog = [];
+        }
+        v.activityLog.push({
+          timestamp: claimDate,
+          action: "claimed",
+          txid: claimTxid,
+          details: `Claimed ${v.value / 1e8} ${v.assetType.toUpperCase()}`,
+        });
+      });
+      await db.broadcast.put({ txid: claimTxid, date: claimDate, description: "vault_claim" });
 
       toast({
         title: t`Vault Claimed`,
-        description: txid,
+        description: claimTxid,
         status: "success",
         duration: 8000,
         isClosable: true,
@@ -788,6 +871,11 @@ export default function VaultPage() {
       }
 
       const totalCount = mainCount + swapCount;
+      
+      // Update last scan state
+      const now = Date.now();
+      setLastScan({ timestamp: now, discovered: totalCount });
+      
       if (totalCount > 0) {
         toast({
           title: t`Vaults Discovered`,
@@ -1021,8 +1109,8 @@ export default function VaultPage() {
                     onChange={(e) => handleLocktimeChange(e.target.value)}
                     placeholder={
                       mode === "block"
-                        ? (currentHeight ? t`e.g. ${currentHeight + 8640}` : t`Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
-                        : t`Unix timestamp`
+                        ? (currentHeight ? `e.g. ${currentHeight + 8640}` : `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
+                        : "Unix timestamp"
                     }
                     type="number"
                   />
@@ -1333,16 +1421,28 @@ export default function VaultPage() {
                   {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${t`claimed`}`}
                 </Text>
               </HStack>
-              <Button
-                size="xs"
-                variant="ghost"
-                leftIcon={<Icon as={TbWand} />}
-                onClick={handleScan}
-                isLoading={scanning}
-                loadingText={t`Scanning...`}
-              >
-                {t`Scan for Vaults`}
-              </Button>
+              <VStack align="end" spacing={0}>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  leftIcon={<Icon as={TbWand} />}
+                  onClick={handleScan}
+                  isLoading={scanning}
+                  loadingText={t`Scanning...`}
+                >
+                  {t`Scan for Vaults`}
+                </Button>
+                {lastScan && (
+                  <Text fontSize="xs" color="whiteAlpha.500">
+                    {t`Last scan`}: {formatScanTime(lastScan.timestamp)}
+                    {lastScan.discovered > 0 && (
+                      <Text as="span" color="green.400" ml={1}>
+                        ({lastScan.discovered} {t`found`})
+                      </Text>
+                    )}
+                  </Text>
+                )}
+              </VStack>
             </HStack>
           )}
 
@@ -1440,6 +1540,9 @@ export default function VaultPage() {
                     <Tr
                       key={`${v.txid}-${v.vout}`}
                       opacity={v.claimed ? 0.4 : 1}
+                      onClick={() => handleVaultClick(v)}
+                      cursor="pointer"
+                      _hover={{ bg: "whiteAlpha.100" }}
                     >
                       <Td>
                         {v.claimed ? (
@@ -1482,13 +1585,41 @@ export default function VaultPage() {
                         )}
                       </Td>
                       <Td>
-                        <Text fontSize="xs" noOfLines={1} maxW="120px">
-                          {v.label || "—"}
-                        </Text>
+                        <VStack align="start" spacing={0}>
+                          <Link
+                            href={createExplorerUrl(v.txid)}
+                            isExternal
+                            fontSize="xs"
+                            fontFamily="mono"
+                            color="whiteAlpha.400"
+                            _hover={{ color: "whiteAlpha.700" }}
+                            title={v.txid}
+                          >
+                            {v.txid.slice(0, 8)}...{v.txid.slice(-8)}
+                          </Link>
+                          {v.label && (
+                            <Text fontSize="xs" noOfLines={1} maxW="120px" color="whiteAlpha.500">
+                              {v.label}
+                            </Text>
+                          )}
+                          {v.claimed && v.claimTxid && (
+                            <Link
+                              href={createExplorerUrl(v.claimTxid)}
+                              isExternal
+                              fontSize="xs"
+                              fontFamily="mono"
+                              color="green.400"
+                              _hover={{ color: "green.300" }}
+                              title={`Claimed: ${v.claimTxid}`}
+                            >
+                              {t`Claimed`}: {v.claimTxid.slice(0, 6)}...{v.claimTxid.slice(-6)}
+                            </Link>
+                          )}
+                        </VStack>
                       </Td>
                       <Td>
                         <HStack gap={2}>
-                          {!v.claimed && (
+                          <Tooltip label={t`View on explorer`} placement="top">
                             <Link
                               href={createExplorerUrl(v.txid)}
                               isExternal
@@ -1498,7 +1629,7 @@ export default function VaultPage() {
                             >
                               <ExternalLinkIcon />
                             </Link>
-                          )}
+                          </Tooltip>
                           {!v.claimed && unlockable && (
                             isRecipient ? (
                               <Button
@@ -1540,6 +1671,15 @@ export default function VaultPage() {
         </Box>
       )}
       </Container>
+
+      {/* Vault Detail Modal */}
+      <VaultDetailModal
+        isOpen={isDetailModalOpen}
+        onClose={handleCloseDetailModal}
+        vault={selectedVault}
+        currentHeight={currentHeight}
+        currentTimestamp={currentTimestamp}
+      />
     </ContentContainer>
   );
 }

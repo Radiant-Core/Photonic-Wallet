@@ -60,6 +60,10 @@ vi.mock('@app/db', () => ({
       where: vi.fn().mockReturnThis(),
       toArray: vi.fn().mockResolvedValue([]),
     },
+    kvp: {
+      get: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockResolvedValue(undefined),
+    },
   },
 }));
 

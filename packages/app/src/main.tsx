@@ -38,6 +38,7 @@ import SwapCompleted from "./pages/SwapCompleted";
 import SwapLoad from "./pages/SwapLoad";
 import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
+import History from "./pages/History";
 import VaultPage from "./pages/Vault";
 import WaveRegister from "./pages/WaveRegister";
 import WaveNames from "./pages/WaveNames";
@@ -413,7 +414,7 @@ const router = createHashRouter([
           },
           {
             path: "/history",
-            element: <Placeholder />,
+            element: <History />,
           },
           {
             element: <SwapLayout />,
