@@ -30,6 +30,61 @@ function workerLog(msg: string, data?: unknown) {
   console.debug(msg, data);
 }
 
+const RXINDEXER_WSS = "wss://electrumx.radiantcore.org";
+
+async function waveResolveRPC(bareName: string): Promise<{ target: string } | null> {
+  type WaveResult = { target?: string; zone?: { address?: string } } | null | undefined;
+
+  // Try connected server first
+  try {
+    if (electrum.client && electrum.connected()) {
+      const result = await electrum.client.request("wave.resolve", bareName) as WaveResult;
+      if (result) {
+        const target = result.target || result.zone?.address;
+        if (target) return { target };
+      }
+    }
+  } catch {
+    // Connected server doesn't support wave.resolve — fall through to direct call
+  }
+
+  // Fall back: direct WebSocket RPC to RXinDexer
+  try {
+    const ws = new WebSocket(RXINDEXER_WSS);
+    const result = await new Promise<WaveResult>((resolve, reject) => {
+      const timeout = setTimeout(() => { ws.close(); reject(new Error("timeout")); }, 10000);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server.version", params: ["photonic", "1.4"] }));
+      };
+      let versionSent = false;
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data as string);
+          if (!versionSent) {
+            versionSent = true;
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "wave.resolve", params: [bareName] }));
+            return;
+          }
+          clearTimeout(timeout);
+          ws.close();
+          if (data.result) resolve(data.result);
+          else resolve(null);
+        } catch { clearTimeout(timeout); ws.close(); resolve(null); }
+      };
+      ws.onerror = () => { clearTimeout(timeout); reject(new Error("ws error")); };
+      ws.onclose = () => { clearTimeout(timeout); };
+    });
+    if (result) {
+      const target = result.target || result.zone?.address;
+      if (target) return { target };
+    }
+  } catch (e) {
+    console.warn("[WAVE] Direct RXinDexer fallback failed:", e);
+  }
+
+  return null;
+}
+
 const worker = {
   ready: false,
   active: true,
@@ -191,19 +246,9 @@ const worker = {
       }
 
       // Fall back to RPC (RXinDexer supports this natively)
-      try {
-        const result = await electrum.client?.request("wave.resolve", bareName) as {
-          target?: string;
-          zone?: { address?: string };
-        } | null | undefined;
-        if (result) {
-          // RXinDexer returns {target, zone: {address}} — accept either
-          const target = result.target || result.zone?.address;
-          if (target) return { target };
-        }
-      } catch {
-        // RPC not supported — ignore
-      }
+      // Try the connected server first, then fall back to RXinDexer directly
+      const rpcResult = await waveResolveRPC(bareName);
+      if (rpcResult) return rpcResult;
 
       return null;
     } catch {
