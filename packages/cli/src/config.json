@@ -7,6 +7,7 @@
         "tx": "https://explorer.radiantblockchain.org/tx/{txid}"
       },
       "servers": [
+        "wss://electrumx.radiantcore.org",
         "wss://electrumx.radiant4people.com:50022",
         "wss://radiant2.bladenet.online:50022",
         "wss://radiantus.bladenet.online:50022",

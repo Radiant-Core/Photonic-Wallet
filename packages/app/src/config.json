@@ -39,7 +39,7 @@
         "wss://testnet.bladenet.online:53002"
       ],
       "mainnet": [
-        "wss://electrumx.radiantcore.org:50011",
+        "wss://electrumx.radiantcore.org",
         "wss://electrumx.radiant4people.com:50022",
         "wss://radiant2.bladenet.online:50022",
         "wss://radiantus.bladenet.online:50022",
