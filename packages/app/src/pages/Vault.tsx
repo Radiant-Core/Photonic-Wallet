@@ -40,7 +40,8 @@ import { wallet, feeRate, openModal } from "@app/signals";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
-import { ContractType, VaultRecord } from "@app/types";
+import { ContractType, SmartToken, SmartTokenType, VaultRecord } from "@app/types";
+import { reverseRef } from "@lib/Outpoint";
 import { parseFtScript, parseNftScript } from "@lib/script";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
@@ -192,6 +193,7 @@ export default function VaultPage() {
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
   const [ref, setRef] = useState("");
+  const [refManual, setRefManual] = useState(false);
   const [vesting, setVesting] = useState(false);
   const [tranches, setTranches] = useState<Tranche[]>([
     { locktime: "", value: "", pct: "" },
@@ -208,6 +210,28 @@ export default function VaultPage() {
     }
   }, [tab, wallet.value.address, recipient]);
   const [totalVestingAmount, setTotalVestingAmount] = useState("");
+
+  // Owned tokens for the picker (reactive to assetType)
+  const ownedTokens = useLiveQuery(
+    async () => {
+      if (assetType === "rxd") return [];
+      const tokenType =
+        assetType === "nft" ? SmartTokenType.NFT : SmartTokenType.FT;
+      return db.glyph
+        .where("tokenType")
+        .equals(tokenType)
+        .filter((g) => g.spent === 0)
+        .toArray();
+    },
+    [assetType],
+    []
+  );
+
+  // When assetType changes reset ref selection
+  useEffect(() => {
+    setRef("");
+    setRefManual(false);
+  }, [assetType]);
 
   // Interval auto-fill state
   const [intervalStart, setIntervalStart] = useState("");
@@ -631,6 +655,17 @@ export default function VaultPage() {
         }));
       }
 
+      // FT balance check: total available must cover the requested amount
+      if (assetType === "ft" && tokenUtxos && !vesting) {
+        const ftTotal = tokenUtxos.reduce((s, u) => s + u.value, 0);
+        const valRequested = parseInt(amount, 10);
+        if (valRequested > ftTotal) {
+          throw new Error(
+            `Insufficient FT balance: need ${valRequested} units but only ${ftTotal} available`
+          );
+        }
+      }
+
       if (!vesting) {
         // Simple vault
         const lt = parseInt(locktime, 10);
@@ -737,6 +772,17 @@ export default function VaultPage() {
           }
           if (mode === "time" && lt <= currentTimestamp) {
             throw new Error(t`Tranche ${i + 1}: Timestamp must be in the future`);
+          }
+        }
+
+        // FT vesting balance check
+        if (assetType === "ft" && tokenUtxos) {
+          const ftTotal = tokenUtxos.reduce((s, u) => s + u.value, 0);
+          const trancheTotal = resolvedTranches.reduce((s, rt) => s + rt.value, 0);
+          if (trancheTotal > ftTotal) {
+            throw new Error(
+              `Insufficient FT balance: tranches total ${trancheTotal} units but only ${ftTotal} available`
+            );
           }
         }
 
@@ -864,6 +910,13 @@ export default function VaultPage() {
 
       const claimTxid = await electrumWorker.value.broadcast(result.rawTx);
       const claimDate = Date.now();
+
+      // Optimistically mark the token glyph as spent so the UI updates
+      // before the next ElectrumX sync (NFT/FT vaults only)
+      if (vault.assetType !== "rxd" && vault.ref) {
+        const glyphRef = reverseRef(vault.ref);
+        await db.glyph.where({ ref: glyphRef }).modify({ spent: 1 });
+      }
 
       // Update vault with claim information and activity log
       await db.vault.where({ txid: vault.txid, vout: vault.vout }).modify((v) => {
@@ -1133,14 +1186,55 @@ export default function VaultPage() {
 
           {assetType !== "rxd" && (
             <FormControl>
-              <FormLabel>{t`Token Ref (LE hex)`}</FormLabel>
-              <Input
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                placeholder={t`72 character hex`}
-                fontFamily="mono"
-                size="sm"
-              />
+              <FormLabel>
+                {assetType === "nft" ? t`NFT Token` : t`FT Token`}
+              </FormLabel>
+              {!refManual ? (
+                <>
+                  <Select
+                    size="sm"
+                    value={ref}
+                    title={assetType === "nft" ? t`NFT Token` : t`FT Token`}
+                    aria-label={assetType === "nft" ? t`NFT Token` : t`FT Token`}
+                    onChange={(e) => setRef(e.target.value)}
+                    placeholder={t`Select a token from your wallet…`}
+                    fontFamily="mono"
+                  >
+                    {(ownedTokens || []).map((g: SmartToken) => (
+                      <option key={g.ref} value={reverseRef(g.ref)}>
+                        {g.name || g.ticker || g.ref.slice(0, 16) + "…"}
+                        {assetType === "nft" ? " [NFT]" : ""}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    mt={1}
+                    onClick={() => setRefManual(true)}
+                  >
+                    {t`Enter ref manually`}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Input
+                    value={ref}
+                    onChange={(e) => setRef(e.target.value)}
+                    placeholder={t`72 character LE hex`}
+                    fontFamily="mono"
+                    size="sm"
+                  />
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    mt={1}
+                    onClick={() => setRefManual(false)}
+                  >
+                    {t`Pick from wallet`}
+                  </Button>
+                </>
+              )}
             </FormControl>
           )}
 
