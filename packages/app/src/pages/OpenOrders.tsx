@@ -26,10 +26,21 @@ import {
   VStack,
   HStack,
   Badge,
+  IconButton,
+  Tooltip,
+  Select,
+  Grid,
+  GridItem,
+  Divider,
+  ButtonGroup,
+  Tag,
+  TagLabel,
+  Wrap,
+  WrapItem,
 } from "@chakra-ui/react";
-import { SearchIcon } from "@chakra-ui/icons";
-import { MdOutlineSwapHoriz, MdRefresh } from "react-icons/md";
-import { useCallback, useEffect, useState } from "react";
+import { SearchIcon, CopyIcon, ViewIcon, TimeIcon } from "@chakra-ui/icons";
+import { MdOutlineSwapHoriz, MdRefresh, MdGridView, MdTableRows, MdFilterList } from "react-icons/md";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Card from "@app/components/Card";
 import TokenContent from "@app/components/TokenContent";
 import { SmartToken, ContractType, SmartTokenType } from "@app/types";
@@ -184,6 +195,64 @@ interface ParsedOrder {
   wantOutputs?: { script: string; value: number }[];
 }
 
+type SortField = "block" | "name" | "value" | "price";
+type SortDirection = "asc" | "desc";
+type ViewMode = "table" | "grid";
+type FilterType = "all" | "ft" | "nft" | "rxd-in" | "rxd-out";
+
+function formatRxd(satoshis: number): string {
+  return `${(satoshis / 100000000).toFixed(8)} RXD`;
+}
+
+function formatCompactRxd(satoshis: number): string {
+  const rxd = satoshis / 100000000;
+  if (rxd >= 1000000) return `${(rxd / 1000000).toFixed(2)}M RXD`;
+  if (rxd >= 1000) return `${(rxd / 1000).toFixed(2)}K RXD`;
+  return `${rxd.toFixed(4)} RXD`;
+}
+
+function getPriceRatio(order: ParsedOrder): string | null {
+  if (!order.wantValue || order.wantValue === 0) return null;
+  if (order.offeredGlyph && !order.wantGlyph) {
+    // Token for RXD
+    const rxdPerToken = order.wantValue / 100000000;
+    return `1 ${order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"} = ${rxdPerToken.toFixed(4)} RXD`;
+  }
+  if (!order.offeredGlyph && order.wantGlyph) {
+    // RXD for Token
+    const tokensPerRxd = 100000000 / order.wantValue;
+    return `1 RXD = ${tokensPerRxd.toFixed(4)} ${order.wantGlyph.ticker || order.wantGlyph.name || "Token"}`;
+  }
+  if (order.offeredGlyph && order.wantGlyph) {
+    // Token for Token
+    const ratio = 1; // Simplified, would need actual amounts for FT
+    return `1 ${order.offeredGlyph.ticker || "Token"} ↔ ${order.wantGlyph.ticker || "Token"}`;
+  }
+  return null;
+}
+
+function useCopyToClipboard() {
+  const toast = useToast();
+  return useCallback(async (text: string, label?: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        status: "success",
+        title: "Copied",
+        description: `${label || "Text"} copied to clipboard`,
+        duration: 2000,
+      });
+    } catch {
+      toast({
+        status: "error",
+        title: "Copy failed",
+        description: "Could not copy to clipboard",
+        duration: 3000,
+      });
+    }
+  }, [toast]);
+}
+
 type TokenFunding = {
   inputs: SelectableInput[];
   outputs: { script: string; value: number }[];
@@ -218,25 +287,117 @@ async function fundNonFungible(refLE: string): Promise<TokenFunding> {
   return { inputs: [nft], outputs: [] };
 }
 
-function TokenIcon({ glyph }: { glyph?: SmartToken }) {
+function TokenIcon({ glyph, size = 6 }: { glyph?: SmartToken; size?: number }) {
   if (!glyph) {
-    return <Image src={rxdIcon} width={6} height={6} />;
+    return <Image src={rxdIcon} width={size} height={size} />;
   }
   return (
-    <Box w={6} h={6}>
+    <Box w={size} h={size}>
       <TokenContent glyph={glyph} thumbnail />
     </Box>
+  );
+}
+
+function OrderCard({
+  order,
+  onAccept,
+  onCopy,
+}: {
+  order: ParsedOrder;
+  onAccept: (order: ParsedOrder) => void;
+  onCopy: (text: string, label: string) => void;
+}) {
+  const { offer, offeredGlyph, wantGlyph, wantValue } = order;
+  const priceRatio = getPriceRatio(order);
+
+  return (
+    <Card p={4}>
+      <VStack align="stretch" spacing={3}>
+        {/* Token icons and swap direction */}
+        <Flex justify="space-between" align="center">
+          <HStack spacing={2}>
+            <TokenIcon glyph={offeredGlyph} size={8} />
+            <Icon as={MdOutlineSwapHoriz} boxSize={5} color="gray.400" />
+            <TokenIcon glyph={wantGlyph} size={8} />
+          </HStack>
+          <Badge colorScheme="blue" variant="subtle">
+            Block {offer.block_height.toLocaleString()}
+          </Badge>
+        </Flex>
+
+        {/* Token names */}
+        <Box>
+          <Text fontWeight="bold" fontSize="md">
+            {offeredGlyph?.name || "RXD"}
+            {offeredGlyph?.ticker && (
+              <Text as="span" fontSize="sm" color="gray.500" ml={2}>
+                ${offeredGlyph.ticker}
+              </Text>
+            )}
+          </Text>
+          <Text fontSize="sm" color="gray.400">
+            for{" "}
+            <Text as="span" fontWeight="medium" color="gray.300">
+              {wantGlyph?.name || formatCompactRxd(wantValue || 0)}
+            </Text>
+            {wantGlyph?.ticker && (
+              <Text as="span" color="gray.500" ml={1}>
+                (${wantGlyph.ticker})
+              </Text>
+            )}
+          </Text>
+        </Box>
+
+        {/* Price ratio */}
+        {priceRatio && (
+          <Tag size="sm" colorScheme="green" variant="subtle">
+            <TagLabel>{priceRatio}</TagLabel>
+          </Tag>
+        )}
+
+        {/* Token ref with copy button */}
+        {offeredGlyph && (
+          <HStack spacing={2}>
+            <Text fontSize="xs" color="gray.500" isTruncated maxW="200px">
+              Ref: {offeredGlyph.ref.slice(0, 16)}...{offeredGlyph.ref.slice(-8)}
+            </Text>
+            <IconButton
+              aria-label="Copy token ref"
+              icon={<CopyIcon />}
+              size="xs"
+              variant="ghost"
+              onClick={() => onCopy(offeredGlyph.ref, "Token ref")}
+            />
+          </HStack>
+        )}
+
+        <Divider />
+
+        {/* Accept button */}
+        <Button
+          size="sm"
+          colorScheme="blue"
+          width="100%"
+          onClick={() => onAccept(order)}
+        >
+          Accept Offer
+        </Button>
+      </VStack>
+    </Card>
   );
 }
 
 function OrderRow({
   order,
   onAccept,
+  onCopy,
 }: {
   order: ParsedOrder;
   onAccept: (order: ParsedOrder) => void;
+  onCopy?: (text: string, label: string) => void;
 }) {
   const { offer, offeredGlyph, wantGlyph, wantValue } = order;
+  const priceRatio = getPriceRatio(order);
 
   return (
     <Tr>
@@ -249,30 +410,55 @@ function OrderRow({
       </Td>
       <Td>
         <VStack align="start" spacing={0}>
-          <Text fontSize="sm" fontWeight="medium">
-            {offeredGlyph?.name || "RXD"}
-          </Text>
+          <HStack spacing={1}>
+            <Text fontSize="sm" fontWeight="medium">
+              {offeredGlyph?.name || "RXD"}
+            </Text>
+            {onCopy && offeredGlyph && (
+              <IconButton
+                aria-label="Copy token ref"
+                icon={<CopyIcon boxSize={3} />}
+                size="xs"
+                variant="ghost"
+                height="16px"
+                minW="16px"
+                onClick={() => onCopy(offeredGlyph.ref, "Token ref")}
+              />
+            )}
+          </HStack>
           <Text fontSize="xs" color="gray.500">
             {offeredGlyph?.ticker || ""}
           </Text>
+          {priceRatio && (
+            <Tag size="sm" colorScheme="green" variant="subtle" mt={1}>
+              <TagLabel fontSize="10px">{priceRatio}</TagLabel>
+            </Tag>
+          )}
         </VStack>
       </Td>
       <Td>
         <VStack align="start" spacing={0}>
           <Text fontSize="sm" fontWeight="medium">
-            {wantGlyph?.name || "RXD"}
+            {wantGlyph?.name || formatCompactRxd(wantValue || 0)}
           </Text>
           {wantValue && !wantGlyph && (
             <Text fontSize="xs" color="gray.500">
-              {(wantValue / 100000000).toFixed(8)} RXD
+              {formatRxd(wantValue)}
             </Text>
           )}
         </VStack>
       </Td>
       <Td display={{ base: "none", md: "table-cell" }}>
-        <Text fontSize="xs" color="gray.500">
-          Block {offer.block_height}
-        </Text>
+        <VStack align="start" spacing={0}>
+          <Text fontSize="xs" color="gray.500">
+            Block {offer.block_height.toLocaleString()}
+          </Text>
+          {offer.block_height > 0 && (
+            <Text fontSize="10px" color="gray.600">
+              ~{Math.max(0, Math.floor((Date.now() / 1000 - offer.block_height * 600) / 3600))}h ago
+            </Text>
+          )}
+        </VStack>
       </Td>
       <Td>
         <Button size="sm" colorScheme="blue" onClick={() => onAccept(order)}>
@@ -285,6 +471,7 @@ function OrderRow({
 
 export default function OpenOrders() {
   const toast = useToast();
+  const copyToClipboard = useCopyToClipboard();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<ParsedOrder[]>([]);
   const [searchRef, setSearchRef] = useState("");
@@ -292,17 +479,30 @@ export default function OpenOrders() {
   const [rpcUrl, setRpcUrl] = useState(getSwapRpcConfig().url);
   const [showConfig, setShowConfig] = useState(false);
 
+  // Sorting and filtering state
+  const [sortField, setSortField] = useState<SortField>("block");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [filterType, setFilterType] = useState<FilterType>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [displayCount, setDisplayCount] = useState(20);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+
   // Get all known glyphs for display
   const glyphs = useLiveQuery(() => db.glyph.toArray(), []);
   const glyphMap = new Map(glyphs?.map((g) => [g.ref, g]) || []);
-  const glyphByTokenId = new Map(
-    glyphs?.map((g) => [
-      assetToSwapTokenId(
-        g.tokenType === SmartTokenType.NFT ? ContractType.NFT : ContractType.FT,
-        g.ref
+  const glyphByTokenId = useMemo(
+    () =>
+      new Map(
+        glyphs?.map((g) => [
+          assetToSwapTokenId(
+            g.tokenType === SmartTokenType.NFT ? ContractType.NFT : ContractType.FT,
+            g.ref
+          ),
+          g,
+        ]) || []
       ),
-      g,
-    ]) || []
+    [glyphs]
   );
 
   const normalizeTokenSearch = (tokenRef?: string) => {
@@ -390,6 +590,8 @@ export default function OpenOrders() {
         );
 
         setOrders(uniqueOrders);
+        setLastUpdated(new Date());
+        setDisplayCount(20); // Reset pagination on new fetch
       } catch (error) {
         console.error("Failed to fetch orders:", error);
         toast({
@@ -412,6 +614,103 @@ export default function OpenOrders() {
       }
     });
   }, [checkIndexAvailability, fetchOrders]);
+
+  // Auto-refresh every 30 seconds when tab is visible
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible" && !loading) {
+        fetchOrders(searchRef.trim() || undefined);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [autoRefreshEnabled, fetchOrders, loading, searchRef]);
+
+  // Filter and sort orders
+  const filteredAndSortedOrders = useMemo(() => {
+    let result = [...orders];
+
+    // Apply filter
+    if (filterType !== "all") {
+      result = result.filter((order) => {
+        const offeredIsFt = order.offeredGlyph?.tokenType === SmartTokenType.FT;
+        const offeredIsNft = order.offeredGlyph?.tokenType === SmartTokenType.NFT;
+        const offeredIsRxd = !order.offeredGlyph;
+        const wantIsRxd = !order.wantGlyph;
+
+        switch (filterType) {
+          case "ft":
+            return offeredIsFt || order.wantGlyph?.tokenType === SmartTokenType.FT;
+          case "nft":
+            return offeredIsNft || order.wantGlyph?.tokenType === SmartTokenType.NFT;
+          case "rxd-in":
+            return offeredIsRxd; // Offering RXD
+          case "rxd-out":
+            return wantIsRxd; // Wanting RXD
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Apply sort
+    result.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case "block":
+          comparison = a.offer.block_height - b.offer.block_height;
+          break;
+        case "name":
+          const nameA = a.offeredGlyph?.name || "RXD";
+          const nameB = b.offeredGlyph?.name || "RXD";
+          comparison = nameA.localeCompare(nameB);
+          break;
+        case "value":
+          const valueA = a.wantValue || 0;
+          const valueB = b.wantValue || 0;
+          comparison = valueA - valueB;
+          break;
+        case "price": {
+          // Sort by implied price ratio
+          const getPrice = (o: ParsedOrder) => {
+            if (o.wantValue && o.wantValue > 0) {
+              if (o.offeredGlyph && !o.wantGlyph) return o.wantValue; // RXD per token
+              if (!o.offeredGlyph && o.wantGlyph) return 100000000 / o.wantValue; // Tokens per RXD
+            }
+            return 0;
+          };
+          comparison = getPrice(a) - getPrice(b);
+          break;
+        }
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return result;
+  }, [orders, sortField, sortDirection, filterType]);
+
+  // Paginated orders
+  const displayedOrders = filteredAndSortedOrders.slice(0, displayCount);
+  const hasMoreOrders = filteredAndSortedOrders.length > displayCount;
+
+  // Sort toggle helper
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  };
+
+  // Load more handler
+  const handleLoadMore = () => {
+    setDisplayCount((prev) => prev + 20);
+  };
 
   const handleSearch = () => {
     if (searchRef.trim()) {
@@ -678,12 +977,54 @@ export default function OpenOrders() {
     );
   }
 
+  // Smart empty state message
+  const getEmptyStateMessage = () => {
+    if (!glyphs || glyphs.length === 0) {
+      return {
+        title: "No tokens in wallet",
+        description: "You don't own any tokens yet. Acquire tokens to see swap offers for them here.",
+      };
+    }
+    if (orders.length === 0) {
+      return {
+        title: "No open orders found",
+        description: "There are currently no open swap orders for tokens you own. Check back later or create your own swap offer.",
+      };
+    }
+    if (filteredAndSortedOrders.length === 0) {
+      return {
+        title: "No matching orders",
+        description: "Try adjusting your filters or search criteria to see more results.",
+      };
+    }
+    return null;
+  };
+
+  const emptyState = getEmptyStateMessage();
+
   return (
-    <Container maxW="container.lg" px={4}>
-      <VStack spacing={6} align="stretch">
-        <Flex justify="space-between" align="center">
+    <Container maxW="container.xl" px={4}>
+      <VStack spacing={4} align="stretch">
+        {/* Header with controls */}
+        <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
           <Heading size="lg">{"Open Orders"}</Heading>
-          <HStack>
+          <HStack spacing={2}>
+            {lastUpdated && (
+              <HStack spacing={1} color="gray.500" fontSize="xs" display={{ base: "none", md: "flex" }}>
+                <Icon as={TimeIcon} boxSize={3} />
+                <Text>Updated {dayjs(lastUpdated).format("HH:mm:ss")}</Text>
+              </HStack>
+            )}
+            <Tooltip label={autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"}>
+              <IconButton
+                aria-label="Toggle auto-refresh"
+                icon={<Icon as={MdRefresh} />}
+                size="sm"
+                variant={autoRefreshEnabled ? "solid" : "ghost"}
+                colorScheme={autoRefreshEnabled ? "green" : "gray"}
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+              />
+            </Tooltip>
             <Button
               size="sm"
               variant="ghost"
@@ -702,6 +1043,7 @@ export default function OpenOrders() {
           </HStack>
         </Flex>
 
+        {/* Config panel */}
         {showConfig && (
           <Card p={4}>
             <HStack>
@@ -718,23 +1060,73 @@ export default function OpenOrders() {
           </Card>
         )}
 
+        {/* Search and filters */}
         <Card p={4}>
-          <InputGroup>
-            <InputLeftElement pointerEvents="none">
-              <SearchIcon color="gray.400" />
-            </InputLeftElement>
-            <Input
-              placeholder={"Search by token ref..."}
-              value={searchRef}
-              onChange={(e) => setSearchRef(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-            />
-            <Button ml={2} onClick={handleSearch} isLoading={loading}>
-              {"Search"}
-            </Button>
-          </InputGroup>
+          <VStack spacing={3} align="stretch">
+            {/* Search bar */}
+            <InputGroup>
+              <InputLeftElement pointerEvents="none">
+                <SearchIcon color="gray.400" />
+              </InputLeftElement>
+              <Input
+                placeholder={"Search by token ref or name..."}
+                value={searchRef}
+                onChange={(e) => setSearchRef(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleSearch()}
+              />
+              <Button ml={2} onClick={handleSearch} isLoading={loading}>
+                {"Search"}
+              </Button>
+            </InputGroup>
+
+            {/* Filter and view controls */}
+            <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+              <HStack spacing={2}>
+                <Icon as={MdFilterList} color="gray.400" />
+                <Select
+                  size="sm"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as FilterType)}
+                  width="140px"
+                  aria-label="Filter by type"
+                >
+                  <option value="all">All Types</option>
+                  <option value="ft">Fungible</option>
+                  <option value="nft">NFT</option>
+                  <option value="rxd-in">Buying RXD</option>
+                  <option value="rxd-out">Selling RXD</option>
+                </Select>
+              </HStack>
+
+              <ButtonGroup size="sm" isAttached variant="outline">
+                <IconButton
+                  aria-label="Table view"
+                  icon={<Icon as={MdTableRows} />}
+                  colorScheme={viewMode === "table" ? "blue" : undefined}
+                  onClick={() => setViewMode("table")}
+                />
+                <IconButton
+                  aria-label="Grid view"
+                  icon={<Icon as={MdGridView} />}
+                  colorScheme={viewMode === "grid" ? "blue" : undefined}
+                  onClick={() => setViewMode("grid")}
+                />
+              </ButtonGroup>
+            </Flex>
+
+            {/* Stats */}
+            {orders.length > 0 && (
+              <Flex justify="space-between" align="center" fontSize="sm" color="gray.500">
+                <Text>
+                  Showing {displayedOrders.length} of {filteredAndSortedOrders.length} orders
+                  {filteredAndSortedOrders.length !== orders.length && ` (filtered from ${orders.length})`}
+                </Text>
+              </Flex>
+            )}
+          </VStack>
         </Card>
 
+        {/* Results */}
         <Card>
           {loading && orders.length === 0 ? (
             <VStack p={8} spacing={4}>
@@ -742,40 +1134,91 @@ export default function OpenOrders() {
               <Skeleton height="40px" width="100%" />
               <Skeleton height="40px" width="100%" />
             </VStack>
-          ) : orders.length === 0 ? (
+          ) : emptyState ? (
             <Box p={8} textAlign="center">
-              <Text color="gray.500">{"No open orders found"}</Text>
+              <Text color="gray.500" fontWeight="medium">{emptyState.title}</Text>
               <Text fontSize="sm" color="gray.400" mt={2}>
-                {"Orders will appear here when users broadcast swap offers for tokens you own"}
+                {emptyState.description}
               </Text>
             </Box>
+          ) : viewMode === "table" ? (
+            <Box overflowX="auto">
+              <Table size="sm">
+                <Thead>
+                  <Tr>
+                    <Th>{"Swap"}</Th>
+                    <Th
+                      cursor="pointer"
+                      onClick={() => handleSort("name")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Offering"} {sortField === "name" && (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th
+                      cursor="pointer"
+                      onClick={() => handleSort("value")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Wants"} {sortField === "value" && (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th
+                      display={{ base: "none", md: "table-cell" }}
+                      cursor="pointer"
+                      onClick={() => handleSort("block")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Block"} {sortField === "block" && (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th></Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {displayedOrders.map((order, idx) => (
+                    <OrderRow
+                      key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
+                      order={order}
+                      onAccept={handleAcceptOrder}
+                      onCopy={copyToClipboard}
+                    />
+                  ))}
+                </Tbody>
+              </Table>
+            </Box>
           ) : (
-            <Table size="sm">
-              <Thead>
-                <Tr>
-                  <Th>{"Swap"}</Th>
-                  <Th>{"Offering"}</Th>
-                  <Th>{"Wants"}</Th>
-                  <Th display={{ base: "none", md: "table-cell" }}>
-                    {"Block"}
-                  </Th>
-                  <Th></Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {orders.map((order, idx) => (
-                  <OrderRow
-                    key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
+            <Grid
+              templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }}
+              gap={4}
+              p={4}
+            >
+              {displayedOrders.map((order, idx) => (
+                <GridItem key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}>
+                  <OrderCard
                     order={order}
                     onAccept={handleAcceptOrder}
+                    onCopy={copyToClipboard}
                   />
-                ))}
-              </Tbody>
-            </Table>
+                </GridItem>
+              ))}
+            </Grid>
+          )}
+
+          {/* Load more */}
+          {hasMoreOrders && (
+            <Box p={4} textAlign="center">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleLoadMore}
+                isLoading={loading}
+              >
+                Load More ({filteredAndSortedOrders.length - displayCount} remaining)
+              </Button>
+            </Box>
           )}
         </Card>
 
-        <Alert status="info">
+        {/* Help text */}
+        <Alert status="info" variant="subtle">
           <AlertIcon />
           <Box>
             <Text fontWeight="medium">{"How it works"}</Text>

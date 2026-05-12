@@ -25,12 +25,19 @@ import {
   useToast,
   IconButton,
   Flex,
+  Badge,
+  Text,
+  Spinner,
+  Icon,
+  HStack,
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { SmartToken, ContractType } from "@app/types";
 import { ftScript, isP2pkh, p2pkhScript } from "@lib/script";
 import { feeRate, network, wallet } from "@app/signals";
+import { useWaveResolver, isPotentialWaveName } from "@app/hooks/useWaveResolver";
+import { HiOutlineAtSymbol } from "react-icons/hi";
 import { reverseRef } from "@lib/Outpoint";
 import TokenContent from "./TokenContent";
 import { RiQuestionFill } from "react-icons/ri";
@@ -56,6 +63,11 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
   const [errorMessage, setErrorMessage] = useState("");
   const toast = useToast();
 
+  // WAVE name resolution
+  const waveResolver = useWaveResolver();
+  const [recipientInput, setRecipientInput] = useState("");
+  const [finalAddress, setFinalAddress] = useState<string | null>(null);
+
   const rxd = useLiveQuery(
     () => db.txo.where({ contractType: ContractType.RXD, spent: 0 }).toArray(),
     [],
@@ -68,9 +80,30 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     setLoading(false);
   };
 
+  // Handle recipient input change for WAVE resolution
+  const handleRecipientChange = async (value: string) => {
+    setRecipientInput(value);
+    waveResolver.clear();
+    setFinalAddress(null);
+
+    if (isPotentialWaveName(value)) {
+      const resolved = await waveResolver.resolveName(value);
+      if (resolved) {
+        setFinalAddress(resolved);
+      }
+    } else if (value) {
+      if (isP2pkh(value)) {
+        setFinalAddress(value);
+      }
+    }
+  };
+
   useEffect(() => {
     setSuccess(true);
     setLoading(false);
+    waveResolver.clear();
+    setRecipientInput("");
+    setFinalAddress(null);
   }, [isOpen]);
 
   const ticker = (glyph.ticker as string) || glyph.name || "???";
@@ -84,8 +117,10 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       return setFailure("Invalid amount");
     }
 
-    if (!toAddress.current?.value || !isP2pkh(toAddress.current.value)) {
-      return setFailure("Invalid address");
+    // Use resolved WAVE name address or direct address input
+    const recipientAddress = finalAddress || toAddress.current?.value || "";
+    if (!recipientAddress || !isP2pkh(recipientAddress)) {
+      return setFailure(waveResolver.isWaveName && !finalAddress ? "WAVE name could not be resolved" : "Invalid address");
     }
 
     const value = parseInt(amount.current?.value, 10);
@@ -102,7 +137,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
         tokens,
         refLE,
         wallet.value.address,
-        toAddress.current?.value as string,
+        recipientAddress,
         value,
         feeRate.value,
         wallet.value.wif as string
@@ -115,7 +150,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       db.broadcast.put({ txid, date: Date.now(), description: "ft_send" });
       console.debug("Result", txid);
       toast({
-        title: "Sent ${value} ${ticker}",
+        title: `Sent ${value} ${ticker}`,
         status: "success",
       });
 
@@ -146,6 +181,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
   const onScan = (value: string) => {
     setScan(false);
     setSuccess(true);
+    handleRecipientChange(value);
     if (toAddress.current) {
       toAddress.current.value = value;
     }
@@ -164,7 +200,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{"Send ${glyph.name || ticker}"}</ModalHeader>
+          <ModalHeader>{`Send ${glyph.name || ticker}`}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
@@ -192,12 +228,24 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                 </Alert>
               )}
               <FormControl>
-                <FormLabel>To</FormLabel>
+                <FormLabel>
+                  <HStack spacing={2}>
+                    <span>To</span>
+                    {waveResolver.isWaveName && (
+                      <Badge colorScheme="brand" size="sm">
+                        <Icon as={HiOutlineAtSymbol} boxSize={3} mr={1} />
+                        WAVE
+                      </Badge>
+                    )}
+                  </HStack>
+                </FormLabel>
                 <Flex gap={2}>
                   <Input
                     ref={toAddress}
                     type="text"
-                    placeholder={`${network.value.name} address`}
+                    placeholder={`${network.value.name} address or WAVE name (e.g., alice.rxd)`}
+                    value={recipientInput}
+                    onChange={(e) => handleRecipientChange(e.target.value)}
                   />
                   <IconButton
                     icon={<BsQrCodeScan />}
@@ -205,6 +253,31 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                     onClick={() => setScan(true)}
                   />
                 </Flex>
+                {/* WAVE resolution status */}
+                {waveResolver.isResolving && (
+                  <Flex align="center" mt={2} gap={2}>
+                    <Spinner size="xs" />
+                    <Text fontSize="xs" color="gray.500">
+                      {"Resolving WAVE name..."}
+                    </Text>
+                  </Flex>
+                )}
+                {waveResolver.error && (
+                  <Alert status="warning" mt={2} size="sm" borderRadius="md">
+                    <AlertIcon boxSize={4} />
+                    <AlertDescription fontSize="xs">
+                      {waveResolver.error}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {waveResolver.resolvedAddress && (
+                  <Alert status="success" mt={2} size="sm" borderRadius="md">
+                    <AlertIcon boxSize={4} />
+                    <AlertDescription fontSize="xs" wordBreak="break-all">
+                      {"Resolved to:"} {waveResolver.resolvedAddress}
+                    </AlertDescription>
+                  </Alert>
+                )}
               </FormControl>
               <FormControl>
                 <FormLabel>{"Amount"}</FormLabel>

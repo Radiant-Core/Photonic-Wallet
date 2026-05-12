@@ -97,6 +97,15 @@ export default function WaveRegister() {
       return;
     }
 
+    if (isAvailable === false) {
+      toast({
+        title: "Name Already Taken",
+        description: `${fullName} is already registered. Choose a different name.`,
+        status: "error",
+      });
+      return;
+    }
+
     setIsLoading(true);
     setRegistrationPhase("broadcasting");
 
@@ -205,7 +214,7 @@ export default function WaveRegister() {
                 <Alert status="warning" size="sm" borderRadius="md" py={1}>
                   <AlertIcon boxSize={4} />
                   <AlertDescription fontSize="sm">
-                    Server cannot verify availability. Registration will fail if name is already taken.
+                    Server cannot verify availability. If the name is already taken: (1) the registration fee is sent to the protocol treasury and is non-refundable, (2) the name will continue to resolve to the original registrant's address — not yours, and (3) anyone sending funds to this name will have them delivered to the original registrant, not you.
                   </AlertDescription>
                 </Alert>
               )}
@@ -302,7 +311,7 @@ export default function WaveRegister() {
               size="lg"
               onClick={handleRegister}
               isLoading={isLoading || registrationPhase === "broadcasting"}
-              isDisabled={!validation.valid || isAvailable !== true || !target}
+              isDisabled={!validation.valid || isAvailable === false || isChecking || !target}
               loadingText={"Registering..."}
             >
               {"Register WAVE Name"}

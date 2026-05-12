@@ -127,7 +127,7 @@ export default function AirdropFungible({
       db.broadcast.put({ txid, date: Date.now(), description: "ft_send" });
       console.debug("Result", txid);
       toast({
-        title: "Sent ${value} ${ticker}",
+        title: `Sent ${value} ${ticker}`,
         status: "success",
       });
 
@@ -184,7 +184,7 @@ export default function AirdropFungible({
       <form onSubmit={submit}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{"Airdrop ${glyph.name || ticker}"}</ModalHeader>
+          <ModalHeader>{`Airdrop ${glyph.name || ticker}`}</ModalHeader>
           <ModalCloseButton />
           <AddressInput
             open={scan}
