@@ -36,7 +36,7 @@ import { useNavigate } from "react-router-dom";
 
 export default function WaveRegister() {
   const [name, setName] = useState("");
-  const [target, setTarget] = useState("");
+  const [target, setTarget] = useState(wallet.value.address || "");
   const [description, setDescription] = useState("");
   const [customData, setCustomData] = useState("");
   const [isChecking, setIsChecking] = useState(false);
@@ -251,11 +251,22 @@ export default function WaveRegister() {
             <FormLabel>
               Target Address/Reference
             </FormLabel>
-            <Input
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder={"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"}
-            />
+            <HStack>
+              <Input
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder={"1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"}
+                flex={1}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setTarget(wallet.value.address || "")}
+                flexShrink={0}
+              >
+                Use My Address
+              </Button>
+            </HStack>
             <FormHelperText>
               The address or token reference this name points to
             </FormHelperText>
