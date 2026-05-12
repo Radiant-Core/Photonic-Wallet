@@ -41,6 +41,7 @@ import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import { ContractType, VaultRecord } from "@app/types";
+import { parseFtScript, parseNftScript } from "@lib/script";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   buildVaultTx,
@@ -601,10 +602,43 @@ export default function VaultPage() {
         value: c.value,
       }));
 
+      // Fetch token UTXO for NFT/FT vaults
+      let tokenUtxos: { txid: string; vout: number; script: string; value: number }[] | undefined;
+      if (assetType !== "rxd" && ref) {
+        const refLE = ref.trim().toLowerCase();
+        const contractType = assetType === "nft" ? ContractType.NFT : ContractType.FT;
+        const tokenTxos = await db.txo
+          .where({ contractType, spent: 0 })
+          .filter((txo) => {
+            const parsed =
+              assetType === "nft"
+                ? parseNftScript(txo.script)
+                : parseFtScript(txo.script);
+            return parsed.ref === refLE;
+          })
+          .toArray();
+        if (tokenTxos.length === 0) {
+          throw new Error(
+            `No unspent ${assetType.toUpperCase()} UTXO found for ref ${refLE}. Make sure the token is in your wallet.`
+          );
+        }
+        // For NFT take exactly 1; for FT take all UTXOs carrying this ref
+        tokenUtxos = (assetType === "nft" ? tokenTxos.slice(0, 1) : tokenTxos).map((t) => ({
+          txid: t.txid,
+          vout: t.vout,
+          script: t.script,
+          value: t.value,
+        }));
+      }
+
       if (!vesting) {
         // Simple vault
         const lt = parseInt(locktime, 10);
-        const val = Math.round(parseFloat(amount) * 1e8);
+        // For FT, amount is in token units (integer); for RXD, amount is in RXD (parsed as photons)
+        const val =
+          assetType === "ft"
+            ? parseInt(amount, 10)
+            : Math.round(parseFloat(amount) * 1e8);
         if (!lt || !val) {
           throw new Error("Fill in locktime and amount");
         }
@@ -633,7 +667,8 @@ export default function VaultPage() {
           fromAddress,
           wif,
           params,
-          feeRate.value
+          feeRate.value,
+          tokenUtxos
         );
 
         // Broadcast
@@ -720,7 +755,8 @@ export default function VaultPage() {
           fromAddress,
           wif,
           vestingTranches,
-          feeRate.value
+          feeRate.value,
+          tokenUtxos
         );
 
         const txid = await electrumWorker.value.broadcast(result.rawTx);
@@ -793,6 +829,25 @@ export default function VaultPage() {
       const wif = wallet.value.wif;
       const toAddress = wallet.value.address;
 
+      // For NFT/FT vaults the locked value may be dust (546 photons).
+      // Fetch RXD UTXOs to cover the claim transaction fee.
+      let additionalFundingUtxos:
+        | { txid: string; vout: number; script: string; value: number }[]
+        | undefined;
+      if (vault.assetType !== "rxd") {
+        const rxdTxos = await db.txo
+          .where({ contractType: ContractType.RXD, spent: 0 })
+          .toArray();
+        if (rxdTxos.length > 0) {
+          additionalFundingUtxos = rxdTxos.map((t) => ({
+            txid: t.txid,
+            vout: t.vout,
+            script: t.script,
+            value: t.value,
+          }));
+        }
+      }
+
       const result = claimVaultTx(
         {
           txid: vault.txid,
@@ -802,7 +857,9 @@ export default function VaultPage() {
         },
         toAddress,
         wif,
-        feeRate.value
+        feeRate.value,
+        additionalFundingUtxos,
+        toAddress
       );
 
       const claimTxid = await electrumWorker.value.broadcast(result.rawTx);
@@ -1119,12 +1176,18 @@ export default function VaultPage() {
                   </FormHelperText>
                 </FormControl>
                 <FormControl>
-                  <FormLabel>{t`Amount (RXD)`}</FormLabel>
+                  <FormLabel>
+                    {assetType === "ft"
+                      ? t`Amount (token units)`
+                      : assetType === "nft"
+                      ? t`Amount (RXD dust)`
+                      : t`Amount (RXD)`}
+                  </FormLabel>
                   <Input
                     size="sm"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    placeholder="0.00"
+                    placeholder={assetType === "ft" ? "0" : "0.00"}
                   />
                 </FormControl>
               </SimpleGrid>

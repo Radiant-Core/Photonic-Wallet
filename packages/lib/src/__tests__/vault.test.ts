@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import rjs from "@radiant-core/radiantjs";
 import {
   encodeLocktime,
   decodeLocktime,
@@ -10,6 +11,7 @@ import {
   p2shAddress,
   vaultScriptHash,
   buildRedeemScript,
+  buildVaultTx,
   parseVaultRedeemScript,
   decodeVaultMetadata,
   isVaultUnlockable,
@@ -22,6 +24,9 @@ import {
   CLTV_SEQUENCE,
   type VaultParams,
 } from "../vault";
+import { nftScript, ftScript } from "../script";
+
+const { PrivateKey, Transaction } = rjs;
 
 // ============================================================================
 // Test fixtures
@@ -453,5 +458,162 @@ describe("constants", () => {
   it("VAULT_MAGIC_BYTES encodes 'vault'", () => {
     const decoded = Buffer.from(VAULT_MAGIC_BYTES, "hex").toString("utf8");
     expect(decoded).toBe("vault");
+  });
+});
+
+// ============================================================================
+// buildVaultTx — NFT and FT tokenUtxos
+// ============================================================================
+
+describe("buildVaultTx — NFT vault with tokenUtxos", () => {
+  const privKey = new PrivateKey();
+  const wif = privKey.toWIF();
+  const fromAddress = privKey.toAddress().toString();
+
+  const locktime = 100000;
+  const vaultValue = 546; // dust for NFT P2SH output
+
+  const tokenScript = nftScript(fromAddress, testRef);
+  const tokenUtxo = {
+    txid: "a".repeat(64),
+    vout: 0,
+    script: tokenScript,
+    value: 546,
+  };
+
+  const rxdCoin = {
+    txid: "b".repeat(64),
+    vout: 0,
+    script: "76a914" + "00".repeat(20) + "88ac",
+    value: 500000,
+  };
+
+  const params: VaultParams = {
+    mode: "block",
+    locktime,
+    assetType: "nft",
+    recipientAddress: fromAddress,
+    ref: testRef,
+    value: vaultValue,
+  };
+
+  it("returns rawTx, txid, redeemScriptHex, and p2shAddr", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    expect(result.rawTx).toBeTruthy();
+    expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.redeemScriptHex).toBeTruthy();
+    expect(result.p2shAddr).toMatch(/^3/);
+  });
+
+  it("includes token UTXO as the first input", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    // @ts-ignore — Transaction.fromString exists at runtime
+    const tx = new Transaction(result.rawTx);
+    // First input prevTxId should be tokenUtxo.txid (reversed as bytes)
+    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId).reverse().toString("hex");
+    expect(firstInputTxid).toBe(tokenUtxo.txid);
+  });
+
+  it("P2SH output script matches p2shOutputScript of redeemScript", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const expectedP2sh = p2shOutputScript(result.redeemScriptHex);
+    // @ts-ignore
+    const tx = new Transaction(result.rawTx);
+    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
+    expect(outputScripts).toContain(expectedP2sh);
+  });
+
+  it("redeemScript is an NFT vault script (contains d8 singleton opcode)", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    expect(result.redeemScriptHex).toContain("d8");
+    expect(result.redeemScriptHex).toContain(testRef);
+  });
+
+  it("throws when NFT ref is missing from params", () => {
+    const paramsNoRef: VaultParams = { ...params, ref: undefined };
+    expect(() =>
+      buildVaultTx([rxdCoin], fromAddress, wif, paramsNoRef, 1, [tokenUtxo])
+    ).toThrow("ref");
+  });
+});
+
+describe("buildVaultTx — FT vault with tokenUtxos", () => {
+  const privKey = new PrivateKey();
+  const wif = privKey.toWIF();
+  const fromAddress = privKey.toAddress().toString();
+
+  const locktime = 200000;
+  const tokenValue = 1000; // FT token units (satoshi field holds token amount)
+
+  const tokenScript = ftScript(fromAddress, testRef);
+  const tokenUtxo = {
+    txid: "c".repeat(64),
+    vout: 0,
+    script: tokenScript,
+    value: tokenValue,
+  };
+
+  const rxdCoin = {
+    txid: "d".repeat(64),
+    vout: 0,
+    script: "76a914" + "00".repeat(20) + "88ac",
+    value: 500000,
+  };
+
+  const params: VaultParams = {
+    mode: "block",
+    locktime,
+    assetType: "ft",
+    recipientAddress: fromAddress,
+    ref: testRef,
+    value: tokenValue,
+  };
+
+  it("returns rawTx, txid, redeemScriptHex, and p2shAddr", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    expect(result.rawTx).toBeTruthy();
+    expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.redeemScriptHex).toBeTruthy();
+    expect(result.p2shAddr).toMatch(/^3/);
+  });
+
+  it("includes token UTXO as the first input", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    // @ts-ignore
+    const tx = new Transaction(result.rawTx);
+    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId).reverse().toString("hex");
+    expect(firstInputTxid).toBe(tokenUtxo.txid);
+  });
+
+  it("redeemScript is an FT vault script (contains bd statesep and d0 pushinputref)", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    expect(result.redeemScriptHex).toContain("bd"); // OP_STATESEPARATOR
+    expect(result.redeemScriptHex).toContain("d0"); // OP_PUSHINPUTREF
+    expect(result.redeemScriptHex).toContain(testRef);
+  });
+
+  it("P2SH output script matches p2shOutputScript of redeemScript", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const expectedP2sh = p2shOutputScript(result.redeemScriptHex);
+    // @ts-ignore
+    const tx = new Transaction(result.rawTx);
+    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
+    expect(outputScripts).toContain(expectedP2sh);
+  });
+
+  it("works without tokenUtxos (no token input — for RXD-only fallback)", () => {
+    const rxdParams: VaultParams = {
+      mode: "block",
+      locktime,
+      assetType: "rxd",
+      recipientAddress: fromAddress,
+      value: 100000,
+    };
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, rxdParams, 1);
+    expect(result.rawTx).toBeTruthy();
+    // RXD script must not contain FT (bdd0 = OP_STATESEPARATOR OP_PUSHINPUTREF)
+    // or NFT (d875 = OP_PUSHINPUTREFSINGLETON ... OP_DROP) opcode sequences
+    expect(result.redeemScriptHex).not.toContain("bdd0");
+    expect(result.redeemScriptHex).not.toContain("d875");
   });
 });
