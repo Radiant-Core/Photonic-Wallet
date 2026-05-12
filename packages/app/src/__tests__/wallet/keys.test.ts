@@ -3,6 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { HDKey } from '@scure/bip32';
+import { mnemonicToSeedSync } from '@scure/bip39';
 
 describe('Wallet Key Management', () => {
   beforeEach(() => {
@@ -81,5 +83,80 @@ describe('Address Generation', () => {
   it('should support multiple address types', () => {
     const addressTypes = ['p2pkh', 'p2sh'];
     expect(addressTypes).toContain('p2pkh');
+  });
+});
+
+describe('BIP-44 Coin Type Dual-Path Support (regression for v3.0.0 upgrade)', () => {
+  // Known BIP-39 test vector (all-abandon). We only need the seed; no real
+  // wallet is involved.
+  const TEST_MNEMONIC =
+    'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+  const seed = mnemonicToSeedSync(TEST_MNEMONIC);
+  const hdKey = HDKey.fromMasterSeed(seed);
+
+  const legacyPrivKey = hdKey.derive("m/44'/0'/0'/0/0").privateKey!;
+  const modernPrivKey = hdKey.derive("m/44'/512'/0'/0/0").privateKey!;
+
+  it('produces DIFFERENT private keys for coin type 0 vs 512 from the same mnemonic', () => {
+    // This is the exact root cause of the WAVE registration bug: after
+    // Photonic Wallet v3.0.0 switched the default derivation from coin type 0
+    // to 512, legacy wallets signed transactions with a different key than
+    // the one that controls their on-chain UTXOs, causing the node to reject
+    // every broadcast with OP_EQUALVERIFY in the P2PKH unlock.
+    expect(legacyPrivKey).not.toEqual(modernPrivKey);
+  });
+
+  it('legacy coin type 0 derivation is deterministic across calls', () => {
+    const again = HDKey.fromMasterSeed(seed).derive("m/44'/0'/0'/0/0").privateKey!;
+    expect(Buffer.from(legacyPrivKey).toString('hex')).toBe(
+      Buffer.from(again).toString('hex')
+    );
+  });
+
+  it('modern coin type 512 derivation is deterministic across calls', () => {
+    const again = HDKey.fromMasterSeed(seed).derive("m/44'/512'/0'/0/0").privateKey!;
+    expect(Buffer.from(modernPrivKey).toString('hex')).toBe(
+      Buffer.from(again).toString('hex')
+    );
+  });
+
+  it('swap path differs from spending path at both coin types', () => {
+    const legacySwap = hdKey.derive("m/44'/0'/0'/0/1").privateKey!;
+    const modernSwap = hdKey.derive("m/44'/512'/0'/0/1").privateKey!;
+    expect(legacySwap).not.toEqual(legacyPrivKey);
+    expect(modernSwap).not.toEqual(modernPrivKey);
+    expect(legacySwap).not.toEqual(modernSwap);
+  });
+
+  it('encryption path differs from spending path at both coin types', () => {
+    const legacyEnc = hdKey.derive("m/44'/0'/0'/2/0").privateKey!;
+    const modernEnc = hdKey.derive("m/44'/512'/0'/2/0").privateKey!;
+    expect(legacyEnc).not.toEqual(legacyPrivKey);
+    expect(modernEnc).not.toEqual(modernPrivKey);
+    expect(legacyEnc).not.toEqual(modernEnc);
+  });
+});
+
+describe('Coin Type Constants', () => {
+  it('exposes RADIANT_COIN_TYPE = 512 and LEGACY_COIN_TYPE = 0', async () => {
+    const { RADIANT_COIN_TYPE, LEGACY_COIN_TYPE, DEFAULT_COIN_TYPE } =
+      await import('@app/keys');
+    expect(RADIANT_COIN_TYPE).toBe(512);
+    expect(LEGACY_COIN_TYPE).toBe(0);
+    expect(DEFAULT_COIN_TYPE).toBe(RADIANT_COIN_TYPE);
+  });
+
+  it('probeCoinTypeFromHistory is exported and is an async function', async () => {
+    const { probeCoinTypeFromHistory } = await import('@app/keys');
+    expect(typeof probeCoinTypeFromHistory).toBe('function');
+    // Sanity: when called with an empty server list the probe must resolve
+    // (best-effort fallback to default) and never throw.
+    const result = await probeCoinTypeFromHistory(
+      'mainnet',
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      { timeoutMs: 50, servers: [] }
+    );
+    expect(result).toBe(512);
   });
 });

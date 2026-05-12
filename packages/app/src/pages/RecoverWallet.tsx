@@ -6,8 +6,10 @@ import {
   AlertIcon,
   Button,
   Center,
+  Checkbox,
   Container,
   FormControl,
+  FormHelperText,
   FormLabel,
   Heading,
   Input,
@@ -16,7 +18,7 @@ import {
   useBreakpointValue,
 } from "@chakra-ui/react";
 import { t } from "@lingui/macro";
-import { recoverKeys } from "@app/keys";
+import { recoverKeys, LEGACY_COIN_TYPE } from "@app/keys";
 import Card from "@app/components/Card";
 import { NetworkKey } from "@lib/types";
 import config from "@app/config.json";
@@ -33,6 +35,7 @@ export default function RecoverWallet() {
   const network = useRef<HTMLSelectElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [forceLegacy, setForceLegacy] = useState(false);
   const navigate = useNavigate();
   const isMobile = useBreakpointValue({ base: true, lg: false });
 
@@ -60,7 +63,11 @@ export default function RecoverWallet() {
         const result = await recoverKeys(
           network.current?.value as NetworkKey,
           phrase.current?.value || "",
-          passwordValue
+          passwordValue,
+          // Explicit override forces the legacy (coin type 0) path used by
+          // Photonic Wallet pre-v3.0.0. When unchecked, recoverKeys probes
+          // ElectrumX to auto-detect which path holds on-chain history.
+          forceLegacy ? LEGACY_COIN_TYPE : undefined
         );
         if (!result) {
           return;
@@ -131,6 +138,19 @@ export default function RecoverWallet() {
                 </option>
               ))}
             </Select>
+          </FormControl>
+          <FormControl mb={4}>
+            <Checkbox
+              isChecked={forceLegacy}
+              onChange={(e) => setForceLegacy(e.target.checked)}
+            >
+              {"Use legacy derivation path (m/44'/0'/...)"}
+            </Checkbox>
+            <FormHelperText>
+              {
+                "Leave unchecked to auto-detect. Tick this only if recovery shows an empty wallet and you know your seed was created in Photonic Wallet before v3.0.0."
+              }
+            </FormHelperText>
           </FormControl>
           <Button
             width="full"

@@ -153,6 +153,14 @@ export type SavedWallet = EncryptedData & {
   address: string;
   swapAddress: string;
   net: NetworkKey;
+  /**
+   * BIP-44 SLIP-0044 coin type used for HD derivation.
+   * - 512 (default for wallets created after v3.0.0)
+   * - 0   (legacy wallets created before v3.0.0)
+   * If undefined, treated as legacy (0) for existing saved wallets and
+   * auto-detected/persisted on next unlock.
+   */
+  coinType?: number;
 };
 
 export interface WalletState {
