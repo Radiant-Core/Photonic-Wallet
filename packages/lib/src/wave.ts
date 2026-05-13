@@ -168,6 +168,23 @@ export function canReclaimWaveName(
 }
 
 /**
+ * Check if a WAVE name token is a duplicate (not the canonical/first registration)
+ */
+export function isWaveDuplicate(token: any): boolean {
+  if (!token || !token.protocols) return false;
+  const hasWaveProtocol = token.protocols.includes(5); // GLYPH_WAVE = 5
+  return hasWaveProtocol && token.is_wave_duplicate === true;
+}
+
+/**
+ * Get warning message for duplicate WAVE name tokens
+ */
+export function getWaveDuplicateWarning(token: any): string | null {
+  if (!isWaveDuplicate(token)) return null;
+  return "⚠️ DUPLICATE WAVE NAME: This is NOT the canonical (first) registration. It is NOT used for name resolution. Consider burning this token.";
+}
+
+/**
  * Create reclaim metadata for burning an expired WAVE name
  */
 export function createWaveReclaimMetadata(

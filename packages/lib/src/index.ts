@@ -23,7 +23,18 @@ export {
 } from "./container";
 export * from "./authority";
 export * from "./wavenaming";
-export * from "./crypto";
+export {
+  createWaveNameMetadata,
+  calculateNameCost,
+  generateCommitment,
+  verifyCommitment,
+  createWaveCommitMetadata,
+  canReclaimWaveName,
+  createWaveReclaimMetadata,
+  isWaveDuplicate,
+  getWaveDuplicateWarning,
+} from './wave';
+export * from './crypto';
 export * from "./encryption";
 export * from "./timelock";
 export * from "./reveal";

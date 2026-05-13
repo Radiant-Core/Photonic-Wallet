@@ -928,11 +928,12 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
         .toArray();
 
       const ref = Outpoint.fromString(record.ref);
+      const refLE = ref.reverse().toString();
 
       const { tx, selected } = transferNonFungible(
         rxdUtxos as SelectableInput[],
         txo,
-        ref.toString(),
+        refLE,
         wallet.value.address,
         transferAddress,
         feeRate.value,

@@ -761,10 +761,10 @@ export function buildVaultTx(
   }
 
   // Add RXD funding inputs
-  let totalIn = tokenUtxos
-    ? tokenUtxos.reduce((sum, u) => sum + u.value, 0)
-    : 0;
-  const requiredAmount = params.value + 1000; // vault output + estimated fee buffer
+  // Note: Token UTXOs don't contribute RXD for fees - they only provide tokens
+  // Only count actual RXD coins toward the funding total
+  let totalIn = 0;
+  const requiredAmount = params.value + 25000; // vault output + fee buffer (0.00025 RXD)
   for (const coin of coins) {
     if (totalIn >= requiredAmount + 5000) break; // enough with fee margin
     tx.from({
@@ -853,12 +853,11 @@ export function buildVestingTx(
   }
 
   // Add RXD funding
-  let totalIn = tokenUtxos
-    ? tokenUtxos.reduce((sum, u) => sum + u.value, 0)
-    : 0;
+  // Note: Token UTXOs don't contribute RXD for fees - they only provide tokens
+  let totalIn = 0;
   const totalRequired = tranches.reduce((sum, t) => sum + t.value, 0);
   for (const coin of coins) {
-    if (totalIn >= totalRequired + 10000) break;
+    if (totalIn >= totalRequired + 25000) break; // include fee buffer
     tx.from({
       address: fromAddress,
       txId: coin.txid,

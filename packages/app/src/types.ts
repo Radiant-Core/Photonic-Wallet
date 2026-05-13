@@ -126,6 +126,8 @@ export interface SmartToken {
   // Encrypted NFT fields (GLYPH_ENCRYPTED protocol)
   crypto?: unknown;        // payload.crypto — encryption metadata stub
   main?: unknown;          // payload.main — on-chain ciphertext or file metadata
+  // WAVE protocol fields
+  is_wave_duplicate?: boolean;  // True if this is a duplicate WAVE name registration
 }
 
 export interface Subscription {
