@@ -372,7 +372,16 @@ export default function ViewDigitalObject({
               )}
             </SimpleGrid>
             {nft && (
-              <TokenDetails glyph={nft} container={container} author={author}>
+              <TokenDetails
+                glyph={nft}
+                container={container}
+                author={author}
+                decryptedBytes={decryptedBytes}
+                onDecrypted={(bytes, mime) => {
+                  setDecryptedBytes(bytes);
+                  setDecryptedMime(mime);
+                }}
+              >
                 <PropertyCard heading={"Output value"}>
                   <Photons value={txo.value} />
                 </PropertyCard>

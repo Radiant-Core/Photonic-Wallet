@@ -13,6 +13,10 @@ import {
   Tooltip,
   Divider,
   IconButton,
+  HStack,
+  Icon,
+  Badge,
+  Box,
 } from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { filesize } from "filesize";
@@ -26,6 +30,9 @@ import createExplorerUrl from "@app/network/createExplorerUrl";
 import { Link } from "react-router-dom";
 import { PropsWithChildren } from "react";
 import ContractAddresses from "./ContractAddresses";
+import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
+import EncryptedContentUnlock from "./EncryptedContentUnlock";
+import { MdLock, MdLockOpen } from "react-icons/md";
 
 function RefProperty({ tokenRef }: { tokenRef: Outpoint }) {
   return (
@@ -58,10 +65,14 @@ export default function TokenDetails({
   author,
   container,
   children,
+  decryptedBytes,
+  onDecrypted,
 }: PropsWithChildren<{
   glyph: SmartToken;
   author?: SmartToken;
   container?: SmartToken;
+  decryptedBytes?: Uint8Array | null;
+  onDecrypted?: (bytes: Uint8Array, mime: string) => void;
 }>) {
   const ref = Outpoint.fromString(glyph.ref);
   const revealRef =
@@ -70,6 +81,16 @@ export default function TokenDetails({
   const containerRef = glyph.container && Outpoint.fromString(glyph.container);
   const hasAttrs = glyph.attrs && Object.keys(glyph.attrs).length > 0;
   const isIPFS = glyph.remote?.u?.startsWith("ipfs://");
+  const isEncrypted = !!(glyph.p?.includes(GLYPH_ENCRYPTED));
+  const isTimelocked = !!(glyph.p?.includes(GLYPH_TIMELOCK));
+  const cryptoObj = glyph.crypto as Record<string, unknown> | undefined;
+  const mainObj = glyph.main as Record<string, unknown> | undefined;
+  const encScheme = (mainObj?.scheme as string) ?? (mainObj?.enc as string) ?? "xchacha20poly1305";
+  const encType = mainObj?.type as string | undefined;
+  const encSize = mainObj?.size as number | undefined;
+  const encLocator = cryptoObj?.locator as string | undefined;
+  const encLocatorNonce = cryptoObj?.locator_nonce as string | undefined;
+  const encMainB = mainObj?.b as string | undefined;
 
   return (
     <div>
@@ -83,6 +104,55 @@ export default function TokenDetails({
             {glyph.description && (
               <PropertyCard heading={"Description"} mb={4}>
                 {glyph.description.substring(0, 1000)}
+              </PropertyCard>
+            )}
+            {isEncrypted && (
+              <PropertyCard
+                heading={
+                  <HStack spacing={2}>
+                    <Icon as={decryptedBytes ? MdLockOpen : MdLock} color={decryptedBytes ? "green.400" : isTimelocked ? "orange.400" : "blue.400"} />
+                    <Text as="span">{decryptedBytes ? "Decrypted" : "Encrypted Content"}</Text>
+                    {!decryptedBytes && (
+                      <Badge colorScheme={isTimelocked ? "orange" : "blue"} fontSize="xs">
+                        {isTimelocked ? "Timelocked" : encScheme.toUpperCase()}
+                      </Badge>
+                    )}
+                  </HStack>
+                }
+                mb={4}
+              >
+                {!decryptedBytes && (
+                  <Box mt={1} mb={3}>
+                    <SimpleGrid columns={[2, 3]} spacing={2}>
+                      {encType && (
+                        <PropertyCard heading="Type">{encType}</PropertyCard>
+                      )}
+                      {encSize !== undefined && (
+                        <PropertyCard heading="Size">{filesize(encSize) as string}</PropertyCard>
+                      )}
+                      {encScheme && (
+                        <PropertyCard heading="Cipher">{encScheme.toUpperCase()}</PropertyCard>
+                      )}
+                    </SimpleGrid>
+                  </Box>
+                )}
+                {decryptedBytes ? (
+                  <Text fontSize="sm" color="green.300">
+                    Content has been decrypted{encType ? ` — ${encType}` : ""}.
+                    Use the Download button above to save the file.
+                  </Text>
+                ) : (
+                  <EncryptedContentUnlock
+                    stub={(glyph.crypto as any) ?? { main: {}, crypto: {} }}
+                    locator={encLocator}
+                    locatorNonce={encLocatorNonce}
+                    mainB={encMainB}
+                    tokenRef={glyph.ref}
+                    onDecrypted={(plaintext) =>
+                      onDecrypted?.(plaintext, encType ?? "application/octet-stream")
+                    }
+                  />
+                )}
               </PropertyCard>
             )}
             <PropertyCard heading={"Radiant ID"} mb={4}>
