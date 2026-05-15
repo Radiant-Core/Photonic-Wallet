@@ -7,10 +7,12 @@ import {
   vaultP2pkhRedeemScript,
   vaultNftRedeemScript,
   vaultFtRedeemScript,
+  vaultFtNativeScript,
   p2shOutputScript,
   p2shAddress,
   vaultScriptHash,
   buildRedeemScript,
+  isNativeVault,
   buildVaultTx,
   parseVaultRedeemScript,
   decodeVaultMetadata,
@@ -167,20 +169,43 @@ describe("vaultNftRedeemScript", () => {
   });
 });
 
-describe("vaultFtRedeemScript", () => {
-  it("contains state separator (bd) and PUSHINPUTREF (d0)", () => {
-    const script = vaultFtRedeemScript(100000, testAddress, testRef);
+describe("vaultFtNativeScript / vaultFtRedeemScript", () => {
+  it("contains CLTV, state separator (bd), PUSHINPUTREF (d0), and P2PKH", () => {
+    const script = vaultFtNativeScript(100000, testAddress, testRef);
     expect(script).toContain("b175"); // CLTV DROP
+    expect(script).toContain("76a914"); // P2PKH
+    expect(script).toContain("88ac"); // OP_EQUALVERIFY OP_CHECKSIG
     expect(script).toContain("bd"); // OP_STATESEPARATOR
     expect(script).toContain("d0"); // OP_PUSHINPUTREF
     expect(script).toContain(testRef);
-    expect(script).toContain("88ac"); // P2PKH within
+  });
+
+  it("is NOT a P2SH script (does not start with a914...87)", () => {
+    const script = vaultFtNativeScript(100000, testAddress, testRef);
+    expect(script).not.toMatch(/^a914[0-9a-f]{40}87$/);
+  });
+
+  it("vaultFtRedeemScript is an alias for vaultFtNativeScript", () => {
+    const a = vaultFtRedeemScript(100000, testAddress, testRef);
+    const b = vaultFtNativeScript(100000, testAddress, testRef);
+    expect(a).toBe(b);
   });
 
   it("rejects invalid ref length", () => {
-    expect(() => vaultFtRedeemScript(100000, testAddress, "")).toThrow(
+    expect(() => vaultFtNativeScript(100000, testAddress, "")).toThrow(
       "72 hex"
     );
+  });
+});
+
+describe("isNativeVault", () => {
+  it("returns true for ft", () => {
+    expect(isNativeVault("ft")).toBe(true);
+  });
+
+  it("returns false for rxd and nft", () => {
+    expect(isNativeVault("rxd")).toBe(false);
+    expect(isNativeVault("nft")).toBe(false);
   });
 });
 
@@ -301,14 +326,16 @@ describe("parseVaultRedeemScript", () => {
     expect(parsed!.ref).toBe(testRef);
   });
 
-  it("parses FT vault script", () => {
+  it("parses FT native vault script", () => {
     const locktime = 400000;
-    const redeem = vaultFtRedeemScript(locktime, testAddress, testRef);
-    const parsed = parseVaultRedeemScript(redeem);
+    const native = vaultFtNativeScript(locktime, testAddress, testRef);
+    const parsed = parseVaultRedeemScript(native);
     expect(parsed).not.toBeNull();
     expect(parsed!.locktime).toBe(locktime);
     expect(parsed!.assetType).toBe("ft");
     expect(parsed!.ref).toBe(testRef);
+    // For native FT vaults, p2shScriptHex is the native script itself (no P2SH wrap)
+    expect(parsed!.p2shScriptHex).toBe(native);
   });
 
   it("parses timestamp-based locktime as time mode", () => {
@@ -569,12 +596,22 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
     value: tokenValue,
   };
 
-  it("returns rawTx, txid, redeemScriptHex, and p2shAddr", () => {
+  it("returns rawTx, txid, and redeemScriptHex", () => {
     const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
     expect(result.rawTx).toBeTruthy();
     expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
     expect(result.redeemScriptHex).toBeTruthy();
-    expect(result.p2shAddr).toMatch(/^3/);
+  });
+
+  it("FT vault output is the native locking script (not P2SH)", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const expectedNativeScript = vaultFtNativeScript(locktime, fromAddress, testRef);
+    // @ts-ignore
+    const tx = new Transaction(result.rawTx);
+    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
+    expect(outputScripts).toContain(expectedNativeScript);
+    // Must NOT be a P2SH script
+    expect(outputScripts[0]).not.toMatch(/^a914[0-9a-f]{40}87$/);
   });
 
   it("includes token UTXO as the first input", () => {
@@ -585,23 +622,37 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
     expect(firstInputTxid).toBe(tokenUtxo.txid);
   });
 
-  it("redeemScript is an FT vault script (contains bd statesep and d0 pushinputref)", () => {
+  it("token input scriptSig is non-empty (signed)", () => {
     const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    // @ts-ignore
+    const tx = new Transaction(result.rawTx);
+    const tokenInputScript = tx.inputs[0].script.toHex();
+    // Must have sig + pubkey pushed — not empty
+    expect(tokenInputScript.length).toBeGreaterThan(0);
+    // A P2PKH scriptSig is min 106 bytes = 212 hex chars (70-byte DER sig + pushes + 33-byte pubkey)
+    expect(tokenInputScript.length).toBeGreaterThanOrEqual(212);
+  });
+
+  it("redeemScript is an FT vault native script (contains b175, bd, d0, ref)", () => {
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    expect(result.redeemScriptHex).toContain("b175"); // CLTV DROP
     expect(result.redeemScriptHex).toContain("bd"); // OP_STATESEPARATOR
     expect(result.redeemScriptHex).toContain("d0"); // OP_PUSHINPUTREF
     expect(result.redeemScriptHex).toContain(testRef);
   });
 
-  it("P2SH output script matches p2shOutputScript of redeemScript", () => {
+  it("parseVaultRedeemScript round-trips the FT native script", () => {
     const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
-    const expectedP2sh = p2shOutputScript(result.redeemScriptHex);
-    // @ts-ignore
-    const tx = new Transaction(result.rawTx);
-    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
-    expect(outputScripts).toContain(expectedP2sh);
+    const parsed = parseVaultRedeemScript(result.redeemScriptHex);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.assetType).toBe("ft");
+    expect(parsed!.locktime).toBe(locktime);
+    expect(parsed!.ref).toBe(testRef);
+    // p2shScriptHex == redeemScriptHex for native FT (no P2SH wrapping)
+    expect(parsed!.p2shScriptHex).toBe(result.redeemScriptHex);
   });
 
-  it("works without tokenUtxos (no token input — for RXD-only fallback)", () => {
+  it("works without tokenUtxos (RXD-only fallback)", () => {
     const rxdParams: VaultParams = {
       mode: "block",
       locktime,
@@ -611,8 +662,7 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
     };
     const result = buildVaultTx([rxdCoin], fromAddress, wif, rxdParams, 1);
     expect(result.rawTx).toBeTruthy();
-    // RXD script must not contain FT (bdd0 = OP_STATESEPARATOR OP_PUSHINPUTREF)
-    // or NFT (d875 = OP_PUSHINPUTREFSINGLETON ... OP_DROP) opcode sequences
+    // RXD script must not contain FT (bdd0) or NFT (d875) opcode sequences
     expect(result.redeemScriptHex).not.toContain("bdd0");
     expect(result.redeemScriptHex).not.toContain("d875");
   });

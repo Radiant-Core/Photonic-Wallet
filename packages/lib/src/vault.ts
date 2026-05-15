@@ -254,18 +254,25 @@ export function vaultNftRedeemScript(
 }
 
 /**
- * Build CLTV + FT redeem script.
+ * Build a native CLTV + FT locking script.
  *
- * Script:
+ * FT vaults CANNOT use P2SH because OP_CODESCRIPTBYTECODE_UTXO reads the
+ * on-chain scriptPubKey (which for P2SH is `OP_HASH160 <hash> OP_EQUAL`).
+ * The FT conservation opcodes would then hash the P2SH wrapper, find no
+ * matching outputs, and fail.
+ *
+ * Instead we embed CLTV directly into a native output script:
+ *
  *   <locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP
  *   OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
  *   OP_STATESEPARATOR
  *   OP_PUSHINPUTREF <ref> <FT conservation opcodes>
  *
- * The FT conservation opcodes enforce that the total value of outputs with the
- * same code script hash is >= the total value of inputs (no token inflation).
+ * This is the same as a standard FT script but with CLTV+DROP prepended.
+ * OP_CODESCRIPTBYTECODE_UTXO returns this exact script, so conservation works.
+ * Spending requires only a standard P2PKH scriptSig: <sig> <pubkey>.
  */
-export function vaultFtRedeemScript(
+export function vaultFtNativeScript(
   locktime: number,
   recipientAddress: string,
   refLE: string
@@ -290,6 +297,15 @@ export function vaultFtRedeemScript(
   );
 
   return script.toHex();
+}
+
+/** @deprecated Use vaultFtNativeScript instead */
+export function vaultFtRedeemScript(
+  locktime: number,
+  recipientAddress: string,
+  refLE: string
+): string {
+  return vaultFtNativeScript(locktime, recipientAddress, refLE);
 }
 
 // ============================================================================
@@ -336,7 +352,8 @@ export function vaultScriptHash(redeemScriptHex: string): string {
 // ============================================================================
 
 /**
- * Build the appropriate redeem script for a given vault params.
+ * Build the appropriate locking script for a given vault params.
+ * RXD and NFT use P2SH (redeem script). FT uses a native output script.
  */
 export function buildRedeemScript(params: VaultParams): string {
   switch (params.assetType) {
@@ -351,7 +368,7 @@ export function buildRedeemScript(params: VaultParams): string {
       );
     case "ft":
       if (!params.ref) throw new Error("FT vault requires a ref");
-      return vaultFtRedeemScript(
+      return vaultFtNativeScript(
         params.locktime,
         params.recipientAddress,
         params.ref
@@ -361,12 +378,20 @@ export function buildRedeemScript(params: VaultParams): string {
   }
 }
 
+/**
+ * Returns true if this vault asset type uses a native output script
+ * (i.e. the locking script IS the output script, not a P2SH redeem script).
+ */
+export function isNativeVault(assetType: VaultAssetType): boolean {
+  return assetType === "ft";
+}
+
 // ============================================================================
 // Vault Script Parsing
 // ============================================================================
 
 /**
- * Parse a redeem script to determine if it's a vault script and extract params.
+ * Parse a vault locking script and extract params.
  *
  * Script hex structure (after Script.add(Buffer)):
  *   <pushLen> <locktime-LE-bytes> b1 75 ... (CLTV DROP + inner script)
@@ -375,9 +400,9 @@ export function buildRedeemScript(params: VaultParams): string {
  * The push length byte is followed by exactly that many locktime bytes.
  *
  * Patterns after CLTV DROP (b175):
- *   RXD:  76 a9 14 <20-byte-pkh> 88 ac
- *   NFT:  d8 <36-byte-ref> 75 76 a9 14 <20-byte-pkh> 88 ac
- *   FT:   76 a9 14 <20-byte-pkh> 88 ac bd d0 <36-byte-ref> <FT conservation>
+ *   RXD:  76 a9 14 <20-byte-pkh> 88 ac           → P2SH redeem script
+ *   NFT:  d8 <36-byte-ref> 75 76 a9 14 <40-char pkh> 88 ac  → P2SH redeem script
+ *   FT:   76 a9 14 <40-char pkh> 88 ac bd d0 <36-byte-ref> <conservation> → native output script
  */
 export function parseVaultRedeemScript(
   scriptHex: string
@@ -404,7 +429,7 @@ export function parseVaultRedeemScript(
   const { locktime, rest } = result;
   const mode: VaultMode = locktime < LOCKTIME_THRESHOLD ? "block" : "time";
 
-  // NFT: d8 <72-char ref> 75 76 a9 14 <40-char pkh> 88 ac
+  // NFT: d8 <72-char ref> 75 76 a9 14 <40-char pkh> 88 ac  → P2SH redeem script
   const nftPattern = /^d8([0-9a-f]{72})7576a914([0-9a-f]{40})88ac$/;
   const nftMatch = rest.match(nftPattern);
   if (nftMatch) {
@@ -419,7 +444,8 @@ export function parseVaultRedeemScript(
     };
   }
 
-  // FT: 76 a9 14 <40-char pkh> 88 ac bd d0 <72-char ref> <conservation tail>
+  // FT: native output script (not P2SH)
+  // 76 a9 14 <40-char pkh> 88 ac bd d0 <72-char ref> <conservation tail>
   const ftPattern =
     /^76a914([0-9a-f]{40})88acbdd0([0-9a-f]{72})dec0e9aa76e378e4a269e69d$/;
   const ftMatch = rest.match(ftPattern);
@@ -430,12 +456,14 @@ export function parseVaultRedeemScript(
       assetType: "ft",
       recipientPkh: ftMatch[1],
       ref: ftMatch[2],
+      // For native FT vaults, redeemScriptHex IS the output script itself
       redeemScriptHex: scriptHex,
-      p2shScriptHex: p2shOutputScript(scriptHex),
+      // No P2SH wrapping — p2shScriptHex is the native script itself
+      p2shScriptHex: scriptHex,
     };
   }
 
-  // RXD: 76 a9 14 <40-char pkh> 88 ac
+  // RXD: 76 a9 14 <40-char pkh> 88 ac  → P2SH redeem script
   const rxdPattern = /^76a914([0-9a-f]{40})88ac$/;
   const rxdMatch = rest.match(rxdPattern);
   if (rxdMatch) {
@@ -777,10 +805,12 @@ export function buildVaultTx(
     totalIn += coin.value;
   }
 
-  // Vault output (P2SH)
+  // Vault output: P2SH for RXD/NFT, native script for FT
+  const vaultOutputScript =
+    params.assetType === "ft" ? redeemScriptHex : p2shScript;
   tx.addOutput(
     new Transaction.Output({
-      script: p2shScript,
+      script: vaultOutputScript,
       satoshis: params.value,
     })
   );
@@ -797,7 +827,33 @@ export function buildVaultTx(
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
   tx.fee(Math.max(20000, Math.ceil(tx._estimateSize() * feeRate)));
+  // Sign the RXD funding inputs (added via tx.from)
   tx.sign(privKey);
+
+  // Sign token inputs manually (added via addInput, not tx.from, so tx.sign skips them)
+  if (tokenUtxos && tokenUtxos.length > 0) {
+    const sigType =
+      crypto.Signature.SIGHASH_ALL | crypto.Signature.SIGHASH_FORKID;
+    for (let i = 0; i < tokenUtxos.length; i++) {
+      // @ts-ignore — Sighash.sign exists at runtime
+      const tokenSig = Transaction.Sighash.sign(
+        tx,
+        privKey,
+        sigType,
+        i,
+        // @ts-ignore — fromHex exists at runtime
+        Script.fromHex(tokenUtxos[i].script),
+        // @ts-ignore — BN accepts string at runtime
+        new crypto.BN(`${tokenUtxos[i].value}`)
+      );
+      const tokenScriptSig = Script.empty()
+        .add(Buffer.concat([tokenSig.toBuffer(), Buffer.from([sigType])]))
+        .add(privKey.toPublicKey().toBuffer());
+      // @ts-ignore — setScript exists at runtime
+      tx.inputs[i].setScript(tokenScriptSig);
+    }
+  }
+
   tx.seal();
 
   const rawTx = tx.toString();
@@ -976,14 +1032,18 @@ export function claimVaultTx(
   // @ts-ignore — nLockTime exists at runtime
   tx.nLockTime = parsed.locktime;
 
-  // Add vault input with P2SH output script
-  const p2shScript = p2shOutputScript(vaultUtxo.redeemScriptHex);
+  // For P2SH vaults (RXD, NFT): on-chain scriptPubKey is the P2SH output script.
+  // For native FT vaults: on-chain scriptPubKey IS the vault locking script.
+  const onChainScript =
+    parsed.assetType === "ft"
+      ? vaultUtxo.redeemScriptHex
+      : p2shOutputScript(vaultUtxo.redeemScriptHex);
   const input = new Transaction.Input({
     prevTxId: vaultUtxo.txid,
     outputIndex: vaultUtxo.vout,
     script: new Script(),
     output: new Transaction.Output({
-      script: p2shScript,
+      script: onChainScript,
       satoshis: vaultUtxo.value,
     }),
   });
@@ -1072,32 +1132,49 @@ export function claimVaultTx(
     }
   }
 
-  // Sign the vault input with custom scriptSig
-  // For P2SH: scriptSig = <sig> <pubkey> <serialized-redeem-script>
-  const redeemScriptBuf = Buffer.from(vaultUtxo.redeemScriptHex, "hex");
   const sigType =
     crypto.Signature.SIGHASH_ALL | crypto.Signature.SIGHASH_FORKID;
 
-  // Sign using the redeem script as the subscript
-  // @ts-ignore — Sighash.sign accepts these args at runtime
-  const sig = Transaction.Sighash.sign(
-    tx,
-    privKey,
-    sigType,
-    0, // input index for vault
-    // @ts-ignore — fromHex exists at runtime
-    Script.fromHex(vaultUtxo.redeemScriptHex),
-    // @ts-ignore — BN accepts string at runtime
-    new crypto.BN(`${vaultUtxo.value}`)
-  );
-
-  const scriptSig = Script.empty()
-    .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
-    .add(pubKey.toBuffer())
-    .add(redeemScriptBuf);
-
-  // @ts-ignore — setScript exists at runtime
-  tx.inputs[0].setScript(scriptSig);
+  if (parsed.assetType === "ft") {
+    // Native FT vault: scriptSig = <sig> <pubkey> (standard P2PKH)
+    // The native output script handles CLTV+DROP and FT conservation directly.
+    // @ts-ignore — Sighash.sign accepts these args at runtime
+    const sig = Transaction.Sighash.sign(
+      tx,
+      privKey,
+      sigType,
+      0,
+      // @ts-ignore — fromHex exists at runtime
+      Script.fromHex(vaultUtxo.redeemScriptHex),
+      // @ts-ignore — BN accepts string at runtime
+      new crypto.BN(`${vaultUtxo.value}`)
+    );
+    const scriptSig = Script.empty()
+      .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
+      .add(pubKey.toBuffer());
+    // @ts-ignore — setScript exists at runtime
+    tx.inputs[0].setScript(scriptSig);
+  } else {
+    // P2SH vault (RXD, NFT): scriptSig = <sig> <pubkey> <serialized-redeem-script>
+    const redeemScriptBuf = Buffer.from(vaultUtxo.redeemScriptHex, "hex");
+    // @ts-ignore — Sighash.sign accepts these args at runtime
+    const sig = Transaction.Sighash.sign(
+      tx,
+      privKey,
+      sigType,
+      0,
+      // @ts-ignore — fromHex exists at runtime
+      Script.fromHex(vaultUtxo.redeemScriptHex),
+      // @ts-ignore — BN accepts string at runtime
+      new crypto.BN(`${vaultUtxo.value}`)
+    );
+    const scriptSig = Script.empty()
+      .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
+      .add(pubKey.toBuffer())
+      .add(redeemScriptBuf);
+    // @ts-ignore — setScript exists at runtime
+    tx.inputs[0].setScript(scriptSig);
+  }
 
   // Sign any additional funding inputs (standard P2PKH)
   if (additionalFundingUtxos && additionalFundingUtxos.length > 0) {
