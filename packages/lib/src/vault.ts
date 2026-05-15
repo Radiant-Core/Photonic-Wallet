@@ -1027,8 +1027,16 @@ export function claimVaultTx(
   }
 
   // Calculate fee
-  // Estimate: base tx + P2SH input (~250 bytes for redeem script + sig) + output
-  const estimatedSize = 200 + vaultUtxo.redeemScriptHex.length / 2 + 107 + 34;
+  // Properly account for all inputs (vault + funding) and outputs
+  const fundingInputs = additionalFundingUtxos?.length || 0;
+  const baseTxSize = 10; // version (4) + locktime (4) + input/output count (2)
+  const inputSize = 150; // avg: txid (32) + vout (4) + scriptSig (~100) + sequence (4)
+  const vaultInputSize = vaultUtxo.redeemScriptHex.length / 2 + 100; // larger due to redeem script + sig
+  const outputSize = 40; // script length + satoshis
+  const totalInputsSize = vaultInputSize + fundingInputs * inputSize;
+  const hasChange = additionalFundingUtxos && additionalFundingUtxos.length > 0;
+  const outputCount = hasChange ? 2 : 1;
+  const estimatedSize = baseTxSize + totalInputsSize + outputCount * outputSize;
   const fee = Math.max(20000, Math.ceil(estimatedSize * feeRate));
 
   const outputValue = vaultUtxo.value - fee;

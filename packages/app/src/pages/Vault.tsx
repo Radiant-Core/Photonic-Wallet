@@ -877,6 +877,7 @@ export default function VaultPage() {
 
       // For NFT/FT vaults the locked value may be dust (546 photons).
       // Fetch RXD UTXOs to cover the claim transaction fee.
+      // Limit to only what's needed (~50k photons per input at 200 sat/byte).
       let additionalFundingUtxos:
         | { txid: string; vout: number; script: string; value: number }[]
         | undefined;
@@ -884,8 +885,19 @@ export default function VaultPage() {
         const rxdTxos = await db.txo
           .where({ contractType: ContractType.RXD, spent: 0 })
           .toArray();
-        if (rxdTxos.length > 0) {
-          additionalFundingUtxos = rxdTxos.map((t) => ({
+        // Only use enough UTXOs to cover estimated fee (~0.0005 RXD at 200 sat/byte)
+        // Sort by value descending to minimize inputs needed
+        const sortedTxos = rxdTxos.sort((a, b) => b.value - a.value);
+        const neededValue = 50000; // 0.0005 RXD buffer for fee
+        let accumulated = 0;
+        const selectedTxos: typeof sortedTxos = [];
+        for (const txo of sortedTxos) {
+          if (accumulated >= neededValue) break;
+          selectedTxos.push(txo);
+          accumulated += txo.value;
+        }
+        if (selectedTxos.length > 0) {
+          additionalFundingUtxos = selectedTxos.map((t) => ({
             txid: t.txid,
             vout: t.vout,
             script: t.script,
