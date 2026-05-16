@@ -20,6 +20,9 @@ import {
   useToast,
   Flex,
   IconButton,
+  Text,
+  VStack,
+  Divider,
 } from "@chakra-ui/react";
 import { photonsToRXD } from "@lib/format";
 import { useLiveQuery } from "dexie-react-hooks";

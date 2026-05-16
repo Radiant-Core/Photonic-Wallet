@@ -28,6 +28,7 @@ import {
   Flex,
   Badge,
   Text,
+  Divider,
   Spinner,
   Icon,
   HStack,

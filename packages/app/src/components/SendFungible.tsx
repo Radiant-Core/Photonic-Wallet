@@ -28,6 +28,7 @@ import {
   Badge,
   Text,
   Spinner,
+  Divider,
   Icon,
   HStack,
 } from "@chakra-ui/react";
