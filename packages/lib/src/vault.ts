@@ -827,9 +827,11 @@ export function buildVaultTx(
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
-  const calculatedFee = Math.ceil(estimatedSize * feeRate);
+  // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
+  const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
+  const calculatedFee = Math.ceil((estimatedSize + tokenScriptSize) * feeRate);
   // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
-  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  const minRelayFee = Math.ceil((estimatedSize + tokenScriptSize) * 1000);
   const finalFee = Math.max(minRelayFee, calculatedFee);
   tx.fee(finalFee);
   // Sign the RXD funding inputs (added via tx.from)
@@ -985,9 +987,11 @@ export function buildVestingTx(
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
-  const calculatedFee = Math.ceil(estimatedSize * feeRate);
+  // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
+  const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
+  const calculatedFee = Math.ceil((estimatedSize + tokenScriptSize) * feeRate);
   // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
-  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  const minRelayFee = Math.ceil((estimatedSize + tokenScriptSize) * 1000);
   const finalFee = Math.max(minRelayFee, calculatedFee);
   tx.fee(finalFee);
   tx.sign(privKey);

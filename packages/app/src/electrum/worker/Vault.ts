@@ -172,6 +172,12 @@ export class VaultWorker implements Subscription {
    */
   async checkVaultSpent(vault: VaultRecord) {
     try {
+      // Don't check spent status for unconfirmed vaults (race condition with indexing)
+      if (!vault.height || vault.height === 0) {
+        console.debug(`[Vault] Skipping spent check for unconfirmed vault: ${vault.txid}:${vault.vout}`);
+        return;
+      }
+
       const scriptHash = vaultScriptHash(vault.redeemScriptHex);
       const utxos = (await this.electrum.client?.request(
         "blockchain.scripthash.listunspent",
