@@ -459,19 +459,25 @@ export function wrapCEK(
   recipientPublicKey: { x25519: Uint8Array; mlkem?: Uint8Array },
   aad?: Uint8Array
 ): { wrappedCEK: Uint8Array; ephemeral: EncapsulatedSecret } {
+  // SECURITY FIX (C8): Determine PQ mode and bind to HKDF info
+  // This prevents downgrade attacks by ensuring hybrid and classical modes
+  // produce different KEKs - an attacker cannot strip ML-KEM and still decrypt
+  const isHybrid = recipientPublicKey.mlkem && recipientPublicKey.mlkem.length > 0;
+  const hkdfInfo = isHybrid
+    ? new TextEncoder().encode("glyph-kek-hybrid-v1")
+    : new TextEncoder().encode("glyph-kek-classical-v1");
+
   // Encapsulate shared secret (hybrid if mlkem key provided)
   const ephemeral = encapsulateHybrid(
     recipientPublicKey.x25519,
-    recipientPublicKey.mlkem && recipientPublicKey.mlkem.length > 0
-      ? recipientPublicKey.mlkem
-      : undefined
+    isHybrid ? recipientPublicKey.mlkem : undefined
   );
 
-  // Derive KEK from shared secret
+  // Derive KEK from shared secret with mode-bound HKDF info
   const kek = deriveKeyHKDF(
     ephemeral.sharedSecret,
     undefined,
-    new TextEncoder().encode("glyph-kek-v1"),
+    hkdfInfo,
     32
   );
 
@@ -499,6 +505,13 @@ export function unwrapCEK(
   recipientKeyPair: HybridKeyPair,
   aad?: Uint8Array
 ): Uint8Array {
+  // SECURITY FIX (C8): Determine PQ mode and bind to HKDF info
+  // Must match the mode used during wrapCEK - hybrid vs classical produce different KEKs
+  const isHybrid = recipientKeyPair.mlkem !== undefined;
+  const hkdfInfo = isHybrid
+    ? new TextEncoder().encode("glyph-kek-hybrid-v1")
+    : new TextEncoder().encode("glyph-kek-classical-v1");
+
   // Decapsulate shared secret
   const encaps: EncapsulatedSecret = {
     ...ephemeral,
@@ -506,11 +519,11 @@ export function unwrapCEK(
   };
   const sharedSecret = decapsulateHybrid(encaps, recipientKeyPair);
 
-  // Derive KEK
+  // Derive KEK with mode-bound HKDF info
   const kek = deriveKeyHKDF(
     sharedSecret,
     undefined,
-    new TextEncoder().encode("glyph-kek-v1"),
+    hkdfInfo,
     32
   );
 

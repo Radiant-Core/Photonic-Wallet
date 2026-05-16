@@ -9,7 +9,9 @@ import { HDKey } from "@scure/bip32";
 import { bytesToHex } from "@noble/hashes/utils";
 import { Wallet } from "./types";
 
-const derivationPath = "m/44'/0'/0'/0/0";
+// Use Radiant coin type 512 (BIP44 standard for RXD)
+// See: Security Audit H7 - CLI vs App address derivation mismatch fix
+const derivationPath = "m/44'/512'/0'/0/0";
 
 // ESM compatibility
 const { Networks, PrivateKey } = rjs;

@@ -126,6 +126,44 @@ export function generateEncryptionKey(): Uint8Array {
   return randomBytes(32); // 256 bits
 }
 
+// ============================================================================
+// SECURITY FIX (C5): Double SHA256 for transaction verification
+// ============================================================================
+
+/**
+ * Double SHA256 hash (dsha256) - Bitcoin/Radiant standard hash.
+ * Used for transaction ID (txid) calculation and verification.
+ *
+ * SECURITY FIX (C5): This enables verification of transaction IDs
+ * returned by ElectrumX to prevent transaction poisoning attacks.
+ *
+ * @param data Input data to hash
+ * @returns 32-byte double SHA256 hash
+ */
+export function dsha256(data: Uint8Array): Uint8Array {
+  return sha256(sha256(data));
+}
+
+/**
+ * Verify that a transaction's txid matches its content.
+ *
+ * SECURITY FIX (C5): Verifies that `blockchain.transaction.get` responses
+ * haven't been tampered with by checking the transaction hash matches the
+ * claimed txid. This prevents transaction poisoning from malicious servers.
+ *
+ * @param rawTx Raw transaction hex bytes
+ * @param claimedTxid The txid claimed by the server
+ * @returns true if the transaction hash matches the claimed txid
+ */
+export function verifyTransactionHash(
+  rawTx: Uint8Array,
+  claimedTxid: string
+): boolean {
+  const computedHash = dsha256(rawTx);
+  const computedTxid = bytesToHex(computedHash.reverse()); // txid is little-endian hex
+  return computedTxid === claimedTxid.toLowerCase();
+}
+
 /**
  * Encrypt content for public key (ECIES-like)
  * Simplified version using shared secret

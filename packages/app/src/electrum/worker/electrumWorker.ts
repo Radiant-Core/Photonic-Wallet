@@ -7,6 +7,7 @@ import { ElectrumStatus, VaultRecord } from "@app/types";
 import { ElectrumRefResponse } from "@lib/types";
 import { findSwaps } from "./findSwaps";
 import { isUtxoUnspent } from "./isUtxoUnspent";
+import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 
 type Timer = ReturnType<typeof setTimeout> | null;
 
@@ -113,10 +114,38 @@ const worker = {
     )) as ElectrumRefResponse;
   },
   async getTransaction(txid: string) {
-    return (await electrum.client?.request(
+    const rawTx = (await electrum.client?.request(
       "blockchain.transaction.get",
       txid
     )) as string;
+
+    // SECURITY FIX (C5): Verify transaction hash matches txid
+    // This prevents transaction poisoning from malicious servers
+    if (rawTx) {
+      try {
+        const txBytes = hexToBytes(rawTx);
+        if (!verifyTransactionHash(txBytes, txid)) {
+          console.error(
+            `[getTransaction] SECURITY ALERT: Transaction hash mismatch for ${txid}`
+          );
+          throw new Error(
+            "Transaction verification failed: hash does not match txid"
+          );
+        }
+      } catch (verifyError) {
+        console.error(
+          `[getTransaction] Transaction verification error:`,
+          verifyError
+        );
+        throw new Error(
+          `Transaction verification failed: ${
+            verifyError instanceof Error ? verifyError.message : String(verifyError)
+          }`
+        );
+      }
+    }
+
+    return rawTx;
   },
   isReady() {
     return this.ready;
@@ -262,12 +291,16 @@ const worker = {
     }
   },
   async checkWaveAvailable(name: string): Promise<boolean> {
+    // Normalize input: strip .rxd suffix if present to get bare name
+    const parts = name.toLowerCase().split(".");
+    const bareName = parts[0];
+
     // Try RPC via connected server first
     try {
       if (electrum.client && electrum.connected()) {
         const result = await electrum.client.request(
           "wave.check_available",
-          name
+          bareName
         ) as { available: boolean } | null | undefined;
 
         if (result && typeof result === 'object' && 'available' in result) {
@@ -292,7 +325,7 @@ const worker = {
             const data = JSON.parse(ev.data as string);
             if (!versionSent) {
               versionSent = true;
-              ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "wave.check_available", params: [name] }));
+              ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "wave.check_available", params: [bareName] }));
               return;
             }
             clearTimeout(timeout);
@@ -313,8 +346,6 @@ const worker = {
     }
 
     // Fall back to local DB check
-    const parts = name.toLowerCase().split(".");
-    const bareName = parts[0];
     const domain = parts[1] || "rxd";
     const GLYPH_WAVE = 11;
 

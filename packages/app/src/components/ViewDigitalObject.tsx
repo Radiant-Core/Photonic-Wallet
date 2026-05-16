@@ -305,7 +305,9 @@ export default function ViewDigitalObject({
                   as={DownloadLink}
                   data={decryptedBytes}
                   filename={`decrypted.${mime.getExtension(decryptedMime) || "dat"}`}
-                  mimeType={decryptedMime}
+                  // SECURITY: Force octet-stream to prevent browser from executing malicious content
+                  // See: Security Audit H11 - MIME sniffing protection
+                  mimeType="application/octet-stream"
                   leftIcon={<ActionIcon as={DownloadIcon} />}
                   colSpan={2}
                 >

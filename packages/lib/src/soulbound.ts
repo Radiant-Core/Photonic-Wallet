@@ -29,9 +29,10 @@ export function soulboundNftScript(
   const addr = Address.fromString(ownerAddress);
   const pubkeyhash = addr.hashBuffer.toString("hex");
 
+  // Standard P2PKH template: OP_DUP OP_HASH160 <pubkeyhash> OP_EQUALVERIFY OP_CHECKSIG
   script.add(
     Script.fromASM(
-      `${pubkeyhash} OP_DUP OP_HASH160 OP_EQUALVERIFY OP_CHECKSIG`
+      `OP_DUP OP_HASH160 ${pubkeyhash} OP_EQUALVERIFY OP_CHECKSIG`
     )
   );
 

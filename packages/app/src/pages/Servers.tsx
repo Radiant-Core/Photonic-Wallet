@@ -24,6 +24,44 @@ import db from "@app/db";
 import { PromiseExtended } from "dexie";
 import Card from "@app/components/Card";
 import { wallet } from "@app/signals";
+import { useToast } from "@chakra-ui/react";
+
+/** Maximum number of Electrum servers allowed per network */
+const MAX_SERVERS = 10;
+
+/** Validate Electrum server URL - must use wss:// scheme for security */
+function validateServerUrl(url: string): { valid: boolean; error?: string } {
+  if (!url || typeof url !== "string") {
+    return { valid: false, error: "Server URL is required" };
+  }
+
+  url = url.trim();
+
+  // Must use secure WebSocket scheme
+  if (!url.startsWith("wss://")) {
+    if (url.startsWith("ws://")) {
+      return {
+        valid: false,
+        error: "Insecure WebSocket (ws://) is not allowed. Use wss:// for secure connections.",
+      };
+    }
+    return {
+      valid: false,
+      error: "Server URL must use wss:// scheme (e.g., wss://electrumx.example.com:50002)",
+    };
+  }
+
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.protocol !== "wss:") {
+      return { valid: false, error: "URL must use wss:// protocol" };
+    }
+  } catch {
+    return { valid: false, error: "Invalid URL format" };
+  }
+
+  return { valid: true };
+}
 
 function NewControls() {
   const { getEditButtonProps } = useEditableControls();
@@ -65,16 +103,52 @@ export default function Servers() {
   );
   const [newKey, setNewKey] = useState(1);
 
+  const toast = useToast();
   const servers = allServers[wallet.value.net];
 
   const newServer = (event: FocusEvent<HTMLInputElement>) => {
+    const value = event.target.value.trim();
+    if (!value) return;
+
+    // Validate URL scheme
+    const validation = validateServerUrl(value);
+    if (!validation.valid) {
+      toast({
+        title: "Invalid Server URL",
+        description: validation.error,
+        status: "error",
+        duration: 5000,
+      });
+      setNewKey(newKey + 1); // Reset the input
+      return;
+    }
+
+    // Check max servers limit
+    if (servers.length >= MAX_SERVERS) {
+      toast({
+        title: "Server Limit Reached",
+        description: `Maximum ${MAX_SERVERS} servers allowed`,
+        status: "warning",
+        duration: 3000,
+      });
+      setNewKey(newKey + 1);
+      return;
+    }
+
     db.kvp.put(
       {
         ...allServers,
-        [wallet.value.net]: [event.target.value, ...servers],
+        [wallet.value.net]: [value, ...servers],
       },
       "servers"
     );
+
+    toast({
+      title: "Server Added",
+      description: value,
+      status: "success",
+      duration: 2000,
+    });
 
     // Recreate new editable by changing the key
     setNewKey(newKey + 1);
@@ -97,9 +171,30 @@ export default function Servers() {
   };
 
   const editServer = (index: number, value: string) => {
+    const trimmedValue = value.trim();
+
+    // Validate URL scheme
+    const validation = validateServerUrl(trimmedValue);
+    if (!validation.valid) {
+      toast({
+        title: "Invalid Server URL",
+        description: validation.error,
+        status: "error",
+        duration: 5000,
+      });
+      return; // Don't save invalid URL
+    }
+
     const edited = servers.slice();
-    edited[index] = value;
+    edited[index] = trimmedValue;
     db.kvp.put({ ...allServers, [wallet.value.net]: edited }, "servers");
+
+    toast({
+      title: "Server Updated",
+      description: trimmedValue,
+      status: "success",
+      duration: 2000,
+    });
   };
 
   return (

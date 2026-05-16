@@ -38,6 +38,7 @@ export default async function walletCreate(
     await tryMnemonic(mnemonic);
     const encrypted = await encrypt(new TextEncoder().encode(mnemonic), pw);
     const hex = {
+      version: 0x02,
       ciphertext: bytesToHex(new Uint8Array(encrypted.ciphertext)),
       salt: bytesToHex(encrypted.salt),
       iv: bytesToHex(encrypted.iv),

@@ -13,10 +13,10 @@ photonic-wallet.com {
     header {
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
-        X-XSS-Protection "1; mode=block"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://explorer.radiantblockchain.org https://testnet.radiantexplorer.com https://swap.radiantcore.org https://*.ipfs.nftstorage.link wss://*.radiant4people.com wss://*.radiantcore.org wss://*.bladenet.online; img-src 'self' data: blob: https://*.ipfs.nftstorage.link https://nft.storage; font-src 'self' data:; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
     }
 
     # Gzip compression

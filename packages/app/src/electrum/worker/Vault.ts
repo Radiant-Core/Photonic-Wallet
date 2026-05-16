@@ -9,6 +9,7 @@ import { Worker } from "./electrumWorker";
 import { vaultScriptHash, recoverVaultsFromTx } from "@lib/vault";
 import { p2pkhScriptHash } from "@lib/script";
 import { ElectrumUtxo } from "@lib/types";
+import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 
 /**
  * VaultWorker monitors vault P2SH UTXOs via ElectrumX subscriptions.
@@ -325,6 +326,23 @@ export class VaultWorker implements Subscription {
           if (!rawTx) {
             timeoutCount++;
             continue;
+          }
+
+          // SECURITY FIX (C5): Verify transaction hash matches txid
+          // This prevents transaction poisoning from malicious servers
+          try {
+            const txBytes = hexToBytes(rawTx);
+            if (!verifyTransactionHash(txBytes, txid)) {
+              console.error(
+                `[Vault] SECURITY ALERT: Transaction hash mismatch for ${txid}`
+              );
+              timeoutCount++;
+              continue; // Skip this potentially malicious transaction
+            }
+          } catch (verifyError) {
+            console.error(`[Vault] Transaction verification failed for ${txid}:`, verifyError);
+            timeoutCount++;
+            continue; // Skip on verification failure
           }
 
           if (isDebug) {

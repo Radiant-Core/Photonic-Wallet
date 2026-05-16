@@ -18,6 +18,7 @@ import {
 import { buildUpdateTXOs } from "./updateTxos";
 import db from "@app/db";
 import Outpoint, { reverseRef } from "@lib/Outpoint";
+import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 import {
   extractRevealPayload,
   filterAttrs,
@@ -272,8 +273,27 @@ export class NFTWorker implements Subscription {
           revealTxId
         )) as string;
 
-        // Store in cache
-        await opfs.putTx(revealTxId, hex);
+        // SECURITY FIX (C5): Verify transaction hash matches txid
+        // This prevents transaction poisoning from malicious servers
+        if (hex) {
+          try {
+            const txBytes = hexToBytes(hex);
+            if (!verifyTransactionHash(txBytes, revealTxId)) {
+              console.error(
+                `[NFT] SECURITY ALERT: Transaction hash mismatch for reveal ${revealTxId}`
+              );
+              hex = ""; // Clear to skip processing
+            }
+          } catch (verifyError) {
+            console.error(`[NFT] Transaction verification failed for ${revealTxId}:`, verifyError);
+            hex = ""; // Clear to skip processing
+          }
+        }
+
+        // Store in cache only if verification passed
+        if (hex) {
+          await opfs.putTx(revealTxId, hex);
+        }
       }
 
       if (hex) {
@@ -309,7 +329,25 @@ export class NFTWorker implements Subscription {
           "blockchain.transaction.get",
           refBE.getTxid()
         )) as string;
-        // Store in cache
+
+        // SECURITY FIX (C5): Verify transaction hash matches txid
+        // This prevents transaction poisoning from malicious servers
+        if (hex) {
+          try {
+            const txBytes = hexToBytes(hex);
+            if (!verifyTransactionHash(txBytes, refBE.getTxid())) {
+              console.error(
+                `[NFT] SECURITY ALERT: Transaction hash mismatch for ref ${refBE.getTxid()}`
+              );
+              hex = ""; // Clear to skip processing
+            }
+          } catch (verifyError) {
+            console.error(`[NFT] Transaction verification failed for ${refBE.getTxid()}:`, verifyError);
+            hex = ""; // Clear to skip processing
+          }
+        }
+
+        // Store in cache only if verification passed
         hex && (await opfs.putTx(refBE.toString(), hex));
       }
 

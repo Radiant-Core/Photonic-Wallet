@@ -4,10 +4,11 @@
  */
 
 import rjs from "@radiant-core/radiantjs";
-import { encode } from "cbor-x";
+import { encode, decode } from "cbor-x";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { Buffer } from "buffer";
+
 import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "./types";
 import { GLYPH_BURN, GLYPH_FT, GLYPH_NFT } from "./protocols";
 import { glyphMagicBytesBuffer } from "./token";
@@ -15,6 +16,9 @@ import { p2pkhScript, p2pkhScriptSize, parseFtScript, parseNftScript } from "./s
 import { fundTx } from "./coinSelect";
 import { buildTx } from "./tx";
 import Outpoint from "./Outpoint";
+
+/** Maximum size for CBOR-encoded burn proof (128 KB) to prevent CPU DoS */
+const MAX_CBOR_SIZE = 128 * 1024;
 
 const { Script, Opcode } = rjs;
 
@@ -58,7 +62,13 @@ export function createBurnProof(
   }
 
   const encodedProof = encode(proof);
-  
+
+  // SECURITY: Enforce size cap on burn proof CBOR encoding
+  // See: Security Audit H13 - Prevent CPU DoS from maliciously large burn proofs
+  if (encodedProof.length > MAX_CBOR_SIZE) {
+    throw new Error(`Burn proof too large: ${encodedProof.length} bytes (max ${MAX_CBOR_SIZE})`);
+  }
+
   // Create OP_RETURN script with magic bytes and proof
   const script = new Script()
     .add(Opcode.OP_RETURN)

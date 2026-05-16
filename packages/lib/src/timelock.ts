@@ -12,10 +12,15 @@
  */
 
 import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { GlyphV2Metadata } from "./v2metadata";
 import { GLYPH_TIMELOCK } from "./protocols";
-import { type EncryptedContentStub } from "./encryption";
+import {
+  type EncryptedContentStub,
+  wrapCEK,
+  unwrapCEK,
+  type HybridKeyPair,
+} from "./encryption";
 
 // ============================================================================
 // Types
@@ -53,7 +58,11 @@ export type TimelockCommitment = {
 export type TimelockReveal = {
   /** Token reference (txid:vout) this reveal is for */
   tokenRef: string;
-  /** The CEK in hex — broadcast this after unlock to allow decryption */
+  /**
+   * The CEK in hex — broadcast this after unlock to allow decryption.
+   * SECURITY FIX (C2): This field is now stored encrypted at rest using
+   * self-as-recipient pattern. Use `unwrapCEKForStorage` to decrypt.
+   */
   cek: string;
   /** On-chain commitment hash (must match SHA256(CEK)) */
   cekHash: string;
@@ -63,6 +72,23 @@ export type TimelockReveal = {
   unlockAt: number;
   /** UNIX timestamp when this reveal record was created */
   createdAt: number;
+  /**
+   * Encrypted CEK storage format (C2 fix).
+   * When present, `cek` contains the encrypted CEK wrapped to self.
+   * Use `ephemeral` and `wrappedCek` to decrypt with the wallet's
+   * self-encryption keypair.
+   */
+  wrappedCek?: string;
+  /**
+   * Ephemeral X25519 public key for decrypting wrappedCek (C2 fix).
+   * Hex-encoded 32-byte X25519 public key.
+   */
+  ephemeralX25519?: string;
+  /**
+   * Optional ephemeral ML-KEM-768 public key for hybrid decryption (C2 fix).
+   * Only present when hybrid post-quantum encryption is used.
+   */
+  ephemeralMlkem?: string;
 };
 
 /** Result of building a timelock-encrypted metadata stub */
@@ -350,6 +376,77 @@ export function loadReveals(): TimelockReveal[] {
  */
 export function getReveal(tokenRef: string): TimelockReveal | undefined {
   return loadReveals().find((r) => r.tokenRef === tokenRef);
+}
+
+// ============================================================================
+// SECURITY FIX (C2): CEK encryption at rest using self-as-recipient pattern
+// ============================================================================
+
+/**
+ * Wrap a CEK for secure local storage using self-as-recipient encryption.
+ *
+ * This encrypts the CEK using the wallet's own derived encryption key,
+ * ensuring the CEK remains confidential even if localStorage is compromised.
+ *
+ * @param cekHex The CEK in hex format (32 bytes)
+ * @param selfKeypair The wallet's self-encryption keypair (from deriveEncryptionKeypair)
+ * @returns Object containing wrapped CEK and ephemeral public keys for storage
+ */
+export function wrapCEKForStorage(
+  cekHex: string,
+  selfKeypair: HybridKeyPair
+): { cek: string; wrappedCek: string; ephemeralX25519: string; ephemeralMlkem?: string } {
+  const cek = hexToBytes(cekHex);
+
+  // Use self-as-recipient pattern: encrypt CEK to our own key
+  const wrapped = wrapCEK(cek, {
+    x25519: selfKeypair.x25519.publicKey,
+    mlkem: selfKeypair.mlkem?.publicKey,
+  });
+
+  return {
+    // Store wrapped CEK (encrypted) instead of plaintext
+    cek: bytesToHex(wrapped.wrappedCEK),
+    wrappedCek: bytesToHex(wrapped.wrappedCEK),
+    ephemeralX25519: bytesToHex(wrapped.ephemeral.x25519),
+    ephemeralMlkem: wrapped.ephemeral.mlkem
+      ? bytesToHex(wrapped.ephemeral.mlkem)
+      : undefined,
+  };
+}
+
+/**
+ * Unwrap a CEK from secure local storage.
+ *
+ * Decrypts the CEK using the wallet's self-encryption keypair.
+ * Falls back to legacy plaintext if no ephemeral keys are present.
+ *
+ * @param reveal The stored reveal record (may be encrypted or legacy plaintext)
+ * @param selfKeypair The wallet's self-encryption keypair
+ * @returns The decrypted CEK in hex format, or undefined if decryption fails
+ */
+export function unwrapCEKForStorage(
+  reveal: TimelockReveal,
+  selfKeypair: HybridKeyPair
+): string | undefined {
+  // Legacy: if no ephemeral key, treat cek as plaintext
+  if (!reveal.ephemeralX25519) {
+    return reveal.cek;
+  }
+
+  try {
+    const wrappedCEK = hexToBytes(reveal.wrappedCek || reveal.cek);
+    const ephemeral = {
+      x25519: hexToBytes(reveal.ephemeralX25519),
+      mlkem: reveal.ephemeralMlkem ? hexToBytes(reveal.ephemeralMlkem) : undefined,
+    };
+
+    const cek = unwrapCEK(wrappedCEK, ephemeral, selfKeypair);
+    return bytesToHex(cek);
+  } catch (error) {
+    console.error("[timelock] Failed to unwrap CEK:", error);
+    return undefined;
+  }
 }
 
 /**

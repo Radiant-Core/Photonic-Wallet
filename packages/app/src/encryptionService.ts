@@ -430,6 +430,13 @@ export async function decryptContent(
         ? { x25519PrivateKey: options.privateKey, x25519PublicKey: new Uint8Array(32) }
         : options.privateKey!;
 
+    // SECURITY: Cap recipient count to prevent DoS from excessive iteration
+    // See: Security Audit H14 - Cap recipient iteration
+    const MAX_RECIPIENTS = 100;
+    if (recipients.length > MAX_RECIPIENTS) {
+      throw new Error(`Too many recipients: ${recipients.length} (max ${MAX_RECIPIENTS})`);
+    }
+
     for (const recipient of recipients) {
       // Skip passphrase-sentinel recipients (all-zero epk)
       const ephemeralBytes = new Uint8Array(Buffer.from(recipient.epk, "base64"));

@@ -194,3 +194,6 @@ export const countdown = (message: string, seconds = 5) => {
 
 export const highlight = chalk.bgBlack.whiteBright;
 export const danger = chalk.bgRed.whiteBright;
+
+// Re-export path security utilities
+export { safeResolvePath, resolveEmbedPath } from "./utils/pathSecurity";

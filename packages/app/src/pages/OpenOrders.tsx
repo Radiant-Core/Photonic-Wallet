@@ -748,6 +748,12 @@ export default function OpenOrders() {
         throw new Error("Offer has invalid price terms");
       }
 
+      // SECURITY: Reject multi-output offers until UI can properly display all outputs
+      // See: Security Audit C3 - Open-orders swap take silently funds attacker-controlled extra outputs
+      if (makerTerms.outputs.length > 1) {
+        throw new Error("Multi-output swap offers are not supported. The offer may be malicious.");
+      }
+
       const coins: SelectableInput[] = await db.txo
         .where({ contractType: ContractType.RXD, spent: 0 })
         .toArray();

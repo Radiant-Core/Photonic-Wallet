@@ -12,10 +12,36 @@ import {
 } from "@chakra-ui/react";
 import opfs from "@app/opfs";
 
+/** Keys to clear from localStorage on logout */
+const LOCAL_STORAGE_KEYS_TO_CLEAR = [
+  "glyph_timelock_reveals",
+  "photonic.swap.rpcConfig",
+  "waveCachedNames",
+  "waveRecentLookups",
+  "activity-last-seen",
+  "photonic_nft_storage_api_key",
+  "photonic_ipfs_gateway",
+];
+
 export default function LogOut() {
   const logout = async () => {
     await db.delete();
     await opfs.deleteAll();
+
+    // Clear sensitive localStorage keys
+    for (const key of LOCAL_STORAGE_KEYS_TO_CLEAR) {
+      localStorage.removeItem(key);
+    }
+
+    // Broadcast logout to other tabs so they also lock
+    try {
+      const bc = new BroadcastChannel("photonic-wallet");
+      bc.postMessage({ type: "logout" });
+      bc.close();
+    } catch {
+      // BroadcastChannel not supported, ignore
+    }
+
     document.location = "/";
   };
 

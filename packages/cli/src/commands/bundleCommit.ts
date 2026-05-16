@@ -46,6 +46,7 @@ import {
 } from "@photonic/lib/types";
 import { loadConfig } from "../config";
 import ora, { Ora } from "ora";
+import { safeResolvePath } from "../utils/pathSecurity";
 import { GLYPH_FT, GLYPH_NFT } from "@photonic/lib/protocols";
 
 const { Address, Transaction } = rjs;
@@ -144,8 +145,9 @@ export default async function bundleCommit(
   bundle.tokens.map((token) =>
     Object.entries(token.files || {}).map((tokenFile) => {
       if (typeof tokenFile === "string") {
+        const safePath = safeResolvePath(bundleDir, tokenFile);
         if (
-          fs.statSync(path.join(bundleDir, tokenFile)).size > config.maxFileSize
+          fs.statSync(safePath).size > config.maxFileSize
         ) {
           throw new Error(`File '${tokenFile}' is too large`);
         }
@@ -163,8 +165,18 @@ export default async function bundleCommit(
 
   log(chalk("Wallet unlocked:", highlight(wallet.address)));
 
-  const readFile = (...paths: string[]) =>
-    fs.readFileSync(path.join(bundleDir, ...paths));
+  const readFile = (...paths: string[]) => {
+    // Validate paths to prevent directory traversal
+    const safePaths = paths.map((p, idx) => {
+      if (idx === 0) return p; // First path is the bundleDir (already validated)
+      // Validate each subsequent path component
+      if (p.includes("..") || p.includes("/") || p.includes("\\")) {
+        throw new Error(`Invalid path component: ${p}`);
+      }
+      return p;
+    });
+    return fs.readFileSync(path.join(bundleDir, ...safePaths));
+  };
 
   // Build token payloads
   const tokens = bundle.tokens.map((token) => {

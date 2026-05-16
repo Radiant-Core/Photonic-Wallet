@@ -26,22 +26,28 @@ function buildP2pkhScriptHex(address: string): string {
 /**
  * Create royalty-enforced NFT script
  * Enforces royalty payments at the script level using Radiant introspection opcodes
- * 
+ *
  * Script structure for royalty enforcement:
  * - Output 0: NFT to buyer (new owner)
  * - Output 1: Seller payment (used to calculate sale price)
  * - Output 2: Royalty payment (single recipient) OR Output 2+N for splits
- * 
+ *
  * Uses OP_OUTPUTVALUE and OP_OUTPUTBYTECODE for on-chain validation
+ *
+ * SECURITY FIX (H4): Now takes both current owner (seller) and new owner (buyer) addresses.
+ * The newOwner address is baked into the trailing P2PKH so the buyer can spend the NFT.
+ * The currentOwner is used for royalty validation logic if needed.
  */
 export function nftRoyaltyScript(
-  address: string,
+  newOwner: string,
   ref: string,
-  royalty: GlyphV2Royalty
+  royalty: GlyphV2Royalty,
+  currentOwner?: string
 ): string {
   if (!royalty.enforced) {
     // Non-enforced royalties use standard NFT script
-    return nftScript(address, ref);
+    // SECURITY FIX (H4): Use newOwner (buyer) for the P2PKH, not currentOwner (seller)
+    return nftScript(newOwner, ref);
   }
 
   // Build base script with singleton ref
@@ -133,7 +139,8 @@ export function nftRoyaltyScript(
   }
 
   // Add P2PKH spending condition for the NFT itself
-  script.add(Script.buildPublicKeyHashOut(address));
+  // SECURITY FIX (H4): Use newOwner (buyer) address so the NFT is spendable by the new owner
+  script.add(Script.buildPublicKeyHashOut(newOwner));
 
   return script.toHex();
 }

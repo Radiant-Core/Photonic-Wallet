@@ -2,6 +2,7 @@ import Outpoint from "@lib/Outpoint";
 import { sha256 } from "@noble/hashes/sha256";
 import { Buffer } from "buffer";
 import { ContractType, SmartTokenType } from "./types";
+import db from "./db";
 
 // SwapOffer as defined in Radiant Core's swapindex.h
 export interface SwapOffer {
@@ -51,37 +52,103 @@ const DEFAULT_RPC_CONFIG: SwapRpcConfig = {
   url: "https://swap.radiantcore.org",
 };
 
+// SECURITY FIX (H8): Use IndexedDB instead of localStorage for better security
 const STORAGE_KEY = "photonic.swap.rpcConfig";
+const DB_KEY = "swapRpcConfig";
 
-function loadStoredConfig(): SwapRpcConfig {
-  try {
-    if (typeof localStorage === "undefined") return DEFAULT_RPC_CONFIG;
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_RPC_CONFIG;
-    const parsed = JSON.parse(raw) as Partial<SwapRpcConfig>;
-    if (!parsed || typeof parsed.url !== "string" || !parsed.url) {
-      return DEFAULT_RPC_CONFIG;
+/**
+ * Validate swap RPC URL - must use https:// scheme for security
+ * SECURITY FIX (H8): Prevent http:// and other insecure schemes
+ */
+function validateSwapRpcUrl(url: string): { valid: boolean; error?: string } {
+  if (!url || typeof url !== "string") {
+    return { valid: false, error: "URL is required" };
+  }
+
+  url = url.trim();
+
+  // Must use HTTPS scheme
+  if (!url.startsWith("https://")) {
+    if (url.startsWith("http://")) {
+      return {
+        valid: false,
+        error: "Insecure HTTP URL is not allowed. Use https:// for secure connections.",
+      };
     }
     return {
-      url: parsed.url,
-      username: typeof parsed.username === "string" ? parsed.username : undefined,
-      password: typeof parsed.password === "string" ? parsed.password : undefined,
+      valid: false,
+      error: "Swap RPC URL must use https:// scheme",
+    };
+  }
+
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.protocol !== "https:") {
+      return { valid: false, error: "URL must use https:// protocol" };
+    }
+  } catch {
+    return { valid: false, error: "Invalid URL format" };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Load swap RPC config from IndexedDB (more secure than localStorage)
+ * SECURITY FIX (H8): Moved from localStorage to IndexedDB
+ */
+async function loadStoredConfig(): Promise<SwapRpcConfig> {
+  try {
+    const stored = await db.kvp.get(DB_KEY) as SwapRpcConfig | undefined;
+    if (!stored || typeof stored.url !== "string" || !stored.url) {
+      return DEFAULT_RPC_CONFIG;
+    }
+
+    // SECURITY FIX (H8): Validate URL scheme
+    const validation = validateSwapRpcUrl(stored.url);
+    if (!validation.valid) {
+      console.warn(`Invalid swap RPC URL in storage: ${validation.error}`);
+      return DEFAULT_RPC_CONFIG;
+    }
+
+    return {
+      url: stored.url,
+      username: typeof stored.username === "string" ? stored.username : undefined,
+      password: typeof stored.password === "string" ? stored.password : undefined,
     };
   } catch {
     return DEFAULT_RPC_CONFIG;
   }
 }
 
-let rpcConfig: SwapRpcConfig = loadStoredConfig();
+let rpcConfig: SwapRpcConfig = DEFAULT_RPC_CONFIG;
+let rpcConfigInitialized = false;
 
-export function setSwapRpcConfig(config: SwapRpcConfig) {
+// Initialize config asynchronously
+loadStoredConfig().then(config => {
+  rpcConfig = config;
+  rpcConfigInitialized = true;
+}).catch(() => {
+  rpcConfigInitialized = true;
+});
+
+/**
+ * Save swap RPC config to IndexedDB with scheme validation
+ * SECURITY FIX (H8): Added https:// scheme validation and moved to IndexedDB
+ */
+export async function setSwapRpcConfig(config: SwapRpcConfig): Promise<void> {
+  // SECURITY FIX (H8): Validate URL scheme before saving
+  const validation = validateSwapRpcUrl(config.url);
+  if (!validation.valid) {
+    throw new Error(`Invalid swap RPC URL: ${validation.error}`);
+  }
+
   rpcConfig = config;
   try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    }
-  } catch {
-    // Ignore quota / privacy-mode failures; in-memory config still works.
+    await db.kvp.put(config, DB_KEY);
+  } catch (error) {
+    // Ignore storage failures; in-memory config still works.
+    console.warn("Failed to save swap RPC config:", error);
   }
 }
 

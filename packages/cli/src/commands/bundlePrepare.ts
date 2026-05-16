@@ -31,6 +31,7 @@ import { bundleFileSchema } from "../schemas";
 import { rimraf } from "rimraf";
 import { loadConfig } from "../config";
 import { confirm } from "@inquirer/prompts";
+import { safeResolvePath } from "../utils/pathSecurity";
 
 const { log } = console;
 
@@ -153,8 +154,9 @@ export default async function bundlePrepare(this: Command, inputDir?: string) {
           }
         } else {
           const embed = tokenFile as EmbeddedTokenFile;
+          const safePath = safeResolvePath(bundleDir, embed.path);
           if (
-            fs.statSync(path.join(bundleDir, embed.path)).size >
+            fs.statSync(safePath).size >
             config.maxFileSize
           ) {
             throw new Error(`File '${embed.path}' is too large`);

@@ -66,6 +66,16 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
   const [recipientInput, setRecipientInput] = useState("");
   const [finalAddress, setFinalAddress] = useState<string | null>(null);
 
+  // SECURITY FIX (C4): Transaction confirmation modal state
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [pendingTx, setPendingTx] = useState<{
+    rawTx: string;
+    txid: string;
+    recipientAddress: string;
+    amount: number;
+    fee: number;
+  } | null>(null);
+
   const setFailure = (reason: string) => {
     setErrorMessage(reason);
     setSuccess(false);
@@ -145,28 +155,22 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       );
 
       const rawTx = tx.toString();
-      console.debug("Broadcasting", rawTx);
-      const txid = await electrumWorker.value.broadcast(rawTx);
-      db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
-      console.debug("Result", txid);
-      toast({
-        title: `Sent ${photonsToRXD(value)} ${network.value.ticker}`,
-        status: "success",
-      });
+      const txid = tx.hash;
 
-      // Update UTXOs without waiting for subscription
-      const changeScript = p2pkhScript(wallet.value.address);
-      await updateWalletUtxos(
-        ContractType.RXD,
-        changeScript,
-        changeScript,
+      // Calculate fee from selected inputs and outputs
+      const inputTotal = selected.inputs.reduce((sum, input) => sum + input.value, 0);
+      const outputTotal = selected.outputs.reduce((sum, output) => sum + output.value, 0);
+      const fee = inputTotal - outputTotal;
+
+      // SECURITY FIX (C4): Show confirmation modal before broadcasting
+      setPendingTx({
+        rawTx,
         txid,
-        selected.inputs,
-        selected.outputs
-      );
-      updateRxdBalances(wallet.value.address);
-
-      onSuccess && onSuccess(txid);
+        recipientAddress,
+        amount: value,
+        fee,
+      });
+      setConfirmModalOpen(true);
       setLoading(false);
     } catch (error) {
       if (
@@ -190,6 +194,44 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     if (toAddress.current) {
       toAddress.current.value = value;
     }
+  };
+
+  // SECURITY FIX (C4): Function to broadcast after user confirms in modal
+  const confirmBroadcast = async () => {
+    if (!pendingTx) return;
+
+    setLoading(true);
+    try {
+      console.debug("Broadcasting", pendingTx.rawTx);
+      const txid = await electrumWorker.value.broadcast(pendingTx.rawTx);
+      db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
+      console.debug("Result", txid);
+
+      toast({
+        title: `Sent ${photonsToRXD(pendingTx.amount)} ${network.value.ticker}`,
+        status: "success",
+      });
+
+      // Close modal and cleanup
+      setConfirmModalOpen(false);
+      setPendingTx(null);
+
+      onSuccess && onSuccess(txid);
+    } catch (error) {
+      console.error("Broadcast error:", error);
+      toast({
+        title: "Transaction failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelBroadcast = () => {
+    setConfirmModalOpen(false);
+    setPendingTx(null);
   };
 
   if (!isOpen || !onClose) return null;
@@ -308,6 +350,58 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
           </AddressInput>
         </ModalContent>
       </form>
+
+      {/* SECURITY FIX (C4): Transaction Confirmation Modal */}
+      <Modal
+        closeOnOverlayClick={false}
+        isOpen={confirmModalOpen}
+        onClose={cancelBroadcast}
+        isCentered
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Confirm Transaction</ModalHeader>
+          <ModalCloseButton onClick={cancelBroadcast} />
+          <ModalBody>
+            <VStack align="start" spacing={3}>
+              <Text>
+                <strong>Recipient:</strong> {pendingTx?.recipientAddress}
+              </Text>
+              <Text>
+                <strong>Amount:</strong>{" "}
+                {pendingTx && photonsToRXD(pendingTx.amount)} {network.value.ticker}
+              </Text>
+              <Text>
+                <strong>Fee:</strong>{" "}
+                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+              </Text>
+              <Text>
+                <strong>Total:</strong>{" "}
+                {pendingTx && photonsToRXD(pendingTx.amount + pendingTx.fee)}{" "}
+                {network.value.ticker}
+              </Text>
+              <Text fontSize="xs" color="gray.500">
+                <strong>TxID:</strong> {pendingTx?.txid}
+              </Text>
+              <Divider my={2} />
+              <Text fontSize="sm" color="orange.500">
+                Please verify the recipient address and amount before confirming.
+              </Text>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="primary"
+              isLoading={loading}
+              onClick={confirmBroadcast}
+              mr={4}
+            >
+              Confirm & Send
+            </Button>
+            <Button onClick={cancelBroadcast}>Cancel</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Modal>
   );
 }

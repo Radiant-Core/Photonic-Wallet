@@ -56,6 +56,16 @@ export default function SendDigitalObject({
   const toast = useToast();
   const ref = Outpoint.fromString(txo.script.substring(2, 74));
 
+  // SECURITY FIX (C4): Transaction confirmation modal state
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [pendingTx, setPendingTx] = useState<{
+    rawTx: string;
+    txid: string;
+    recipientAddress: string;
+    fee: number;
+    nftName: string;
+  } | null>(null);
+
   const rxd = useLiveQuery(
     () => db.txo.where({ contractType: ContractType.RXD, spent: 0 }).toArray(),
     [],
@@ -97,24 +107,24 @@ export default function SendDigitalObject({
       );
 
       const rawTx = tx.toString();
-      const txid = await electrumWorker.value.broadcast(rawTx);
-      db.broadcast.put({ txid, date: Date.now(), description: "nft_send" });
+      const txid = tx.hash;
 
-      toast({
-        title: "Sent NFT",
-        status: "success",
-      });
-      const changeScript = p2pkhScript(wallet.value.address);
-      const sendToSelf = toAddress.current?.value === wallet.value.address;
+      // Calculate fee from inputs and outputs
+      const inputTotal = selected.inputs.reduce((sum, input) => sum + input.value, 0);
+      const outputTotal = selected.outputs.reduce((sum, output) => sum + output.value, 0);
+      const fee = inputTotal - outputTotal;
 
-      const newTxos = await updateWalletUtxos(
-        ContractType.NFT,
-        txo.script, // NFT script, if sent to self
-        changeScript, // RXD change
+      // SECURITY FIX (C4): Show confirmation modal before broadcasting
+      setPendingTx({
+        rawTx,
         txid,
-        selected.inputs,
-        selected.outputs
-      );
+        recipientAddress: toAddress.current?.value || "",
+        fee,
+        nftName: nft?.name || "Unknown NFT",
+      });
+      setConfirmModalOpen(true);
+      setLoading(false);
+    } catch (error) {
 
       if (glyph.id) {
         if (sendToSelf) {
@@ -151,6 +161,61 @@ export default function SendDigitalObject({
     if (toAddress.current) {
       toAddress.current.value = value;
     }
+  };
+
+  // SECURITY FIX (C4): Function to broadcast after user confirms in modal
+  const confirmBroadcast = async () => {
+    if (!pendingTx) return;
+
+    setLoading(true);
+    try {
+      console.debug("Broadcasting", pendingTx.rawTx);
+      const txid = await electrumWorker.value.broadcast(pendingTx.rawTx);
+      db.broadcast.put({ txid, date: Date.now(), description: "nft_send" });
+      console.debug("Result", txid);
+
+      toast({
+        title: `Sent NFT: ${pendingTx.nftName}`,
+        status: "success",
+      });
+
+      // Close modals and cleanup
+      setConfirmModalOpen(false);
+      setPendingTx(null);
+
+      // Update UTXOs and refresh UI
+      const changeScript = p2pkhScript(wallet.value.address);
+      const sendToSelf = pendingTx.recipientAddress === wallet.value.address;
+
+      // Update NFT UTXOs if sent to self
+      if (sendToSelf) {
+        await updateWalletUtxos(
+          ContractType.NFT,
+          p2pkhScript(wallet.value.address), // Will find by outpoint
+          changeScript,
+          txid,
+          [],
+          [{ script: p2pkhScript(wallet.value.address), value: 0, outpoint: `${txid}:0` }]
+        );
+      }
+      updateNFTOwned(wallet.value.address);
+
+      onSuccess && onSuccess(txid);
+    } catch (error) {
+      console.error("Broadcast error:", error);
+      toast({
+        title: "Transaction failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelBroadcast = () => {
+    setConfirmModalOpen(false);
+    setPendingTx(null);
   };
 
   if (!isOpen || !onClose) return null;
@@ -219,6 +284,56 @@ export default function SendDigitalObject({
           </AddressInput>
         </ModalContent>
       </form>
+
+      {/* SECURITY FIX (C4): Transaction Confirmation Modal */}
+      <Modal
+        closeOnOverlayClick={false}
+        isOpen={confirmModalOpen}
+        onClose={cancelBroadcast}
+        isCentered
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Confirm Transaction</ModalHeader>
+          <ModalCloseButton onClick={cancelBroadcast} />
+          <ModalBody>
+            <VStack align="start" spacing={3}>
+              <Text>
+                <strong>Recipient:</strong> {pendingTx?.recipientAddress}
+              </Text>
+              <Text>
+                <strong>NFT:</strong> {pendingTx?.nftName}
+              </Text>
+              <Text>
+                <strong>Fee:</strong>{" "}
+                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+              </Text>
+              <Text>
+                <strong>Total Cost:</strong>{" "}
+                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+              </Text>
+              <Text fontSize="xs" color="gray.500">
+                <strong>TxID:</strong> {pendingTx?.txid}
+              </Text>
+              <Divider my={2} />
+              <Text fontSize="sm" color="orange.500">
+                Please verify the recipient address before confirming. This action cannot be undone.
+              </Text>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="primary"
+              isLoading={loading}
+              onClick={confirmBroadcast}
+              mr={4}
+            >
+              Confirm & Send
+            </Button>
+            <Button onClick={cancelBroadcast}>Cancel</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Modal>
   );
 }
