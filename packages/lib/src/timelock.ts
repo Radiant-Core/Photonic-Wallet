@@ -400,17 +400,17 @@ export function wrapCEKForStorage(
 
   // Use self-as-recipient pattern: encrypt CEK to our own key
   const wrapped = wrapCEK(cek, {
-    x25519: selfKeypair.x25519.publicKey,
-    mlkem: selfKeypair.mlkem?.publicKey,
+    x25519: selfKeypair.x25519PublicKey,
+    mlkem: selfKeypair.mlkemPublicKey,
   });
 
   return {
     // Store wrapped CEK (encrypted) instead of plaintext
     cek: bytesToHex(wrapped.wrappedCEK),
     wrappedCek: bytesToHex(wrapped.wrappedCEK),
-    ephemeralX25519: bytesToHex(wrapped.ephemeral.x25519),
-    ephemeralMlkem: wrapped.ephemeral.mlkem
-      ? bytesToHex(wrapped.ephemeral.mlkem)
+    ephemeralX25519: bytesToHex(wrapped.ephemeral.x25519EphemeralPublicKey),
+    ephemeralMlkem: wrapped.ephemeral.mlkemCiphertext
+      ? bytesToHex(wrapped.ephemeral.mlkemCiphertext)
       : undefined,
   };
 }
@@ -437,8 +437,8 @@ export function unwrapCEKForStorage(
   try {
     const wrappedCEK = hexToBytes(reveal.wrappedCek || reveal.cek);
     const ephemeral = {
-      x25519: hexToBytes(reveal.ephemeralX25519),
-      mlkem: reveal.ephemeralMlkem ? hexToBytes(reveal.ephemeralMlkem) : undefined,
+      x25519EphemeralPublicKey: hexToBytes(reveal.ephemeralX25519),
+      mlkemCiphertext: reveal.ephemeralMlkem ? hexToBytes(reveal.ephemeralMlkem) : undefined,
     };
 
     const cek = unwrapCEK(wrappedCEK, ephemeral, selfKeypair);

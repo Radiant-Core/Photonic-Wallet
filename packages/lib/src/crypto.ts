@@ -7,6 +7,9 @@ import { randomBytes } from "@noble/hashes/utils";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
+// Re-export for convenience
+export { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+
 /** Extract a plain ArrayBuffer from a Uint8Array (TS 5.9 BufferSource compat) */
 function toAB(u: Uint8Array): ArrayBuffer {
   const ab = new ArrayBuffer(u.byteLength);

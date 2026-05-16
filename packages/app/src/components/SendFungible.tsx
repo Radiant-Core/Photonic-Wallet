@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "@lingui/macro";
 import { SelectableInput } from "@lib/coinSelect";
+import { photonsToRXD } from "@lib/format";
 import {
   Modal,
   ModalOverlay,

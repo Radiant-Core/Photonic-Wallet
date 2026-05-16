@@ -826,7 +826,12 @@ export function buildVaultTx(
   // Change
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
-  tx.fee(Math.max(20000, Math.ceil(tx._estimateSize() * feeRate)));
+  const estimatedSize = tx._estimateSize();
+  const calculatedFee = Math.ceil(estimatedSize * feeRate);
+  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
+  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  const finalFee = Math.max(minRelayFee, calculatedFee);
+  tx.fee(finalFee);
   // Sign the RXD funding inputs (added via tx.from)
   tx.sign(privKey);
 
@@ -979,7 +984,12 @@ export function buildVestingTx(
   // Change
   tx.change(fromAddress);
   // @ts-ignore — _estimateSize exists at runtime
-  tx.fee(Math.max(20000, Math.ceil(tx._estimateSize() * feeRate)));
+  const estimatedSize = tx._estimateSize();
+  const calculatedFee = Math.ceil(estimatedSize * feeRate);
+  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
+  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  const finalFee = Math.max(minRelayFee, calculatedFee);
+  tx.fee(finalFee);
   tx.sign(privKey);
   tx.seal();
 
@@ -1097,7 +1107,10 @@ export function claimVaultTx(
   const hasChange = additionalFundingUtxos && additionalFundingUtxos.length > 0;
   const outputCount = hasChange ? 2 : 1;
   const estimatedSize = baseTxSize + totalInputsSize + outputCount * outputSize;
-  const fee = Math.max(20000, Math.ceil(estimatedSize * feeRate));
+  const calculatedFee = Math.ceil(estimatedSize * feeRate);
+  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
+  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  const fee = Math.max(minRelayFee, calculatedFee);
 
   const outputValue = vaultUtxo.value - fee;
   if (outputValue <= 0) {

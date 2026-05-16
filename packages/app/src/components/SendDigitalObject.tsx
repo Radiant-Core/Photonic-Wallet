@@ -33,7 +33,7 @@ import Identifier from "./Identifier";
 import Outpoint from "@lib/Outpoint";
 import { feeRate, network, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
-import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
+import { updateRxdBalances, updateWalletUtxos, updateNFTOwned } from "@app/utxos";
 import { BsQrCodeScan } from "react-icons/bs";
 import AddressInput from "./AddressInput";
 import { TransferError, transferNonFungible } from "@lib/transfer";
@@ -123,28 +123,10 @@ export default function SendDigitalObject({
         txid,
         recipientAddress: toAddress.current?.value || "",
         fee,
-        nftName: nft?.name || "Unknown NFT",
+        nftName: glyph?.name || "Unknown NFT",
       });
       setConfirmModalOpen(true);
       setLoading(false);
-    } catch (error) {
-
-      if (glyph.id) {
-        if (sendToSelf) {
-          // If sent to self, update lastTxoId of glyph
-          await db.glyph.update(glyph.id, {
-            lastTxoId: newTxos[0].id,
-            height: Infinity,
-          });
-        } else {
-          // Remove from UI
-          await db.glyph.update(glyph.id, { spent: 1 });
-        }
-      }
-      // Update RXD change
-      updateRxdBalances(wallet.value.address);
-
-      onSuccess && onSuccess(txid);
     } catch (error) {
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
@@ -198,7 +180,7 @@ export default function SendDigitalObject({
           changeScript,
           txid,
           [],
-          [{ script: p2pkhScript(wallet.value.address), value: 0, outpoint: `${txid}:0` }]
+          [{ script: p2pkhScript(wallet.value.address), value: 0, txid, vout: 0 }]
         );
       }
       updateNFTOwned(wallet.value.address);

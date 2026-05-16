@@ -507,7 +507,7 @@ export function unwrapCEK(
 ): Uint8Array {
   // SECURITY FIX (C8): Determine PQ mode and bind to HKDF info
   // Must match the mode used during wrapCEK - hybrid vs classical produce different KEKs
-  const isHybrid = recipientKeyPair.mlkem !== undefined;
+  const isHybrid = recipientKeyPair.mlkemPrivateKey !== undefined;
   const hkdfInfo = isHybrid
     ? new TextEncoder().encode("glyph-kek-hybrid-v1")
     : new TextEncoder().encode("glyph-kek-classical-v1");
