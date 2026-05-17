@@ -1100,24 +1100,30 @@ export function claimVaultTx(
     outputScript = Script.buildPublicKeyHashOut(toAddress).toHex();
   }
 
-  // Calculate fee
-  // Properly account for all inputs (vault + funding) and outputs
+  // Calculate fee with buffer for scriptSigs
   const fundingInputs = additionalFundingUtxos?.length || 0;
   const baseTxSize = 10; // version (4) + locktime (4) + input/output count (2)
-  const inputSize = 150; // avg: txid (32) + vout (4) + scriptSig (~100) + sequence (4)
-  const vaultInputSize = vaultUtxo.redeemScriptHex.length / 2 + 100; // larger due to redeem script + sig
-  const outputSize = 40; // script length + satoshis
-  const totalInputsSize = vaultInputSize + fundingInputs * inputSize;
-  const hasChange = additionalFundingUtxos && additionalFundingUtxos.length > 0;
-  const outputCount = hasChange ? 2 : 1;
+  // scriptSig sizes after signing: ~107 bytes per input (sig + pubkey + push ops)
+  const inputScriptSize = 107;
+  const vaultInputSize = vaultUtxo.redeemScriptHex.length / 2 + inputScriptSize;
+  const fundingInputSize = inputScriptSize;
+  const outputSize = 40; // scriptPubKey + satoshis
+  const totalInputsSize = vaultInputSize + fundingInputs * fundingInputSize;
+  const hasFunding = additionalFundingUtxos && additionalFundingUtxos.length > 0 && fundingAddress;
+  const outputCount = hasFunding ? 2 : 1;
   const estimatedSize = baseTxSize + totalInputsSize + outputCount * outputSize;
-  const calculatedFee = Math.ceil(estimatedSize * feeRate);
-  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
-  const minRelayFee = Math.ceil(estimatedSize * 1000);
+  // Add 10% buffer for serialization overhead
+  const sizeWithBuffer = Math.ceil(estimatedSize * 1.1);
+  const calculatedFee = Math.ceil(sizeWithBuffer * feeRate);
+  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte = 1 sat/byte)
+  const minRelayFee = Math.ceil(sizeWithBuffer * 1000);
   const fee = Math.max(minRelayFee, calculatedFee);
 
-  const outputValue = vaultUtxo.value - fee;
-  if (outputValue <= 0) {
+  // Determine vault output value based on funding availability
+  const outputValue = hasFunding ? vaultUtxo.value : vaultUtxo.value - fee;
+
+  // Check if vault can cover fee - if not, we need wallet funding UTXOs
+  if (outputValue <= 0 && !hasFunding) {
     throw new Error("Vault UTXO value too small to cover fee");
   }
 
@@ -1129,14 +1135,12 @@ export function claimVaultTx(
   );
 
   // If we have additional funding inputs, add change output
-  if (additionalFundingUtxos && additionalFundingUtxos.length > 0 && fundingAddress) {
+  if (hasFunding) {
     const totalFunding = additionalFundingUtxos.reduce(
       (sum, u) => sum + u.value,
       0
     );
-    // Recalculate: vault output gets full value, fee comes from funding
-    // @ts-ignore — satoshis is writable at runtime
-    tx.outputs[0].satoshis = vaultUtxo.value;
+    // Fee comes from funding, vault keeps full value
     const change = totalFunding - fee;
     if (change > 546) {
       // dust threshold
