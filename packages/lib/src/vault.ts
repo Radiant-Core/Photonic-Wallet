@@ -1375,7 +1375,26 @@ export function claimVaultTx(
 // ============================================================================
 
 /**
- * Check if a vault is unlockable given the current block height and time.
+ * Safety margin (seconds) added to time-mode unlock checks to bridge the gap
+ * between wall-clock time and the network's `nMedianTimePast` (MTP), which
+ * Radiant Core uses to evaluate time-based nLockTime. MTP is the median of
+ * the last 11 block timestamps and can lag wall-clock by ~1 hour in normal
+ * operation.
+ *
+ * `isVaultUnlockable` (consensus-level) does not apply this buffer — it
+ * matches CHECKLOCKTIMEVERIFY semantics. `isVaultClaimable` (relay-level)
+ * applies it so the Claim button only enables when the broadcast is
+ * actually likely to be accepted by an up-to-date node.
+ */
+export const MTP_SAFETY_BUFFER_SEC = 3600;
+
+/**
+ * Check if a vault's locktime has elapsed — i.e. whether CHECKLOCKTIMEVERIFY
+ * in the redeem script would pass. This is the **consensus-level** answer.
+ *
+ * For time-mode vaults, an unlockable vault may still be rejected by relay
+ * for up to ~1 hour because mempool acceptance uses MTP rather than wall
+ * clock. Use `isVaultClaimable` to gate broadcast attempts.
  */
 export function isVaultUnlockable(
   locktime: number,
@@ -1390,7 +1409,30 @@ export function isVaultUnlockable(
 }
 
 /**
- * Estimate the remaining time or blocks until a vault unlocks.
+ * Check if a vault claim is **likely to be accepted by relay** right now.
+ *
+ * Same as `isVaultUnlockable` for block-mode vaults (block height is
+ * unambiguous). For time-mode vaults, requires the wall-clock to be
+ * `MTP_SAFETY_BUFFER_SEC` (1 hour) past the locktime so that the network's
+ * MTP has reliably caught up — without this, a freshly-unlocked claim is
+ * routinely rejected as "non-final transaction" until MTP advances.
+ */
+export function isVaultClaimable(
+  locktime: number,
+  mode: VaultMode,
+  currentBlockHeight: number,
+  currentTimestamp: number
+): boolean {
+  if (mode === "block") {
+    return currentBlockHeight >= locktime;
+  }
+  return currentTimestamp >= locktime + MTP_SAFETY_BUFFER_SEC;
+}
+
+/**
+ * Estimate the remaining time or blocks until a vault unlocks at the
+ * consensus level. For UI countdowns, prefer `vaultClaimableIn`, which
+ * reflects when the wallet will actually let the user broadcast.
  */
 export function vaultTimeRemaining(
   locktime: number,
@@ -1403,6 +1445,25 @@ export function vaultTimeRemaining(
     return { value: Math.max(0, remaining), unit: "blocks" };
   }
   const remaining = locktime - currentTimestamp;
+  return { value: Math.max(0, remaining), unit: "seconds" };
+}
+
+/**
+ * Estimate the remaining time or blocks until a vault claim is likely to
+ * be relayable. Adds MTP_SAFETY_BUFFER_SEC to time-mode countdowns; block
+ * mode is unchanged.
+ */
+export function vaultClaimableIn(
+  locktime: number,
+  mode: VaultMode,
+  currentBlockHeight: number,
+  currentTimestamp: number
+): { value: number; unit: "blocks" | "seconds" } {
+  if (mode === "block") {
+    const remaining = locktime - currentBlockHeight;
+    return { value: Math.max(0, remaining), unit: "blocks" };
+  }
+  const remaining = locktime + MTP_SAFETY_BUFFER_SEC - currentTimestamp;
   return { value: Math.max(0, remaining), unit: "seconds" };
 }
 

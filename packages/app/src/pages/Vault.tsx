@@ -48,9 +48,9 @@ import {
   buildVaultTx,
   buildVestingTx,
   p2shOutputScript,
-  isVaultUnlockable,
+  isVaultClaimable,
   formatLocktime,
-  vaultTimeRemaining,
+  vaultClaimableIn,
   claimVaultTx,
   recoverVaultsFromTx,
   VAULT_MAX_LOCKTIME_BLOCKS,
@@ -374,7 +374,7 @@ export default function VaultPage() {
     return [...vaultsRaw].sort((a, b) => {
       switch (sortCol) {
         case "status": {
-          const rank = (v: typeof a) => (v.claimed ? 2 : isVaultUnlockable(v.locktime, v.mode, currentHeight, currentTimestamp) ? 0 : 1);
+          const rank = (v: typeof a) => (v.claimed ? 2 : isVaultClaimable(v.locktime, v.mode, currentHeight, currentTimestamp) ? 0 : 1);
           return dir * (rank(a) - rank(b));
         }
         case "type":
@@ -384,8 +384,8 @@ export default function VaultPage() {
         case "locktime":
           return dir * (a.locktime - b.locktime);
         case "remaining": {
-          const ra = vaultTimeRemaining(a.locktime, a.mode, currentHeight, currentTimestamp);
-          const rb = vaultTimeRemaining(b.locktime, b.mode, currentHeight, currentTimestamp);
+          const ra = vaultClaimableIn(a.locktime, a.mode, currentHeight, currentTimestamp);
+          const rb = vaultClaimableIn(b.locktime, b.mode, currentHeight, currentTimestamp);
           return dir * (ra.value - rb.value);
         }
         case "label":
@@ -1703,13 +1703,16 @@ export default function VaultPage() {
               </Thead>
               <Tbody fontFamily="mono">
                 {vaults.filter((v) => showClaimed || !v.claimed).map((v) => {
-                  const unlockable = isVaultUnlockable(
+                  // `claimable` reflects relay-readiness (includes MTP buffer for
+                  // time-mode), so the Claim button only enables when broadcast
+                  // is actually likely to succeed.
+                  const claimable = isVaultClaimable(
                     v.locktime,
                     v.mode,
                     currentHeight,
                     currentTimestamp
                   );
-                  const remaining = vaultTimeRemaining(
+                  const remaining = vaultClaimableIn(
                     v.locktime,
                     v.mode,
                     currentHeight,
@@ -1731,7 +1734,7 @@ export default function VaultPage() {
                           <Tag size="sm" colorScheme="gray">
                             {t`Claimed`}
                           </Tag>
-                        ) : unlockable ? (
+                        ) : claimable ? (
                           <Tag size="sm" colorScheme="green">
                             <Icon as={TbLockOpen} mr={1} />
                             {t`Unlockable`}
@@ -1812,7 +1815,7 @@ export default function VaultPage() {
                               <ExternalLinkIcon />
                             </Link>
                           </Tooltip>
-                          {!v.claimed && unlockable && (
+                          {!v.claimed && claimable && (
                             isRecipient ? (
                               <Button
                                 size="xs"
@@ -1829,11 +1832,11 @@ export default function VaultPage() {
                               </Tooltip>
                             )
                           )}
-                          {!v.claimed && !unlockable && currentHeight > 0 && (
+                          {!v.claimed && !claimable && currentHeight > 0 && (
                             <Tooltip
                               label={v.mode === "block"
                                 ? t`Unlocks at block ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} remaining`
-                                : t`Unlocks ${new Date(v.locktime * 1000).toLocaleString()}`
+                                : t`Unlocks ${new Date(v.locktime * 1000).toLocaleString()} (claimable ~1h later — network propagation)`
                               }
                               placement="top"
                             >

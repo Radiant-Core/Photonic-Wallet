@@ -20,7 +20,10 @@ import {
   parseVaultRedeemScript,
   decodeVaultMetadata,
   isVaultUnlockable,
+  isVaultClaimable,
   vaultTimeRemaining,
+  vaultClaimableIn,
+  MTP_SAFETY_BUFFER_SEC,
   formatLocktime,
   VAULT_MAX_LOCKTIME_BLOCKS,
   VAULT_MAX_TRANCHES,
@@ -445,6 +448,67 @@ describe("vaultTimeRemaining", () => {
     const result = vaultTimeRemaining(1700000000, "time", 0, 1699999000);
     expect(result.value).toBe(1000);
     expect(result.unit).toBe("seconds");
+  });
+});
+
+describe("isVaultClaimable", () => {
+  it("MTP_SAFETY_BUFFER_SEC is one hour", () => {
+    expect(MTP_SAFETY_BUFFER_SEC).toBe(3600);
+  });
+
+  it("matches isVaultUnlockable for block mode", () => {
+    expect(isVaultClaimable(100000, "block", 100000, 0)).toBe(true);
+    expect(isVaultClaimable(100000, "block", 100001, 0)).toBe(true);
+    expect(isVaultClaimable(100000, "block", 99999, 0)).toBe(false);
+  });
+
+  it("requires the MTP safety buffer to elapse for time mode", () => {
+    const locktime = 1700000000;
+    // At wall-clock unlock moment: not yet claimable (would be unlockable)
+    expect(isVaultClaimable(locktime, "time", 0, locktime)).toBe(false);
+    expect(isVaultUnlockable(locktime, "time", 0, locktime)).toBe(true);
+
+    // One second before MTP buffer elapses: still not claimable
+    expect(
+      isVaultClaimable(locktime, "time", 0, locktime + MTP_SAFETY_BUFFER_SEC - 1)
+    ).toBe(false);
+
+    // Exactly at MTP buffer boundary: claimable
+    expect(
+      isVaultClaimable(locktime, "time", 0, locktime + MTP_SAFETY_BUFFER_SEC)
+    ).toBe(true);
+
+    // Well past: claimable
+    expect(
+      isVaultClaimable(locktime, "time", 0, locktime + 86400)
+    ).toBe(true);
+  });
+});
+
+describe("vaultClaimableIn", () => {
+  it("matches vaultTimeRemaining for block mode", () => {
+    const r = vaultClaimableIn(100000, "block", 90000, 0);
+    expect(r.value).toBe(10000);
+    expect(r.unit).toBe("blocks");
+  });
+
+  it("adds the MTP buffer to time-mode countdowns", () => {
+    const locktime = 1700000000;
+    // 1000 seconds before unlock: vaultTimeRemaining says 1000s, vaultClaimableIn says 1000 + buffer
+    const remaining = vaultClaimableIn(locktime, "time", 0, locktime - 1000);
+    expect(remaining.value).toBe(1000 + MTP_SAFETY_BUFFER_SEC);
+    expect(remaining.unit).toBe("seconds");
+  });
+
+  it("returns 0 once the MTP-buffered moment has passed", () => {
+    const locktime = 1700000000;
+    const r = vaultClaimableIn(
+      locktime,
+      "time",
+      0,
+      locktime + MTP_SAFETY_BUFFER_SEC + 1
+    );
+    expect(r.value).toBe(0);
   });
 });
 
