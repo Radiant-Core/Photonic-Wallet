@@ -1932,6 +1932,15 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       )}
                       <FormControl>
                         <FormLabel>{"Difficulty Adjustment"}</FormLabel>
+                        {/*
+                          EPOCH (0x01) and SCHEDULE (0x04) are specified in the
+                          Glyph v2 whitepaper but buildV2BytecodePartB in
+                          packages/lib/src/script.ts only emits bytecode for
+                          ASERT and LWMA. Selecting them would deploy contracts
+                          with no on-chain adjustment logic — they would behave
+                          as FIXED while reporting their daaId. Hide until the
+                          bytecode is implemented.
+                        */}
                         <Select
                           name="daaMode"
                           defaultValue={formData.daaMode}
@@ -1940,19 +1949,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <option value="fixed">Fixed Difficulty</option>
                           <option value="asert">ASERT (Recommended)</option>
                           <option value="lwma">LWMA</option>
-                          <option value="epoch">Epoch-Based</option>
-                          <option value="schedule">Schedule</option>
                         </Select>
                         <FormHelperText>
                           {formData.daaMode === 'fixed'
                             ? "Difficulty never changes"
                             : formData.daaMode === 'asert'
                             ? "Exponential moving average, smooth adjustments"
-                            : formData.daaMode === 'lwma'
-                            ? "Linear weighted moving average"
-                            : formData.daaMode === 'epoch'
-                            ? "Bitcoin-style periodic adjustment"
-                            : "Pre-determined difficulty curve"
+                            : "Linear weighted moving average"
                           }
                         </FormHelperText>
                       </FormControl>
