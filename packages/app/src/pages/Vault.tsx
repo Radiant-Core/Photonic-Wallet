@@ -59,6 +59,7 @@ import {
   type VaultAssetType,
   type VaultMode,
   type VestingTranche,
+  type FundingUtxo,
 } from "@lib/vault";
 
 // ── Constants ──────────────────────────────────────────────
@@ -875,36 +876,44 @@ export default function VaultPage() {
       const wif = wallet.value.wif;
       const toAddress = wallet.value.address;
 
-      // For NFT/FT vaults the locked value may be dust (546 photons).
-      // Fetch RXD UTXOs to cover the claim transaction fee.
-      // Limit to only what's needed (~50k photons per input at 200 sat/byte).
-      let additionalFundingUtxos:
-        | { txid: string; vout: number; script: string; value: number }[]
-        | undefined;
-      if (vault.assetType !== "rxd") {
-        const rxdTxos = await db.txo
-          .where({ contractType: ContractType.RXD, spent: 0 })
-          .toArray();
-        // Only use enough UTXOs to cover estimated fee (~0.0005 RXD at 200 sat/byte)
-        // Sort by value descending to minimize inputs needed
-        const sortedTxos = rxdTxos.sort((a, b) => b.value - a.value);
-        const neededValue = 50000; // 0.0005 RXD buffer for fee
+      // For NFT/FT vaults the locked value is dust (546 photons) and the fee
+      // must come from additional RXD UTXOs. For RXD vaults the fee comes out
+      // of the vault value unless the vault is too small (in which case we
+      // fall through to the same funding callback).
+      //
+      // Pre-fetch all spendable RXD UTXOs sorted by descending value so the
+      // selectMoreFunding callback can serve them on demand as
+      // claimVaultTx iterates fee estimation.
+      const rxdTxos = await db.txo
+        .where({ contractType: ContractType.RXD, spent: 0 })
+        .toArray();
+      const fundingPool: FundingUtxo[] = rxdTxos
+        .sort((a, b) => b.value - a.value)
+        .map((t) => ({
+          txid: t.txid,
+          vout: t.vout,
+          script: t.script,
+          value: t.value,
+        }));
+
+      const selectMoreFunding = (
+        needed: number,
+        alreadyHave: FundingUtxo[]
+      ): FundingUtxo[] => {
+        const usedKeys = new Set(
+          alreadyHave.map((u) => `${u.txid}:${u.vout}`)
+        );
+        const additional: FundingUtxo[] = [];
         let accumulated = 0;
-        const selectedTxos: typeof sortedTxos = [];
-        for (const txo of sortedTxos) {
-          if (accumulated >= neededValue) break;
-          selectedTxos.push(txo);
-          accumulated += txo.value;
+        for (const utxo of fundingPool) {
+          if (accumulated >= needed) break;
+          const key = `${utxo.txid}:${utxo.vout}`;
+          if (usedKeys.has(key)) continue;
+          additional.push(utxo);
+          accumulated += utxo.value;
         }
-        if (selectedTxos.length > 0) {
-          additionalFundingUtxos = selectedTxos.map((t) => ({
-            txid: t.txid,
-            vout: t.vout,
-            script: t.script,
-            value: t.value,
-          }));
-        }
-      }
+        return additional;
+      };
 
       const result = claimVaultTx(
         {
@@ -916,8 +925,12 @@ export default function VaultPage() {
         toAddress,
         wif,
         feeRate.value,
-        additionalFundingUtxos,
-        toAddress
+        // Start with zero funding; let the callback iterate fee → UTXOs.
+        // For RXD vaults this lets claimVaultTx try to pay from the vault
+        // itself first and only pull funding if the vault is too small.
+        undefined,
+        toAddress,
+        selectMoreFunding
       );
 
       const claimTxid = await electrumWorker.value.broadcast(result.rawTx);

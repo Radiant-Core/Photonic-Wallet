@@ -60,6 +60,9 @@ export const VAULT_MAGIC_BYTES = "7661756c74"; // "vault"
 /** nSequence value that enables CLTV (must be < 0xFFFFFFFF) */
 export const CLTV_SEQUENCE = 0xfffffffe;
 
+/** Dust threshold in photons — outputs at or below this are not added as change. */
+export const VAULT_DUST_THRESHOLD = 546;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -67,6 +70,26 @@ export const CLTV_SEQUENCE = 0xfffffffe;
 export type VaultAssetType = "rxd" | "nft" | "ft";
 
 export type VaultMode = "block" | "time";
+
+/** A spendable RXD UTXO usable to fund a vault claim. */
+export type FundingUtxo = {
+  txid: string;
+  vout: number;
+  script: string;
+  value: number;
+};
+
+/**
+ * Callback used by claimVaultTx when initial funding is insufficient.
+ *
+ * Implementations should return additional UTXOs (not already in `alreadyHave`)
+ * totalling at least `needed` photons. Returning an empty array signals that no
+ * more funding is available and the claim must abort.
+ */
+export type SelectMoreFunding = (
+  needed: number,
+  alreadyHave: FundingUtxo[]
+) => FundingUtxo[];
 
 export type VaultParams = {
   /** Locking mode: block height or UNIX timestamp */
@@ -1020,6 +1043,93 @@ export function buildVestingTx(
  *
  * For NFT/FT vaults, the output must preserve the token (ref in an output).
  */
+/**
+ * Estimate the serialized byte size of a vault claim transaction.
+ *
+ * Layout (all byte counts post-signing):
+ *   version(4) + in_count(1) + [vault input] + [funding inputs] +
+ *   out_count(1) + [primary output] + [change output?] + locktime(4)
+ *
+ * Per-input header: prev_txid(32) + vout(4) + scriptSig_len(1) + sequence(4) = 41B
+ * Per-output header: value(8) + script_len(1) = 9B
+ *
+ * Vault input scriptSig:
+ *   - Native FT vault: just <sig><pubkey> = 107B (the on-chain script itself enforces CLTV + FT conservation)
+ *   - P2SH vault (RXD/NFT): <sig><pubkey><redeemScript> = 107B + push-prefix + redeemScript length
+ *
+ * Primary output scriptPubKey (defaults if not specified):
+ *   - RXD: 25B (P2PKH)
+ *   - NFT: 63B  (OP_PUSHINPUTREFSINGLETON + 36B ref + OP_DROP + P2PKH)
+ *   - FT:  75B  (P2PKH + OP_STATESEPARATOR + OP_PUSHINPUTREF + 36B ref + 12B conservation)
+ */
+export function estimateVaultClaimSize(params: {
+  redeemScriptHex: string;
+  assetType: VaultAssetType;
+  fundingInputCount: number;
+  hasChange: boolean;
+  primaryOutputScriptSize?: number;
+}): number {
+  const BASE = 10;
+  const INPUT_HEADER = 41;
+  const OUTPUT_HEADER = 9;
+  const P2PKH_SCRIPTSIG = 107;
+  const P2PKH_SCRIPT_PUBKEY = 25;
+
+  const redeemBytes = params.redeemScriptHex.length / 2;
+  const redeemPushPrefix = redeemBytes >= 76 ? 2 : 1;
+  const vaultScriptSig =
+    params.assetType === "ft"
+      ? P2PKH_SCRIPTSIG
+      : P2PKH_SCRIPTSIG + redeemPushPrefix + redeemBytes;
+
+  let primaryOutputScriptSize: number;
+  if (params.primaryOutputScriptSize !== undefined) {
+    primaryOutputScriptSize = params.primaryOutputScriptSize;
+  } else if (params.assetType === "nft") {
+    primaryOutputScriptSize = 63;
+  } else if (params.assetType === "ft") {
+    primaryOutputScriptSize = 75;
+  } else {
+    primaryOutputScriptSize = P2PKH_SCRIPT_PUBKEY;
+  }
+
+  const vaultInputSize = INPUT_HEADER + vaultScriptSig;
+  const fundingInputsSize =
+    params.fundingInputCount * (INPUT_HEADER + P2PKH_SCRIPTSIG);
+  const primaryOutputSize = OUTPUT_HEADER + primaryOutputScriptSize;
+  const changeOutputSize = params.hasChange
+    ? OUTPUT_HEADER + P2PKH_SCRIPT_PUBKEY
+    : 0;
+
+  return (
+    BASE +
+    vaultInputSize +
+    fundingInputsSize +
+    primaryOutputSize +
+    changeOutputSize
+  );
+}
+
+/**
+ * Estimate the fee in photons for a vault claim transaction.
+ *
+ * Adds a 10% safety margin over the raw byte estimate to absorb DER signature
+ * length variance and varint edge cases. The caller passes `feeRate` in
+ * photons/byte (the wallet's `feeRate` signal).
+ */
+export function estimateVaultClaimFee(params: {
+  redeemScriptHex: string;
+  assetType: VaultAssetType;
+  fundingInputCount: number;
+  hasChange: boolean;
+  feeRate: number;
+  primaryOutputScriptSize?: number;
+}): number {
+  const size = estimateVaultClaimSize(params);
+  const sizeWithBuffer = Math.ceil(size * 1.1);
+  return Math.ceil(sizeWithBuffer * params.feeRate);
+}
+
 export function claimVaultTx(
   vaultUtxo: {
     txid: string;
@@ -1030,8 +1140,9 @@ export function claimVaultTx(
   toAddress: string,
   wif: string,
   feeRate: number,
-  additionalFundingUtxos?: { txid: string; vout: number; script: string; value: number }[],
-  fundingAddress?: string
+  additionalFundingUtxos?: FundingUtxo[],
+  fundingAddress?: string,
+  selectMoreFunding?: SelectMoreFunding
 ): { rawTx: string; txid: string } {
   const parsed = parseVaultRedeemScript(vaultUtxo.redeemScriptHex);
   if (!parsed) {
@@ -1040,6 +1151,78 @@ export function claimVaultTx(
 
   const privKey = PrivateKey.fromWIF(wif);
   const pubKey = privKey.toPublicKey();
+
+  // Build the primary output script up-front so the fee estimator uses its
+  // real byte size (NFT and FT outputs are 2-3x larger than P2PKH).
+  let outputScript: string;
+  if (parsed.assetType === "nft" && parsed.ref) {
+    const nftOut = Script.fromASM(
+      `OP_PUSHINPUTREFSINGLETON ${parsed.ref} OP_DROP`
+    ).add(Script.buildPublicKeyHashOut(toAddress));
+    outputScript = nftOut.toHex();
+  } else if (parsed.assetType === "ft" && parsed.ref) {
+    const ftOut = Script.buildPublicKeyHashOut(toAddress).add(
+      Script.fromASM(
+        `OP_STATESEPARATOR OP_PUSHINPUTREF ${parsed.ref} OP_REFOUTPUTCOUNT_OUTPUTS OP_INPUTINDEX OP_CODESCRIPTBYTECODE_UTXO OP_HASH256 OP_DUP OP_CODESCRIPTHASHVALUESUM_UTXOS OP_OVER OP_CODESCRIPTHASHVALUESUM_OUTPUTS OP_GREATERTHANOREQUAL OP_VERIFY OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS OP_NUMEQUALVERIFY`
+      )
+    );
+    outputScript = ftOut.toHex();
+  } else {
+    outputScript = Script.buildPublicKeyHashOut(toAddress).toHex();
+  }
+  const outputScriptSize = outputScript.length / 2;
+
+  // Funding loop: estimate fee → check coverage → request more if needed.
+  // Adding a funding input grows the fee, so we iterate up to 5 times.
+  const funding: FundingUtxo[] = additionalFundingUtxos
+    ? [...additionalFundingUtxos]
+    : [];
+  const MAX_ITERATIONS = 5;
+  let fee = 0;
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    const willHaveChange = funding.length > 0;
+    fee = estimateVaultClaimFee({
+      redeemScriptHex: vaultUtxo.redeemScriptHex,
+      assetType: parsed.assetType,
+      fundingInputCount: funding.length,
+      hasChange: willHaveChange,
+      feeRate,
+      primaryOutputScriptSize: outputScriptSize,
+    });
+
+    const totalFunding = funding.reduce((s, u) => s + u.value, 0);
+    const fundsCoverFee =
+      parsed.assetType === "rxd" && funding.length === 0
+        ? vaultUtxo.value >= fee + VAULT_DUST_THRESHOLD
+        : totalFunding >= fee + VAULT_DUST_THRESHOLD;
+
+    if (fundsCoverFee) break;
+
+    if (!selectMoreFunding || !fundingAddress) {
+      const have =
+        parsed.assetType === "rxd" && funding.length === 0
+          ? vaultUtxo.value
+          : totalFunding;
+      throw new Error(
+        `Insufficient funding for vault claim: estimated fee ${fee} photons, available ${have} photons. Provide additionalFundingUtxos or a selectMoreFunding callback.`
+      );
+    }
+
+    const additional = selectMoreFunding(
+      fee + VAULT_DUST_THRESHOLD - totalFunding,
+      funding
+    );
+    if (!additional || additional.length === 0) {
+      throw new Error(
+        `Insufficient funding for vault claim: estimated fee ${fee} photons, available ${totalFunding} photons; no more funding UTXOs available.`
+      );
+    }
+    funding.push(...additional);
+  }
+
+  const hasFunding = funding.length > 0;
+
   const tx = new Transaction();
 
   // Set nLockTime to the vault's locktime
@@ -1066,9 +1249,9 @@ export function claimVaultTx(
   input.sequenceNumber = CLTV_SEQUENCE;
   tx.addInput(input);
 
-  // Add additional funding UTXOs if needed (for fees)
-  if (additionalFundingUtxos && additionalFundingUtxos.length > 0 && fundingAddress) {
-    for (const utxo of additionalFundingUtxos) {
+  // Add funding UTXOs (selected above)
+  if (hasFunding && fundingAddress) {
+    for (const utxo of funding) {
       tx.from({
         address: fundingAddress,
         txId: utxo.txid,
@@ -1079,51 +1262,10 @@ export function claimVaultTx(
     }
   }
 
-  // Build output based on asset type
-  let outputScript: string;
-  if (parsed.assetType === "nft" && parsed.ref) {
-    // NFT: OP_PUSHINPUTREFSINGLETON <ref> OP_DROP P2PKH
-    const nftOut = Script.fromASM(
-      `OP_PUSHINPUTREFSINGLETON ${parsed.ref} OP_DROP`
-    ).add(Script.buildPublicKeyHashOut(toAddress));
-    outputScript = nftOut.toHex();
-  } else if (parsed.assetType === "ft" && parsed.ref) {
-    // FT: P2PKH + FT conservation
-    const ftOut = Script.buildPublicKeyHashOut(toAddress).add(
-      Script.fromASM(
-        `OP_STATESEPARATOR OP_PUSHINPUTREF ${parsed.ref} OP_REFOUTPUTCOUNT_OUTPUTS OP_INPUTINDEX OP_CODESCRIPTBYTECODE_UTXO OP_HASH256 OP_DUP OP_CODESCRIPTHASHVALUESUM_UTXOS OP_OVER OP_CODESCRIPTHASHVALUESUM_OUTPUTS OP_GREATERTHANOREQUAL OP_VERIFY OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS OP_NUMEQUALVERIFY`
-      )
-    );
-    outputScript = ftOut.toHex();
-  } else {
-    // RXD: plain P2PKH
-    outputScript = Script.buildPublicKeyHashOut(toAddress).toHex();
-  }
-
-  // Calculate fee with buffer for scriptSigs
-  const fundingInputs = additionalFundingUtxos?.length || 0;
-  const baseTxSize = 10; // version (4) + locktime (4) + input/output count (2)
-  // scriptSig sizes after signing: ~107 bytes per input (sig + pubkey + push ops)
-  const inputScriptSize = 107;
-  const vaultInputSize = vaultUtxo.redeemScriptHex.length / 2 + inputScriptSize;
-  const fundingInputSize = inputScriptSize;
-  const outputSize = 40; // scriptPubKey + satoshis
-  const totalInputsSize = vaultInputSize + fundingInputs * fundingInputSize;
-  const hasFunding = additionalFundingUtxos && additionalFundingUtxos.length > 0 && fundingAddress;
-  const outputCount = hasFunding ? 2 : 1;
-  const estimatedSize = baseTxSize + totalInputsSize + outputCount * outputSize;
-  // Add 10% buffer for serialization overhead
-  const sizeWithBuffer = Math.ceil(estimatedSize * 1.1);
-  const calculatedFee = Math.ceil(sizeWithBuffer * feeRate);
-  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte = 1 sat/byte)
-  const minRelayFee = Math.ceil(sizeWithBuffer * 1000);
-  const fee = Math.max(minRelayFee, calculatedFee);
-
-  // Determine vault output value based on funding availability
+  // Primary output value: vault keeps its full value when funding covers the fee;
+  // otherwise (RXD-only path) the fee is deducted from the vault value.
   const outputValue = hasFunding ? vaultUtxo.value : vaultUtxo.value - fee;
-
-  // Check if vault can cover fee - if not, we need wallet funding UTXOs
-  if (outputValue <= 0 && !hasFunding) {
+  if (outputValue <= 0) {
     throw new Error("Vault UTXO value too small to cover fee");
   }
 
@@ -1134,16 +1276,11 @@ export function claimVaultTx(
     })
   );
 
-  // If we have additional funding inputs, add change output
-  if (hasFunding) {
-    const totalFunding = additionalFundingUtxos.reduce(
-      (sum, u) => sum + u.value,
-      0
-    );
-    // Fee comes from funding, vault keeps full value
+  // Change output (only when funded). Sub-dust change is dropped into the fee.
+  if (hasFunding && fundingAddress) {
+    const totalFunding = funding.reduce((sum, u) => sum + u.value, 0);
     const change = totalFunding - fee;
-    if (change > 546) {
-      // dust threshold
+    if (change > VAULT_DUST_THRESHOLD) {
       tx.addOutput(
         new Transaction.Output({
           script: Script.fromAddress(fundingAddress).toHex(),
@@ -1198,7 +1335,7 @@ export function claimVaultTx(
   }
 
   // Sign any additional funding inputs (standard P2PKH)
-  if (additionalFundingUtxos && additionalFundingUtxos.length > 0) {
+  if (hasFunding) {
     for (let i = 1; i < tx.inputs.length; i++) {
       // @ts-ignore — Sighash.sign and input.output exist at runtime
       const fundingSig = Transaction.Sighash.sign(

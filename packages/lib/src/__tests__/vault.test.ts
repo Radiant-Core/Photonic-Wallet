@@ -14,6 +14,9 @@ import {
   buildRedeemScript,
   isNativeVault,
   buildVaultTx,
+  claimVaultTx,
+  estimateVaultClaimSize,
+  estimateVaultClaimFee,
   parseVaultRedeemScript,
   decodeVaultMetadata,
   isVaultUnlockable,
@@ -24,7 +27,9 @@ import {
   LOCKTIME_THRESHOLD,
   VAULT_MAGIC_BYTES,
   CLTV_SEQUENCE,
+  VAULT_DUST_THRESHOLD,
   type VaultParams,
+  type FundingUtxo,
 } from "../vault";
 import { nftScript, ftScript } from "../script";
 
@@ -665,5 +670,167 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
     // RXD script must not contain FT (bdd0) or NFT (d875) opcode sequences
     expect(result.redeemScriptHex).not.toContain("bdd0");
     expect(result.redeemScriptHex).not.toContain("d875");
+  });
+});
+
+describe("estimateVaultClaimSize / estimateVaultClaimFee", () => {
+  // Build representative redeem scripts so the estimator has real lengths to use.
+  const rxdRedeem = vaultP2pkhRedeemScript(800_000, testAddress);
+  const nftRedeem = vaultNftRedeemScript(800_000, testAddress, testRef);
+  const ftRedeem = vaultFtNativeScript(800_000, testAddress, testRef);
+
+  it("returns plausible sizes for each asset type", () => {
+    const rxd = estimateVaultClaimSize({
+      redeemScriptHex: rxdRedeem,
+      assetType: "rxd",
+      fundingInputCount: 0,
+      hasChange: false,
+    });
+    const nft = estimateVaultClaimSize({
+      redeemScriptHex: nftRedeem,
+      assetType: "nft",
+      fundingInputCount: 1,
+      hasChange: true,
+    });
+    const ft = estimateVaultClaimSize({
+      redeemScriptHex: ftRedeem,
+      assetType: "ft",
+      fundingInputCount: 1,
+      hasChange: true,
+    });
+    // Sanity bounds: a P2SH RXD vault claim is roughly 220-260 bytes,
+    // NFT/FT with one funding input land around 320-450 bytes.
+    expect(rxd).toBeGreaterThan(180);
+    expect(rxd).toBeLessThan(300);
+    expect(nft).toBeGreaterThan(rxd);
+    expect(ft).toBeGreaterThan(rxd);
+    expect(nft).toBeLessThan(500);
+    expect(ft).toBeLessThan(500);
+  });
+
+  it("fee scales with feeRate and includes a safety margin", () => {
+    const base = {
+      redeemScriptHex: rxdRedeem,
+      assetType: "rxd" as const,
+      fundingInputCount: 0,
+      hasChange: false,
+    };
+    const lowSize = estimateVaultClaimSize(base);
+    const lowFee = estimateVaultClaimFee({ ...base, feeRate: 1000 });
+    const highFee = estimateVaultClaimFee({ ...base, feeRate: 10000 });
+
+    // Each fee includes the 10% size buffer
+    expect(lowFee).toBeGreaterThanOrEqual(Math.ceil(lowSize * 1.1) * 1000);
+    expect(highFee).toBe(lowFee * 10);
+  });
+
+  it("adding funding inputs and change grows the fee monotonically", () => {
+    const noFunding = estimateVaultClaimSize({
+      redeemScriptHex: nftRedeem,
+      assetType: "nft",
+      fundingInputCount: 0,
+      hasChange: false,
+    });
+    const oneFunding = estimateVaultClaimSize({
+      redeemScriptHex: nftRedeem,
+      assetType: "nft",
+      fundingInputCount: 1,
+      hasChange: true,
+    });
+    const twoFunding = estimateVaultClaimSize({
+      redeemScriptHex: nftRedeem,
+      assetType: "nft",
+      fundingInputCount: 2,
+      hasChange: true,
+    });
+    expect(oneFunding).toBeGreaterThan(noFunding);
+    expect(twoFunding).toBeGreaterThan(oneFunding);
+  });
+});
+
+describe("claimVaultTx — funding selection", () => {
+  // Real key derived from the test address
+  const wif = PrivateKey.fromRandom("livenet").toWIF();
+  const claimAddress = new PrivateKey(wif).toAddress("livenet").toString();
+  const rxdRedeem = vaultP2pkhRedeemScript(800_000, claimAddress);
+  const nftRedeem = vaultNftRedeemScript(800_000, claimAddress, testRef);
+
+  const dummyVaultRxd = {
+    txid: "00".repeat(32),
+    vout: 0,
+    value: 100_000_000, // 1 RXD — comfortably covers any fee
+    redeemScriptHex: rxdRedeem,
+  };
+  const dummyVaultNft = {
+    txid: "00".repeat(32),
+    vout: 0,
+    value: VAULT_DUST_THRESHOLD, // NFT vaults hold dust
+    redeemScriptHex: nftRedeem,
+  };
+
+  it("throws a clear error when NFT claim has no funding and no callback", () => {
+    expect(() =>
+      claimVaultTx(dummyVaultNft, claimAddress, wif, 10000, undefined, claimAddress)
+    ).toThrow(/Insufficient funding/i);
+  });
+
+  it("pulls additional funding via the selectMoreFunding callback", () => {
+    const pool: FundingUtxo[] = [
+      {
+        txid: "11".repeat(32),
+        vout: 0,
+        script: "76a914" + testPkh + "88ac",
+        value: 50_000_000,
+      },
+    ];
+    let callbackCalls = 0;
+    const selectMoreFunding = (
+      _needed: number,
+      already: FundingUtxo[]
+    ): FundingUtxo[] => {
+      callbackCalls++;
+      const usedKeys = new Set(already.map((u) => `${u.txid}:${u.vout}`));
+      return pool.filter((u) => !usedKeys.has(`${u.txid}:${u.vout}`));
+    };
+
+    const result = claimVaultTx(
+      dummyVaultNft,
+      claimAddress,
+      wif,
+      10000,
+      undefined,
+      claimAddress,
+      selectMoreFunding
+    );
+
+    expect(result.rawTx).toBeTruthy();
+    expect(callbackCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it("throws when the callback returns no more funding", () => {
+    const selectMoreFunding = (): FundingUtxo[] => [];
+    expect(() =>
+      claimVaultTx(
+        dummyVaultNft,
+        claimAddress,
+        wif,
+        10000,
+        undefined,
+        claimAddress,
+        selectMoreFunding
+      )
+    ).toThrow(/no more funding/i);
+  });
+
+  it("RXD vault claim succeeds without funding when the vault covers its own fee", () => {
+    const result = claimVaultTx(
+      dummyVaultRxd,
+      claimAddress,
+      wif,
+      10000,
+      undefined,
+      claimAddress
+    );
+    expect(result.rawTx).toBeTruthy();
   });
 });
