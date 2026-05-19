@@ -2,15 +2,7 @@
 // @ts-ignore
 import bsvCoinSelect from "bsv-coinselect";
 import { UnfinalizedInput, UnfinalizedOutput, Utxo } from "./types";
-
-const MIN_FEE_RATE = 10000;
-
-const normalizeFeeRate = (feeRate: number) => {
-  if (!Number.isFinite(feeRate)) {
-    return MIN_FEE_RATE;
-  }
-  return Math.max(MIN_FEE_RATE, feeRate);
-};
+import { normalizeFeeRate } from "./feePolicy";
 
 export type SelectableInput = UnfinalizedInput & {
   required?: boolean;

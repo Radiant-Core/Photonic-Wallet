@@ -37,6 +37,7 @@ import {
   deriveKeyHKDF,
 } from "./encryption";
 import { randomBytes } from "@noble/hashes/utils";
+import { normalizeFeeRate } from "./feePolicy";
 
 const { Script, Opcode, Address, Transaction, PrivateKey, crypto } = rjs;
 type Script = rjs.Script;
@@ -848,14 +849,13 @@ export function buildVaultTx(
 
   // Change
   tx.change(fromAddress);
+  // Clamp the caller's rate to the network floor (Radiant Core post-V2 min relay).
+  const effectiveFeeRate = normalizeFeeRate(feeRate);
   // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
   // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
   const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
-  const calculatedFee = Math.ceil((estimatedSize + tokenScriptSize) * feeRate);
-  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
-  const minRelayFee = Math.ceil((estimatedSize + tokenScriptSize) * 1000);
-  const finalFee = Math.max(minRelayFee, calculatedFee);
+  const finalFee = Math.ceil((estimatedSize + tokenScriptSize) * effectiveFeeRate);
   tx.fee(finalFee);
   // Sign the RXD funding inputs (added via tx.from)
   tx.sign(privKey);
@@ -1008,14 +1008,13 @@ export function buildVestingTx(
 
   // Change
   tx.change(fromAddress);
+  // Clamp the caller's rate to the network floor (Radiant Core post-V2 min relay).
+  const effectiveFeeRate = normalizeFeeRate(feeRate);
   // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
   // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
   const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
-  const calculatedFee = Math.ceil((estimatedSize + tokenScriptSize) * feeRate);
-  // Ensure minimum fee meets relay requirements (at least 1000 photons/byte)
-  const minRelayFee = Math.ceil((estimatedSize + tokenScriptSize) * 1000);
-  const finalFee = Math.max(minRelayFee, calculatedFee);
+  const finalFee = Math.ceil((estimatedSize + tokenScriptSize) * effectiveFeeRate);
   tx.fee(finalFee);
   tx.sign(privKey);
   tx.seal();
@@ -1149,6 +1148,11 @@ export function claimVaultTx(
     throw new Error("Invalid vault redeem script");
   }
 
+  // Clamp the caller's rate to the network floor before any sizing math.
+  // Without this, a user-set rate below 10_000 photons/byte produces a tx that
+  // Radiant Core 2 nodes reject with "min relay fee not met".
+  const effectiveFeeRate = normalizeFeeRate(feeRate);
+
   const privKey = PrivateKey.fromWIF(wif);
   const pubKey = privKey.toPublicKey();
 
@@ -1187,7 +1191,7 @@ export function claimVaultTx(
       assetType: parsed.assetType,
       fundingInputCount: funding.length,
       hasChange: willHaveChange,
-      feeRate,
+      feeRate: effectiveFeeRate,
       primaryOutputScriptSize: outputScriptSize,
     });
 

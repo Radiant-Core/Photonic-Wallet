@@ -6,6 +6,7 @@ import rjs from "@radiant-core/radiantjs";
 import { Buffer } from "buffer";
 import { UnfinalizedOutput, Utxo } from "./types";
 import { parseNftScript } from "./script";
+import { MAX_REASONABLE_FEE_RATE } from "./feePolicy";
 
 // ESM compatibility
 const { Script, PrivateKey, Transaction, crypto } = rjs;
@@ -95,7 +96,7 @@ export const buildTx = (
   tx.seal();
 
   if (!skipFeeCheck) {
-    feeCheck(tx, 20000);
+    feeCheck(tx, MAX_REASONABLE_FEE_RATE);
   }
 
   return tx;
@@ -107,13 +108,20 @@ export function txId(tx: string) {
   );
 }
 
-// Fee check to prevent unfortunate bugs
-export function feeCheck(tx: rjs.Transaction, feeRate: number) {
+/**
+ * Upper-bound sanity check on the fee a signed transaction will pay.
+ *
+ * This is a guard against unit-confusion bugs (paying sats/kB when we mean
+ * photons/byte, etc.) — not a relay-policy enforcement. Compares the actual
+ * fee against `size * referenceFeeRate` and throws if actual is more than
+ * 20% above that reference. Pass `MAX_REASONABLE_FEE_RATE` from feePolicy.ts
+ * unless you have a specific reason to use a different ceiling.
+ */
+export function feeCheck(tx: rjs.Transaction, referenceFeeRate: number) {
   const size = tx.toString().length / 2;
-  const expected = size * feeRate;
+  const expected = size * referenceFeeRate;
   const actual = tx.getFee();
 
-  // No greater than 20% more than expected
   if (actual > expected && !((actual - expected) / expected < 0.2)) {
     throw new Error("Failed fee check");
   }
