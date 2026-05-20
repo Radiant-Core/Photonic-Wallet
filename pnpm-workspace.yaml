@@ -1,2 +1,10 @@
 packages:
   - "packages/*"
+allowBuilds:
+  '@swc/core': true
+  cbor-extract: true
+  esbuild: true
+  protobufjs: true
+  sharp: true
+minimumReleaseAgeExclude:
+  - '@radiant-core/radiantjs@2.0.0'

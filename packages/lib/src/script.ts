@@ -1,4 +1,4 @@
-//import { Address, Opcode, Script } from "@radiantblockchain/radiantjs";
+//import { Address, Opcode, Script } from "@radiant-core/radiantjs";
 import rjs from "@radiant-core/radiantjs";
 import { sha256 } from "@noble/hashes/sha256";
 import { Buffer } from "buffer";
