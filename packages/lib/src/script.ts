@@ -684,6 +684,222 @@ function buildLinearDaaBytecode(): string {
   ].join('');
 }
 
+/**
+ * Allowed maxAdjustment values for EPOCH DAA. Restricted to powers of 2 so the
+ * clamp uses OP_LSHIFT/OP_RSHIFT instead of OP_DIV (see EPOCH/SCHEDULE design
+ * doc §3.3, decision 2026-05-19). The stored value in `daaParams` is the
+ * log2 shift count (1 → 2x, 2 → 4x, 3 → 8x, 4 → 16x).
+ */
+export const EPOCH_MAX_ADJUSTMENT_LOG2_VALUES = [1, 2, 3, 4] as const;
+export type EpochMaxAdjustmentLog2 = (typeof EPOCH_MAX_ADJUSTMENT_LOG2_VALUES)[number];
+
+/** Per the EPOCH/SCHEDULE design doc §3.7, target > 2^48 risks overflow in
+ * `target * clampedDelta` (delta ≤ targetTime * 16). Rejected at wallet build
+ * time when daaMode === 'epoch'. */
+export const EPOCH_MAX_SAFE_TARGET = (1n << 48n);
+
+/** Maximum number of entries in a SCHEDULE (design doc §4.2, decided 2026-05-19). */
+export const SCHEDULE_MAX_ENTRIES = 10;
+
+export type ScheduleEntry = { height: number; target: bigint };
+
+export class DaaParamsValidationError extends Error {}
+
+/**
+ * EPOCH DAA bytecode (design doc §3 + simplifications using OP_MOD/OP_MIN/OP_MAX).
+ *
+ * Entry stack at Part B.3:
+ *   [target, lastTime, targetTime, daaMode, algoId, reward, maxHeight,
+ *    tokenRef, contractRef, height, ...]
+ *
+ * Algorithm (interpretation B from the design doc):
+ *   if (height > 0) and (height % epochLength == 0):
+ *     delta        = currentTime - lastTime
+ *     clampedDelta = max(targetTime >> N, min(targetTime << N, delta))
+ *     newTarget    = max(1, target * clampedDelta / targetTime)
+ *   else:
+ *     target unchanged
+ *
+ * N = maxAdjustmentLog2 ∈ {1,2,3,4}. Default 2 (= 4x).
+ */
+function buildEpochDaaBytecode(
+  epochLength: number,
+  maxAdjustmentLog2: number
+): string {
+  if (!Number.isInteger(epochLength) || epochLength <= 0) {
+    throw new DaaParamsValidationError(
+      `EPOCH: epochLength must be a positive integer (got ${epochLength})`
+    );
+  }
+  if (!EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(maxAdjustmentLog2 as EpochMaxAdjustmentLog2)) {
+    throw new DaaParamsValidationError(
+      `EPOCH: maxAdjustmentLog2 must be one of ${EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.join(', ')} (got ${maxAdjustmentLog2})`
+    );
+  }
+  const epochLengthPush = pushMinimal(epochLength);
+  const nPush = pushMinimal(maxAdjustmentLog2);
+  return [
+    // ── Boundary check: (height > 0) AND (height % epochLength == 0) ──
+    '5979',           // OP_9 OP_PICK       — copy height (state pos 9)
+    '76',             // OP_DUP             — dup for two checks
+    '00a0',           // OP_0 OP_GREATERTHAN — height > 0?
+    '7c',             // OP_SWAP            — move height_copy back to top
+    epochLengthPush,  // push epochLength
+    '97',             // OP_MOD             — height % epochLength
+    '009c',           // OP_0 OP_NUMEQUAL   — mod == 0?
+    '9a',             // OP_BOOLAND         — combine
+    '63',             // OP_IF
+      // ── delta = currentTime - lastTime ──
+      'c5',           //   OP_TXLOCKTIME    — currentTime
+      '5279',         //   OP_2 OP_PICK     — copy lastTime
+      '94',           //   OP_SUB           — delta
+      // ── clamp delta to [targetTime>>N, targetTime<<N] ──
+      '5379',         //   OP_3 OP_PICK     — copy targetTime
+      nPush,          //   push N
+      '98',           //   OP_LSHIFT        — upperBound = targetTime << N
+      'a3',           //   OP_MIN           — delta = min(delta, upperBound)
+      '5379',         //   OP_3 OP_PICK     — copy targetTime
+      nPush,          //   push N
+      '99',           //   OP_RSHIFT        — lowerBound = targetTime >> N
+      'a4',           //   OP_MAX           — delta = max(delta, lowerBound)
+      // ── newTarget = target * clampedDelta / targetTime ──
+      '7c',           //   OP_SWAP          — [target, clampedDelta, ...]
+      '95',           //   OP_MUL           — target * clampedDelta
+      '5279',         //   OP_2 OP_PICK     — copy targetTime
+      '96',           //   OP_DIV           — newTarget
+      // ── clamp newTarget to ≥1 ──
+      '76519f',       //   OP_DUP OP_1 OP_LESSTHAN
+      '63',           //   OP_IF
+      '7551',         //     OP_DROP OP_1
+      '68',           //   OP_ENDIF
+    '68',             // OP_ENDIF (outer)
+  ].join('');
+}
+
+/**
+ * SCHEDULE DAA bytecode (design doc §4).
+ *
+ * Generates a descending nested IF/ELSE chain. For each boundary h_i with
+ * target t_i, in descending order of h:
+ *
+ *   if (height >= h_i):
+ *     target = t_i
+ *   else:
+ *     <next-lower-boundary check>
+ *
+ * If no boundary matches (height < smallest h_i), the original target is
+ * preserved.
+ *
+ * Caller must pass a schedule sorted strictly ascending by height with
+ * 1 ≤ length ≤ SCHEDULE_MAX_ENTRIES. Validation is enforced here.
+ */
+function buildScheduleDaaBytecode(schedule: ScheduleEntry[]): string {
+  if (schedule.length === 0) {
+    // Empty schedule = FIXED behavior. Caller should map this to mode 'fixed'.
+    return '';
+  }
+  if (schedule.length > SCHEDULE_MAX_ENTRIES) {
+    throw new DaaParamsValidationError(
+      `SCHEDULE: at most ${SCHEDULE_MAX_ENTRIES} entries allowed (got ${schedule.length})`
+    );
+  }
+  for (let i = 0; i < schedule.length; i++) {
+    const entry = schedule[i];
+    if (!Number.isInteger(entry.height) || entry.height < 0) {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entry ${i} height must be a non-negative integer (got ${entry.height})`
+      );
+    }
+    if (entry.target <= 0n) {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entry ${i} target must be positive (got ${entry.target})`
+      );
+    }
+    if (i > 0 && entry.height <= schedule[i - 1].height) {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entries must be strictly ascending by height (entry ${i} height ${entry.height} <= ${schedule[i - 1].height})`
+      );
+    }
+  }
+
+  // Build the nested IF/ELSE chain from the inside out: start with the
+  // lowest-boundary check, wrap with each next-higher boundary. After all
+  // iterations, the outermost layer is the highest boundary.
+  let body = '';
+  for (let i = 0; i < schedule.length; i++) {
+    const { height, target } = schedule[i];
+    body = [
+      '5979',                  // OP_9 OP_PICK         — copy height
+      pushMinimal(height),     // push boundary
+      'a2',                    // OP_GREATERTHANOREQUAL
+      '63',                    // OP_IF
+      '75',                    //   OP_DROP            — drop old target
+      pushMinimal(target),     //   push new target
+      body ? '67' : '',        // OP_ELSE (only if there's a deeper layer to fall back to)
+      body,
+      '68',                    // OP_ENDIF
+    ].join('');
+  }
+  return body;
+}
+
+/**
+ * Translate a user-facing maxAdjustment factor (2, 4, 8, 16) to the log2 shift
+ * count the bytecode embeds. Accepts the log2 value directly for callers that
+ * already speak that form. Throws DaaParamsValidationError for anything else.
+ */
+function maxAdjustmentToLog2(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 2; // default 4x (log2=2)
+  }
+  // Direct log2 form (callers that already pass shift count)
+  if (EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(value as EpochMaxAdjustmentLog2)) {
+    return value;
+  }
+  // Factor form (2, 4, 8, 16) — convert to log2
+  const factorToLog2: Record<number, number> = { 2: 1, 4: 2, 8: 3, 16: 4 };
+  if (value in factorToLog2) return factorToLog2[value];
+  throw new DaaParamsValidationError(
+    `EPOCH: maxAdjustment must be 2, 4, 8, or 16 (got ${value})`
+  );
+}
+
+/**
+ * Translate a wallet-side schedule entry (which may carry `difficulty`,
+ * `target`, or both) into the canonical { height, target } form the bytecode
+ * generator expects.
+ */
+function normalizeScheduleEntries(
+  raw: unknown
+): ScheduleEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((e: any, i: number) => {
+    if (!e || typeof e !== 'object') {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entry ${i} is not an object`
+      );
+    }
+    if (typeof e.height !== 'number') {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entry ${i} missing numeric height`
+      );
+    }
+    let target: bigint;
+    if (typeof e.target === 'bigint') {
+      target = e.target;
+    } else if (typeof e.target === 'number' && Number.isFinite(e.target)) {
+      target = BigInt(e.target);
+    } else if (typeof e.difficulty === 'number' && Number.isFinite(e.difficulty) && e.difficulty > 0) {
+      target = dMintDiffToTarget(e.difficulty);
+    } else {
+      throw new DaaParamsValidationError(
+        `SCHEDULE: entry ${i} needs either target (bigint/number) or difficulty (positive number)`
+      );
+    }
+    return { height: e.height, target };
+  });
+}
+
 function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
   let daaBytecode = '';
   switch (daaMode) {
@@ -693,6 +909,20 @@ function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
     case 'lwma':
       daaBytecode = buildLinearDaaBytecode();
       break;
+    case 'epoch':
+      daaBytecode = buildEpochDaaBytecode(
+        daaParams?.epochLength ?? 2016,
+        maxAdjustmentToLog2(
+          // Prefer the explicit log2 form when present.
+          daaParams?.maxAdjustmentLog2 ?? daaParams?.maxAdjustment
+        )
+      );
+      break;
+    case 'schedule':
+      daaBytecode = buildScheduleDaaBytecode(
+        normalizeScheduleEntries(daaParams?.schedule)
+      );
+      break;
     case 'fixed':
     default:
       daaBytecode = '';
@@ -700,6 +930,11 @@ function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
   }
   return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${V2_BYTECODE_PART_B4}`;
 }
+
+export {
+  buildEpochDaaBytecode,
+  buildScheduleDaaBytecode,
+};
 
 export function dMintScript(
   height: number,

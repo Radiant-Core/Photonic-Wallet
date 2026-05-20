@@ -1932,15 +1932,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       )}
                       <FormControl>
                         <FormLabel>{"Difficulty Adjustment"}</FormLabel>
-                        {/*
-                          EPOCH (0x01) and SCHEDULE (0x04) are specified in the
-                          Glyph v2 whitepaper but buildV2BytecodePartB in
-                          packages/lib/src/script.ts only emits bytecode for
-                          ASERT and LWMA. Selecting them would deploy contracts
-                          with no on-chain adjustment logic — they would behave
-                          as FIXED while reporting their daaId. Hide until the
-                          bytecode is implemented.
-                        */}
                         <Select
                           name="daaMode"
                           defaultValue={formData.daaMode}
@@ -1949,13 +1940,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <option value="fixed">Fixed Difficulty</option>
                           <option value="asert">ASERT (Recommended)</option>
                           <option value="lwma">LWMA</option>
+                          <option value="epoch">Epoch-Based</option>
+                          <option value="schedule">Schedule</option>
                         </Select>
                         <FormHelperText>
                           {formData.daaMode === 'fixed'
                             ? "Difficulty never changes"
                             : formData.daaMode === 'asert'
                             ? "Exponential moving average, smooth adjustments"
-                            : "Linear weighted moving average"
+                            : formData.daaMode === 'lwma'
+                            ? "Linear weighted moving average"
+                            : formData.daaMode === 'epoch'
+                            ? "Bitcoin-style periodic adjustment (only at epoch boundaries)"
+                            : "Pre-determined difficulty curve at fixed heights"
                           }
                         </FormHelperText>
                       </FormControl>
@@ -2046,39 +2043,42 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             />
                             <FormHelperText>
                               Number of blocks between difficulty adjustments.
+                              Adjustment fires when `height % epochLength == 0` (skipping height 0).
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
                             <FormLabel>{"Max Adjustment Factor"}</FormLabel>
-                            <Input
-                              defaultValue={formData.maxAdjustment || "4"}
-                              placeholder="4"
+                            <Select
                               name="maxAdjustment"
-                              type="number"
+                              defaultValue={formData.maxAdjustment || "4"}
                               onChange={onFormChange}
-                              min={1}
-                              max={100}
-                              step={0.1}
-                            />
+                            >
+                              <option value="2">2x (gentle)</option>
+                              <option value="4">4x (default)</option>
+                              <option value="8">8x</option>
+                              <option value="16">16x (aggressive)</option>
+                            </Select>
                             <FormHelperText>
-                              Maximum factor difficulty can change per adjustment (e.g., 4 = 4x increase/decrease).
+                              Maximum factor difficulty can change per adjustment. Restricted to
+                              powers of 2 so on-chain clamping uses OP_LSHIFT/OP_RSHIFT (cheaper bytecode).
                             </FormHelperText>
                           </FormControl>
                         </>
                       )}
-                      
+
                       {formData.daaMode === 'schedule' && (
                         <FormControl>
                           <FormLabel>{"Difficulty Schedule"}</FormLabel>
                           <Textarea
-                            defaultValue={formData.schedule || "0:1000,1000:500,2000:250"}
-                            placeholder="0:1000,1000:500,2000:250"
+                            defaultValue={formData.schedule || "1000:500,2000:250,5000:100"}
+                            placeholder="1000:500,2000:250,5000:100"
                             name="schedule"
                             onChange={onFormChange}
                             rows={3}
                           />
                           <FormHelperText>
-                            Comma-separated list of height:difficulty pairs. Example: "0:1000,1000:500,2000:250"
+                            Comma-separated `height:difficulty` pairs, strictly ascending by height.
+                            Up to 10 entries. Below the first boundary the initial difficulty applies.
                           </FormHelperText>
                         </FormControl>
                       )}

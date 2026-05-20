@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { SmartTokenPayload, DmintPayload } from '../types';
 import { GLYPH_FT, GLYPH_DMINT } from '../protocols';
-import { dMintScript, dMintDiffToTarget } from '../script';
+import {
+  dMintScript,
+  dMintDiffToTarget,
+  buildEpochDaaBytecode,
+  buildScheduleDaaBytecode,
+  EPOCH_MAX_ADJUSTMENT_LOG2_VALUES,
+  SCHEDULE_MAX_ENTRIES,
+  DaaParamsValidationError,
+  type ScheduleEntry,
+} from '../script';
 import rjs from '@radiant-core/radiantjs';
 
 const { Script } = rjs;
@@ -405,6 +414,143 @@ describe('dMint Token Creation (Glyph v2)', () => {
       expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_9 OP_PICK');
       expect(indexWindow).toContain('OP_13 OP_PICK OP_13 OP_PICK');
       expect(indexWindow).toContain('OP_14 OP_ROLL');
+    });
+  });
+
+  describe('EPOCH DAA bytecode', () => {
+    it('emits expected opcode sequence for default params', () => {
+      const hex = buildEpochDaaBytecode(2016, 2);
+      // Sanity: starts with OP_9 OP_PICK (5979) and ends with OP_ENDIF (68)
+      expect(hex.startsWith('5979')).toBe(true);
+      expect(hex.endsWith('68')).toBe(true);
+      // Must contain OP_MOD (97), OP_BOOLAND (9a), OP_TXLOCKTIME (c5),
+      // OP_LSHIFT (98), OP_RSHIFT (99), OP_MIN (a3), OP_MAX (a4), OP_MUL (95), OP_DIV (96)
+      for (const op of ['97', '9a', 'c5', '98', '99', 'a3', 'a4', '95', '96']) {
+        expect(hex).toContain(op);
+      }
+    });
+
+    it('emits canonical-minimal pushes (no leading zeros, no oversized data pushes)', () => {
+      const hex = buildEpochDaaBytecode(2016, 2);
+      // Must parse without errors and round-trip through Script.fromHex.toASM
+      const asm = Script.fromHex(hex).toASM();
+      expect(asm.length).toBeGreaterThan(0);
+      expect(hasNonMinimalDataPush(hex)).toBe(false);
+    });
+
+    it('embeds different shift counts for different maxAdjustmentLog2 values', () => {
+      const seen = new Set<string>();
+      for (const n of EPOCH_MAX_ADJUSTMENT_LOG2_VALUES) {
+        const hex = buildEpochDaaBytecode(100, n);
+        seen.add(hex);
+      }
+      // Each log2 value must produce a distinct bytecode (different push constants)
+      expect(seen.size).toBe(EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.length);
+    });
+
+    it('rejects invalid epochLength', () => {
+      expect(() => buildEpochDaaBytecode(0, 2)).toThrow(DaaParamsValidationError);
+      expect(() => buildEpochDaaBytecode(-1, 2)).toThrow(DaaParamsValidationError);
+      expect(() => buildEpochDaaBytecode(1.5, 2)).toThrow(DaaParamsValidationError);
+    });
+
+    it('rejects maxAdjustmentLog2 outside {1,2,3,4}', () => {
+      expect(() => buildEpochDaaBytecode(100, 0)).toThrow(DaaParamsValidationError);
+      expect(() => buildEpochDaaBytecode(100, 5)).toThrow(DaaParamsValidationError);
+      expect(() => buildEpochDaaBytecode(100, -1)).toThrow(DaaParamsValidationError);
+    });
+  });
+
+  describe('SCHEDULE DAA bytecode', () => {
+    const sampleSchedule: ScheduleEntry[] = [
+      { height: 1000, target: 500n },
+      { height: 2000, target: 250n },
+      { height: 5000, target: 100n },
+    ];
+
+    it('emits empty bytecode for an empty schedule', () => {
+      expect(buildScheduleDaaBytecode([])).toBe('');
+    });
+
+    it('emits nested IF/ELSE chain for a 3-entry schedule', () => {
+      const hex = buildScheduleDaaBytecode(sampleSchedule);
+      // Should contain 3 occurrences of OP_GREATERTHANOREQUAL (a2)
+      const geCount = (hex.match(/a2/g) ?? []).length;
+      expect(geCount).toBe(3);
+      // Should contain at least 3 OP_IF (63), 2 OP_ELSE (67), 3 OP_ENDIF (68)
+      expect((hex.match(/63/g) ?? []).length).toBeGreaterThanOrEqual(3);
+      expect((hex.match(/67/g) ?? []).length).toBeGreaterThanOrEqual(2);
+      expect((hex.match(/68/g) ?? []).length).toBeGreaterThanOrEqual(3);
+      // Should parse cleanly
+      Script.fromHex(hex).toASM();
+    });
+
+    it('puts the highest boundary outermost (descending walk in code)', () => {
+      const hex = buildScheduleDaaBytecode(sampleSchedule);
+      // pushMinimal(5000) → 0x02 8813 (2-byte push, little-endian 0x1388)
+      // pushMinimal(2000) → 0x02 d007 (2-byte push, little-endian 0x07d0)
+      // pushMinimal(1000) → 0x02 e803 (2-byte push, little-endian 0x03e8)
+      const i5000 = hex.indexOf('028813');
+      const i2000 = hex.indexOf('02d007');
+      const i1000 = hex.indexOf('02e803');
+      expect(i5000).toBeGreaterThan(-1);
+      expect(i2000).toBeGreaterThan(i5000);
+      expect(i1000).toBeGreaterThan(i2000);
+    });
+
+    it('rejects more than SCHEDULE_MAX_ENTRIES entries', () => {
+      const tooMany = Array.from({ length: SCHEDULE_MAX_ENTRIES + 1 }, (_, i) => ({
+        height: (i + 1) * 100,
+        target: BigInt(1000 - i),
+      }));
+      expect(() => buildScheduleDaaBytecode(tooMany)).toThrow(DaaParamsValidationError);
+    });
+
+    it('rejects unsorted or duplicate-height entries', () => {
+      expect(() =>
+        buildScheduleDaaBytecode([
+          { height: 2000, target: 250n },
+          { height: 1000, target: 500n }, // unsorted
+        ])
+      ).toThrow(DaaParamsValidationError);
+      expect(() =>
+        buildScheduleDaaBytecode([
+          { height: 1000, target: 500n },
+          { height: 1000, target: 250n }, // duplicate
+        ])
+      ).toThrow(DaaParamsValidationError);
+    });
+
+    it('rejects non-positive target', () => {
+      expect(() =>
+        buildScheduleDaaBytecode([{ height: 100, target: 0n }])
+      ).toThrow(DaaParamsValidationError);
+      expect(() =>
+        buildScheduleDaaBytecode([{ height: 100, target: -1n }])
+      ).toThrow(DaaParamsValidationError);
+    });
+
+    it('accepts difficulty form via dMintScript daaParams', () => {
+      // This exercises the normalizeScheduleEntries path: input has `difficulty`,
+      // bytecode embeds the corresponding target.
+      const script = dMintScript(
+        0,
+        '11'.repeat(36),
+        '22'.repeat(36),
+        100,
+        10,
+        dMintDiffToTarget(10),
+        'sha256d',
+        'schedule',
+        {
+          schedule: [
+            { height: 1000, difficulty: 50 },
+            { height: 2000, difficulty: 100 },
+          ],
+        }
+      );
+      // Should produce a contract script and round-trip cleanly
+      expect(Script.fromHex(script).toASM().length).toBeGreaterThan(0);
     });
   });
 });
