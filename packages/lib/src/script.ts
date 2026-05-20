@@ -627,6 +627,12 @@ const V1_BYTECODE_PART_B = 'bc01147f77587f040000000088817600a269a269577ae500a069
 function buildAsertDaaBytecode(halfLife: number): string {
   // ASERT-lite DAA (Design Spec §4.5)
   // Entry stack: [target, lastTime, targetTime, daaMode, ...]
+  //
+  // History note: prior to 2026-05-19 the three NEGATE sites in this function
+  // emitted hex byte 0x81 (OP_BIN2NUM) instead of 0x8f (OP_NEGATE) — see
+  // task #10. The bug rendered the negative-drift clamp identical to a
+  // second positive check and made the RSHIFT path receive a negative
+  // shift count. New deployments after the fix use the correct opcode.
   const halfLifePush = pushMinimal(halfLife);
   return [
     'c5',             // OP_TXLOCKTIME → currentTime
@@ -641,9 +647,9 @@ function buildAsertDaaBytecode(halfLife: number): string {
     '63',             // IF
     '7554',           //   DROP, push 4
     '68',             // ENDIF
-    '765481', '9f',   // DUP OP_4 NEGATE LT
+    '76548f', '9f',   // DUP OP_4 NEGATE LT
     '63',             // IF
-    '755481',         //   DROP, push -4
+    '75548f',         //   DROP, push -4
     '68',             // ENDIF
     // Apply shift: drift>0 → LSHIFT, drift<0 → RSHIFT(|drift|), drift==0 → unchanged
     '7600a0',         // DUP 0 GT
@@ -652,7 +658,7 @@ function buildAsertDaaBytecode(halfLife: number): string {
     '67',             // ELSE
     '76009f',         //   DUP 0 LT
     '63',             //   IF (negative)
-    '8199',           //     NEGATE RSHIFT
+    '8f99',           //     NEGATE RSHIFT
     '67',             //   ELSE (zero)
     '75',             //     DROP (drift=0, target unchanged)
     '68',             //   ENDIF
@@ -932,6 +938,8 @@ function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
 }
 
 export {
+  buildAsertDaaBytecode,
+  buildLinearDaaBytecode,
   buildEpochDaaBytecode,
   buildScheduleDaaBytecode,
 };

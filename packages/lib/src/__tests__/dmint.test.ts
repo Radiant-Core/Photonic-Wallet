@@ -4,6 +4,8 @@ import { GLYPH_FT, GLYPH_DMINT } from '../protocols';
 import {
   dMintScript,
   dMintDiffToTarget,
+  buildAsertDaaBytecode,
+  buildLinearDaaBytecode,
   buildEpochDaaBytecode,
   buildScheduleDaaBytecode,
   EPOCH_MAX_ADJUSTMENT_LOG2_VALUES,
@@ -414,6 +416,38 @@ describe('dMint Token Creation (Glyph v2)', () => {
       expect(indexWindow).toContain('OP_OUTPOINTTXHASH OP_9 OP_PICK');
       expect(indexWindow).toContain('OP_13 OP_PICK OP_13 OP_PICK');
       expect(indexWindow).toContain('OP_14 OP_ROLL');
+    });
+  });
+
+  describe('ASERT DAA bytecode', () => {
+    // Regression for the 2026-05-19 opcode bug: prior implementations of
+    // buildAsertDaaBytecode emitted hex 0x81 (OP_BIN2NUM) in three places
+    // where 0x8f (OP_NEGATE) was intended. The bug rendered the negative-
+    // drift clamp identical to a second positive check and made the RSHIFT
+    // path receive a negative shift count.
+    it('emits OP_NEGATE three times and no OP_BIN2NUM in the DAA section', () => {
+      const hex = buildAsertDaaBytecode(1000);
+      const asm = Script.fromHex(hex).toASM();
+      const tokens = asm.split(' ');
+
+      const bin2numCount = tokens.filter((t) => t === 'OP_BIN2NUM').length;
+      const negateCount = tokens.filter((t) => t === 'OP_NEGATE').length;
+
+      expect(bin2numCount).toBe(0);
+      expect(negateCount).toBe(3);
+    });
+
+    it('emits the documented clamp-and-shift opcode skeleton', () => {
+      const hex = buildAsertDaaBytecode(1000);
+      const asm = Script.fromHex(hex).toASM();
+
+      // Negative clamp must compare against -4 (not 4):
+      // OP_DUP OP_4 OP_NEGATE OP_LESSTHAN
+      expect(asm).toContain('OP_DUP OP_4 OP_NEGATE OP_LESSTHAN');
+
+      // Negative shift must NEGATE the drift before RSHIFT:
+      // OP_NEGATE OP_RSHIFT
+      expect(asm).toContain('OP_NEGATE OP_RSHIFT');
     });
   });
 
