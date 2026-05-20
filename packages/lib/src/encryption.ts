@@ -506,8 +506,16 @@ export function unwrapCEK(
   aad?: Uint8Array
 ): Uint8Array {
   // SECURITY FIX (C8): Determine PQ mode and bind to HKDF info
-  // Must match the mode used during wrapCEK - hybrid vs classical produce different KEKs
-  const isHybrid = recipientKeyPair.mlkemPrivateKey !== undefined;
+  // Must match the mode used during wrapCEK - hybrid vs classical produce
+  // different KEKs. Derive the mode from what the SENDER actually encoded
+  // (presence of mlkemCiphertext in the ephemeral data), not from what the
+  // recipient happens to have — a hybrid-capable recipient must still be
+  // able to unwrap classical-mode messages, and an attacker stripping
+  // mlkemCiphertext flips the receiver's mode, breaking the auth tag (so
+  // the downgrade protection is preserved).
+  const isHybrid =
+    ephemeral.mlkemCiphertext !== undefined &&
+    ephemeral.mlkemCiphertext.length > 0;
   const hkdfInfo = isHybrid
     ? new TextEncoder().encode("glyph-kek-hybrid-v1")
     : new TextEncoder().encode("glyph-kek-classical-v1");
