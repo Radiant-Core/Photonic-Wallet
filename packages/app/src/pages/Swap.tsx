@@ -775,7 +775,6 @@ function Swap() {
           hex={psrt}
           BodyComponent={Card}
           FooterComponent={ViewFooter}
-          showBroadcast={false}
         />
       </Container>
     );
