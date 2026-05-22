@@ -36,7 +36,7 @@ import {
   Tag,
   TagLabel,
 } from "@chakra-ui/react";
-import { SearchIcon, CopyIcon, TimeIcon } from "@chakra-ui/icons";
+import { SearchIcon, CopyIcon, TimeIcon, ExternalLinkIcon } from "@chakra-ui/icons";
 import {
   MdOutlineSwapHoriz,
   MdRefresh,
@@ -47,9 +47,20 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
 import TokenContent from "@app/components/TokenContent";
-import { SmartToken, ContractType, SmartTokenType } from "@app/types";
+import {
+  SmartToken,
+  ContractType,
+  SmartTokenType,
+  SwapError,
+  SwapMode,
+  SwapStatus,
+  TokenSwap,
+} from "@app/types";
 import db from "@app/db";
 import opfs from "@app/opfs";
+import createExplorerUrl from "@app/network/createExplorerUrl";
+import { cancelSwap } from "@app/swap";
+import { photonsToRXD } from "@lib/format";
 import {
   SwapOffer,
   assetToSwapTokenId,
@@ -488,6 +499,216 @@ function OrderRow({
   );
 }
 
+function describeAsset(
+  contractType: ContractType,
+  value: number,
+  glyph?: SmartToken
+): string {
+  if (contractType === ContractType.RXD) {
+    return `${photonsToRXD(value)} RXD`;
+  }
+  if (!glyph) {
+    return contractType === ContractType.FT ? `${value} tokens` : "NFT";
+  }
+  if (glyph.tokenType === SmartTokenType.FT) {
+    return `${value} ${glyph.ticker || glyph.name || "tokens"}`;
+  }
+  return glyph.name || "NFT";
+}
+
+function MyOfferRow({
+  swap,
+  onCopy,
+  onCancel,
+  cancelling,
+}: {
+  swap: TokenSwap;
+  onCopy: (text: string, label: string) => void;
+  onCancel: (swap: TokenSwap) => void;
+  cancelling: boolean;
+}) {
+  const [fromGlyph, toGlyph] =
+    useLiveQuery(
+      async () => [
+        swap.fromGlyph
+          ? await db.glyph.where({ ref: swap.fromGlyph }).first()
+          : undefined,
+        swap.toGlyph
+          ? await db.glyph.where({ ref: swap.toGlyph }).first()
+          : undefined,
+      ],
+      [swap.fromGlyph, swap.toGlyph]
+    ) || [];
+
+  const fromText = describeAsset(swap.from, swap.fromValue, fromGlyph);
+  const toText = describeAsset(swap.to, swap.toValue, toGlyph);
+
+  const statusBadge =
+    swap.status === SwapStatus.PENDING ? (
+      <Badge colorScheme="green">Live</Badge>
+    ) : swap.status === SwapStatus.COMPLETE ? (
+      <Badge colorScheme="blue">Settled</Badge>
+    ) : (
+      <Badge colorScheme="gray">Cancelled</Badge>
+    );
+
+  const offeredIcon = fromGlyph ? (
+    <Box w={6} h={6} flexShrink={0}>
+      <TokenContent glyph={fromGlyph} thumbnail />
+    </Box>
+  ) : (
+    <Image src={rxdIcon} width={6} height={6} flexShrink={0} />
+  );
+  const wantedIcon = toGlyph ? (
+    <Box w={6} h={6} flexShrink={0}>
+      <TokenContent glyph={toGlyph} thumbnail />
+    </Box>
+  ) : (
+    <Image src={rxdIcon} width={6} height={6} flexShrink={0} />
+  );
+
+  return (
+    <Tr>
+      <Td>
+        <Flex gap={2} alignItems="center" minW={0}>
+          {offeredIcon}
+          <Text isTruncated>{fromText}</Text>
+          <Icon as={MdOutlineSwapHoriz} boxSize={5} color="gray.400" />
+          {wantedIcon}
+          <Text isTruncated>{toText}</Text>
+        </Flex>
+      </Td>
+      <Td>{statusBadge}</Td>
+      <Td display={{ base: "none", md: "table-cell" }} color="gray.500">
+        {dayjs(swap.date).format("L LT")}
+      </Td>
+      <Td textAlign="right">
+        <HStack spacing={1} justify="flex-end">
+          {swap.broadcastTxid && (
+            <>
+              <Tooltip label="Copy advertisement txid">
+                <IconButton
+                  aria-label="Copy advertisement txid"
+                  icon={<CopyIcon />}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    onCopy(swap.broadcastTxid as string, "Advertisement txid")
+                  }
+                />
+              </Tooltip>
+              <Tooltip label="View on explorer">
+                <IconButton
+                  as="a"
+                  aria-label="View advertisement on explorer"
+                  icon={<ExternalLinkIcon />}
+                  size="sm"
+                  variant="ghost"
+                  href={createExplorerUrl(swap.broadcastTxid)}
+                  target="_blank"
+                  rel="noreferrer"
+                />
+              </Tooltip>
+            </>
+          )}
+          {swap.status === SwapStatus.PENDING && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onCancel(swap)}
+              isLoading={cancelling}
+            >
+              Cancel
+            </Button>
+          )}
+        </HStack>
+      </Td>
+    </Tr>
+  );
+}
+
+function MyOffersPanel() {
+  const toast = useToast();
+  const copy = useCopyToClipboard();
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  const mySwaps = useLiveQuery(
+    async () =>
+      (await db.swap.where({ mode: SwapMode.BROADCAST }).toArray())
+        .filter((s) => !!s.broadcastTxid)
+        .sort((a, b) => b.date - a.date),
+    []
+  );
+
+  if (!mySwaps || mySwaps.length === 0) return null;
+
+  const handleCancel = async (swap: TokenSwap) => {
+    if (wallet.value.locked) {
+      openModal.value = { modal: "unlock" };
+      return;
+    }
+    if (typeof swap.id !== "number") return;
+    setCancellingId(swap.id);
+    try {
+      await cancelSwap(
+        swap.from,
+        swap.txid,
+        swap.fromValue,
+        swap.fromGlyph || undefined
+      );
+      await db.swap.update(swap.id, { status: SwapStatus.CANCEL });
+      toast({ status: "success", title: "Swap cancelled" });
+    } catch (error) {
+      console.debug(error);
+      toast({
+        status: "error",
+        title:
+          error instanceof SwapError
+            ? error.message
+            : "Failed to cancel swap",
+      });
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  return (
+    <Card p={4}>
+      <VStack align="stretch" spacing={3}>
+        <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+          <Heading size="md">My Public Offers</Heading>
+          <Text fontSize="xs" color="gray.500">
+            Offers you have broadcast on-chain. Cancel to reclaim the asset.
+          </Text>
+        </Flex>
+        <Box overflowX="auto">
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                <Th>Swap</Th>
+                <Th>Status</Th>
+                <Th display={{ base: "none", md: "table-cell" }}>Date</Th>
+                <Th textAlign="right">Actions</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {mySwaps.map((swap) => (
+                <MyOfferRow
+                  key={swap.id ?? swap.txid}
+                  swap={swap}
+                  onCopy={copy}
+                  onCancel={handleCancel}
+                  cancelling={cancellingId === swap.id}
+                />
+              ))}
+            </Tbody>
+          </Table>
+        </Box>
+      </VStack>
+    </Card>
+  );
+}
+
 export default function OpenOrders() {
   const toast = useToast();
   const copyToClipboard = useCopyToClipboard();
@@ -558,27 +779,29 @@ export default function OpenOrders() {
           ]);
           rawOrders = [...byOffered, ...byWant];
         } else {
-          // Get orders for all tokens the user owns
+          // Get orders for all tokens the user owns. Two angles per token:
+          //   - by-want: offers we could fulfill with the token (buyer side)
+          //   - by-offered: offers selling the same token (liquidity view,
+          //     plus surfaces our own published listings)
           const userGlyphs = glyphs?.filter((g) => g.spent === 0) || [];
-          const allOrders: SwapOffer[] = [];
+          const tokenIds = userGlyphs
+            .slice(0, 10)
+            .map((glyph) =>
+              assetToSwapTokenId(
+                glyph.tokenType === SmartTokenType.NFT
+                  ? ContractType.NFT
+                  : ContractType.FT,
+                glyph.ref
+              )
+            );
 
-          for (const glyph of userGlyphs.slice(0, 10)) {
-            try {
-              const wantOrders = await getOpenOrdersByWant(
-                assetToSwapTokenId(
-                  glyph.tokenType === SmartTokenType.NFT
-                    ? ContractType.NFT
-                    : ContractType.FT,
-                  glyph.ref
-                ),
-                20
-              );
-              allOrders.push(...wantOrders);
-            } catch {
-              // Best-effort: skip wants we cannot enumerate.
-            }
-          }
-          rawOrders = allOrders;
+          const fetched = await Promise.all(
+            tokenIds.flatMap((tokenId) => [
+              getOpenOrders(tokenId, 20).catch(() => [] as SwapOffer[]),
+              getOpenOrdersByWant(tokenId, 20).catch(() => [] as SwapOffer[]),
+            ])
+          );
+          rawOrders = fetched.flat();
         }
 
         // Parse and enrich orders
@@ -993,24 +1216,27 @@ export default function OpenOrders() {
   if (indexAvailable === false) {
     return (
       <Container maxW="container.lg" px={4}>
-        <Card p={8}>
-          <VStack spacing={4}>
-            <Alert status="warning">
-              <AlertIcon />
-              Swap index not available. Connect to a Radiant Core node with
-              -swapindex=1 enabled.
-            </Alert>
-            <HStack>
-              <Input
-                placeholder="RPC URL (e.g., http://127.0.0.1:7332)"
-                value={rpcUrl}
-                onChange={(e) => setRpcUrl(e.target.value)}
-                width="300px"
-              />
-              <Button onClick={handleSaveConfig}>Connect</Button>
-            </HStack>
-          </VStack>
-        </Card>
+        <VStack spacing={4} align="stretch">
+          <MyOffersPanel />
+          <Card p={8}>
+            <VStack spacing={4}>
+              <Alert status="warning">
+                <AlertIcon />
+                Swap index not available. Connect to a Radiant Core node with
+                -swapindex=1 enabled.
+              </Alert>
+              <HStack>
+                <Input
+                  placeholder="RPC URL (e.g., http://127.0.0.1:7332)"
+                  value={rpcUrl}
+                  onChange={(e) => setRpcUrl(e.target.value)}
+                  width="300px"
+                />
+                <Button onClick={handleSaveConfig}>Connect</Button>
+              </HStack>
+            </VStack>
+          </Card>
+        </VStack>
       </Container>
     );
   }
@@ -1109,6 +1335,9 @@ export default function OpenOrders() {
             </HStack>
           </Card>
         )}
+
+        {/* The wallet's own broadcast offers, read from local db */}
+        <MyOffersPanel />
 
         {/* Search and filters */}
         <Card p={4}>
