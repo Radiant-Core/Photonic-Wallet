@@ -18,7 +18,6 @@ import {
   VStack,
 } from "@chakra-ui/react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { t } from "@lingui/macro";
 import NoContent from "@app/components/NoContent";
 import useRestoreScroll from "@app/hooks/useRestoreScroll";
 import TokenCard from "@app/components/TokenCard";
@@ -27,11 +26,7 @@ import PageHeader from "@app/components/PageHeader";
 import ViewPanelLayout from "@app/layouts/ViewPanelLayout";
 import useQueryString from "@app/hooks/useQueryString";
 import ViewDigitalObject from "@app/components/ViewDigitalObject";
-import {
-  ChevronDownIcon,
-  Search2Icon,
-  SmallCloseIcon,
-} from "@chakra-ui/icons";
+import { ChevronDownIcon, Search2Icon, SmallCloseIcon } from "@chakra-ui/icons";
 import MintMenu from "@app/components/MintMenu";
 import ActionIcon from "@app/components/ActionIcon";
 import { MdFilterAlt } from "react-icons/md";
@@ -284,7 +279,11 @@ function TokenGrid({ open }: { open: boolean }) {
           page={page}
           startUrl={pathname}
           prevUrl={`${pathname}${page > 0 ? `?p=${page - 1}` : ""}`}
-          nextUrl={paged.length === pageSize + 1 ? `${pathname}?p=${page + 1}` : undefined}
+          nextUrl={
+            paged.length === pageSize + 1
+              ? `${pathname}?p=${page + 1}`
+              : undefined
+          }
         />
       </Flex>
 
@@ -316,7 +315,7 @@ function TokenGrid({ open }: { open: boolean }) {
         </VStack>
       ) : (
         <Grid
-          gridTemplateColumns={`repeat(auto-fill, minmax(${ 
+          gridTemplateColumns={`repeat(auto-fill, minmax(${
             viewMode === "compact" || open ? "168px" : "240px"
           }, 1fr))`}
           gridAutoRows="max-content"

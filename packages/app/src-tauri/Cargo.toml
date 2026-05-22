@@ -12,12 +12,16 @@ rust-version = "1.60"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "1.5.0", features = [] }
+# Tauri 1.x — track the 1.8 line. Bumped from 1.5.0 to pick up several
+# upstream security advisories landed between 1.5 and 1.8 (filesystem
+# scope, IPC handling). Cargo resolves "1.8" as ^1.8 (1.8.x); the latest
+# 1.x is acceptable. If migrating to 2.x in the future, revisit.
+tauri-build = { version = "1.8", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "1.5.0", features = [] }
+tauri = { version = "1.8", features = [] }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.

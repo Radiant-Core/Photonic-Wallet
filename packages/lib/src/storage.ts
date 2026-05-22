@@ -12,12 +12,17 @@
  */
 
 import { sha256 } from "@noble/hashes/sha256";
-import { concatBytes, randomBytes, bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import {
+  concatBytes,
+  randomBytes,
+  bytesToHex,
+  hexToBytes,
+} from "@noble/hashes/utils";
+import { verifyCidContent } from "./multihash";
 import {
   encryptXChaCha20Poly1305,
   decryptXChaCha20Poly1305,
   XCHACHA20_KEY_SIZE,
-  hashLocator,
   toBase64,
   fromBase64,
 } from "./encryption";
@@ -138,7 +143,9 @@ export function encryptLocator(
   key: Uint8Array
 ): { encrypted: Uint8Array; nonce: Uint8Array } {
   if (key.length !== XCHACHA20_KEY_SIZE) {
-    throw new Error(`Locator encryption key must be ${XCHACHA20_KEY_SIZE} bytes`);
+    throw new Error(
+      `Locator encryption key must be ${XCHACHA20_KEY_SIZE} bytes`
+    );
   }
 
   const plaintext = new TextEncoder().encode(JSON.stringify(locator));
@@ -165,7 +172,9 @@ export function decryptLocator(
   key: Uint8Array
 ): EncryptedLocator {
   if (key.length !== XCHACHA20_KEY_SIZE) {
-    throw new Error(`Locator decryption key must be ${XCHACHA20_KEY_SIZE} bytes`);
+    throw new Error(
+      `Locator decryption key must be ${XCHACHA20_KEY_SIZE} bytes`
+    );
   }
   if (nonce.length !== LOCATOR_NONCE_SIZE) {
     throw new Error(`Locator nonce must be ${LOCATOR_NONCE_SIZE} bytes`);
@@ -247,7 +256,10 @@ export class LocalStorageAdapter implements StorageAdapter {
       }
 
       // Store metadata
-      const meta = JSON.stringify({ numChunks, totalLength: base64Data.length });
+      const meta = JSON.stringify({
+        numChunks,
+        totalLength: base64Data.length,
+      });
       localStorage.setItem(key, meta);
 
       return key;
@@ -386,10 +398,13 @@ export class BackendAdapter implements StorageAdapter {
 
     // Check if already exists (HEAD request)
     try {
-      const headResponse = await fetch(`${this.config.baseUrl}/api/v2/blob/${hashHex}`, {
-        method: "HEAD",
-        headers: this.getHeaders(),
-      });
+      const headResponse = await fetch(
+        `${this.config.baseUrl}/api/v2/blob/${hashHex}`,
+        {
+          method: "HEAD",
+          headers: this.getHeaders(),
+        }
+      );
 
       if (headResponse.ok) {
         // Blob already exists, return pointer
@@ -411,7 +426,9 @@ export class BackendAdapter implements StorageAdapter {
     });
 
     if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Upload failed: ${response.status} ${response.statusText}`
+      );
     }
 
     const result = await response.json();
@@ -430,17 +447,24 @@ export class BackendAdapter implements StorageAdapter {
   ): Promise<Uint8Array> {
     const hashHex = bytesToHex(expectedHash);
 
-    const response = await fetch(`${this.config.baseUrl}/api/v2/blob/${hashHex}`, {
-      method: "GET",
-      headers: this.getHeaders(),
-    });
+    const response = await fetch(
+      `${this.config.baseUrl}/api/v2/blob/${hashHex}`,
+      {
+        method: "GET",
+        headers: this.getHeaders(),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Download failed: ${response.status} ${response.statusText}`
+      );
     }
 
     // Get content length if available
-    const contentLength = parseInt(response.headers.get("Content-Length") || "0");
+    const contentLength = parseInt(
+      response.headers.get("Content-Length") || "0"
+    );
 
     // Read response with progress
     const reader = response.body?.getReader();
@@ -487,7 +511,7 @@ export class BackendAdapter implements StorageAdapter {
 
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      "Accept": "application/json",
+      Accept: "application/json",
     };
 
     if (this.config.authToken) {
@@ -590,7 +614,17 @@ export class IPFSAdapter implements StorageAdapter {
         const arrayBuffer = await response.arrayBuffer();
         const data = new Uint8Array(arrayBuffer);
 
-        // Verify hash
+        // R25: primary check — verify the downloaded bytes against the
+        // multihash declared by the CID itself. parseCidMultihash also
+        // rejects any hash function that isn't on the allowlist
+        // (sha2-256 / blake2b-256), so a gateway-served CID using an
+        // unexpected hash never passes verification.
+        verifyCidContent(pointer, data);
+
+        // Defense in depth: also confirm the caller's out-of-band
+        // expected SHA-256 matches. This catches the case where the
+        // CID is well-formed and content-bound but isn't the blob the
+        // caller asked for (e.g. caller-side metadata corruption).
         const actualHash = sha256(data);
         if (bytesToHex(actualHash) !== bytesToHex(expectedHash)) {
           throw new Error("Downloaded blob hash mismatch");
@@ -800,7 +834,9 @@ export class GlyphInscriptionAdapter implements StorageAdapter {
     // Verify hash
     const actualHash = sha256(data);
     if (bytesToHex(actualHash) !== bytesToHex(expectedHash)) {
-      throw new Error("Glyph inscription hash mismatch - data may be corrupted");
+      throw new Error(
+        "Glyph inscription hash mismatch - data may be corrupted"
+      );
     }
 
     if (onProgress) {
@@ -842,10 +878,7 @@ export class StorageManager {
 
     // Initialize adapters
     if (config.local) {
-      this.adapters.set(
-        "local",
-        new LocalStorageAdapter(config.local.maxSize)
-      );
+      this.adapters.set("local", new LocalStorageAdapter(config.local.maxSize));
     }
 
     if (config.backend) {

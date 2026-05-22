@@ -1,5 +1,3 @@
-import { Buffer } from "buffer";
-import { Networks, PrivateKey } from "@radiant-core/radiantjs";
 import {
   generateMnemonic,
   mnemonicToEntropy,
@@ -9,7 +7,6 @@ import {
 import { HDKey } from "@scure/bip32";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import {
-  EncryptedData,
   decryptWallet,
   encryptWallet,
   buildHybridKeyPairFromPrivateKey,
@@ -20,43 +17,39 @@ import db from "@app/db";
 import { NetworkKey } from "@lib/types";
 import { SavedWallet } from "@app/types";
 import { p2pkhScriptHash } from "@lib/script";
+import {
+  RADIANT_COIN_TYPE,
+  LEGACY_COIN_TYPE,
+  DEFAULT_COIN_TYPE,
+  deriveAccountFromHdKey,
+  deriveEncryptionPrivateKeyBytes,
+  type DerivedAccount,
+} from "@lib/wallet";
 import config from "@app/config.json";
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@lib/electrumWsClient";
 
-// SLIP-0044 registered coin type for Radiant (512).
-// See: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-// Wallets created before Photonic Wallet v3.0.0 used coin type 0 and must
-// continue to derive at that path so their existing UTXOs remain spendable.
-export const RADIANT_COIN_TYPE = 512;
-export const LEGACY_COIN_TYPE = 0;
-export const DEFAULT_COIN_TYPE = RADIANT_COIN_TYPE;
-
-function paths(coinType: number) {
-  return {
-    derivationPath: `m/44'/${coinType}'/0'/0/0`,
-    swapDerivationPath: `m/44'/${coinType}'/0'/0/1`,
-    encryptionDerivationPath: `m/44'/${coinType}'/0'/2/0`,
-  };
-}
+// Re-export coin-type constants for app-side callers that previously imported
+// them from this module. The actual values live in `@lib/wallet` — the single
+// source of truth (audit finding R7).
+export { RADIANT_COIN_TYPE, LEGACY_COIN_TYPE, DEFAULT_COIN_TYPE };
 
 /**
  * Derive a deterministic encryption keypair for self-as-recipient (backup key).
- * Uses HD path m/44'/512'/0'/2/0 — dedicated to encryption, never reused for spending.
+ * Uses HD path m/44'/<coinType>'/0'/2/0 — dedicated to encryption, never
+ * reused for spending. The path is owned by `@lib/wallet::bip44Paths`.
  *
  * The secp256k1 child key is converted to an X25519 key and ML-KEM-768 seed
  * via HKDF so the curve mismatch is resolved without cross-package imports.
  *
  * @param mnemonic BIP-39 mnemonic (available while wallet is unlocked)
+ * @param coinType SLIP-0044 coin type (default 512). Legacy wallets pass 0.
  * @returns Hybrid X25519 + ML-KEM-768 keypair
  */
 export function deriveEncryptionKeypair(
   mnemonic: string,
   coinType: number = DEFAULT_COIN_TYPE
 ): HybridKeyPair {
-  const seed = mnemonicToSeedSync(mnemonic);
-  const hdKey = HDKey.fromMasterSeed(seed);
-  const childKey = hdKey.derive(paths(coinType).encryptionDerivationPath);
-  const rawPrivate = childKey.privateKey as Uint8Array;
+  const rawPrivate = deriveEncryptionPrivateKeyBytes(mnemonic, coinType);
 
   // Map secp256k1 private bytes → X25519 scalar via HKDF (avoids curve confusion)
   const x25519PrivateKey = deriveKeyHKDF(
@@ -79,30 +72,18 @@ export function deriveEncryptionKeypair(
 
 /**
  * Derive spending keys at a given SLIP-0044 coin type.
+ *
+ * Thin wrapper around `@lib/wallet::deriveAccountFromHdKey` retained for
+ * app-internal callers (notably `resolveCoinType` and
+ * `probeCoinTypeFromHistory`) that already have an HDKey in hand and don't
+ * want to re-derive the seed.
  */
 function deriveKeysForCoinType(
   hdKey: HDKey,
   net: NetworkKey,
   coinType: number
-) {
-  const p = paths(coinType);
-  const rawKey = hdKey.derive(p.derivationPath).privateKey as Uint8Array | null;
-  const rawSwapKey = hdKey.derive(p.swapDerivationPath).privateKey as
-    | Uint8Array
-    | null;
-  if (!rawKey || !rawSwapKey) {
-    throw new Error("Invalid mnemonic phrase");
-  }
-  const key = Buffer.from(rawKey).toString("hex");
-  const swapKey = Buffer.from(rawSwapKey).toString("hex");
-  const privKey = new PrivateKey(key, Networks[net]);
-  const swapPrivKey = new PrivateKey(swapKey, Networks[net]);
-  return {
-    privKey,
-    swapPrivKey,
-    address: privKey.toAddress().toString() as string,
-    swapAddress: swapPrivKey.toAddress().toString() as string,
-  };
+): DerivedAccount {
+  return deriveAccountFromHdKey(hdKey, net, coinType);
 }
 
 /**
@@ -131,7 +112,11 @@ async function resolveCoinType(
 
   const candidates = [DEFAULT_COIN_TYPE, LEGACY_COIN_TYPE];
   for (const coinType of candidates) {
-    const { address, swapAddress } = deriveKeysForCoinType(hdKey, net, coinType);
+    const { address, swapAddress } = deriveKeysForCoinType(
+      hdKey,
+      net,
+      coinType
+    );
     if (
       (data.address && data.address === address) ||
       (data.swapAddress && data.swapAddress === swapAddress)
@@ -150,7 +135,9 @@ async function resolveCoinType(
 }
 
 export async function decryptKeys(net: NetworkKey, password: string) {
-  const data = (await db.kvp.get("wallet")) as SavedWallet & { version?: number };
+  const data = (await db.kvp.get("wallet")) as SavedWallet & {
+    version?: number;
+  };
   if (!data) {
     throw new Error("Failed to unlock");
   }
@@ -181,7 +168,12 @@ export async function decryptKeys(net: NetworkKey, password: string) {
   if (needsReencrypt || needsCoinType) {
     const blob = needsReencrypt
       ? await encryptWallet(decrypted, password)
-      : { ciphertext: data.ciphertext, salt: data.salt, iv: data.iv, version: data.version };
+      : {
+          ciphertext: data.ciphertext,
+          salt: data.salt,
+          iv: data.iv,
+          version: data.version,
+        };
     await db.kvp.put(
       {
         ...blob,
@@ -288,7 +280,9 @@ export async function probeCoinTypeFromHistory(
     }
   }
   if (!serverList || serverList.length === 0) {
-    serverList = (config.defaultConfig.servers as Record<string, string[]>)[net];
+    serverList = (config.defaultConfig.servers as Record<string, string[]>)[
+      net
+    ];
   }
   if (!serverList || serverList.length === 0) return DEFAULT_COIN_TYPE;
 
@@ -317,8 +311,16 @@ export async function probeCoinTypeFromHistory(
       for (const c of candidates) {
         let sum = 0;
         for (const address of c.addresses) {
-          const sh = p2pkhScriptHash(address);
-          if (!sh) continue;
+          // p2pkhScriptHash now throws on bad addresses instead of returning
+          // "" silently. Skip individual failures rather than aborting the
+          // whole probe — a single mis-derived candidate shouldn't prevent
+          // checking the rest.
+          let sh: string;
+          try {
+            sh = p2pkhScriptHash(address);
+          } catch {
+            continue;
+          }
           sum += await probeScriptHashActivity(ws, sh);
         }
         counts[c.coinType] = sum;
@@ -326,10 +328,6 @@ export async function probeCoinTypeFromHistory(
 
       const legacy = counts[LEGACY_COIN_TYPE] ?? 0;
       const modern = counts[RADIANT_COIN_TYPE] ?? 0;
-      console.debug(
-        "[keys] coin-type probe results",
-        { endpoint, legacy, modern }
-      );
 
       if (legacy > 0 && modern === 0) return LEGACY_COIN_TYPE;
       if (modern > 0 && legacy === 0) return RADIANT_COIN_TYPE;
@@ -339,9 +337,11 @@ export async function probeCoinTypeFromHistory(
         return modern >= legacy ? RADIANT_COIN_TYPE : LEGACY_COIN_TYPE;
       }
       // Neither path had activity at this server — keep trying others in
-      // case this one is misbehaving, but record the empty result.
-    } catch (error) {
-      console.debug("[keys] coin-type probe failed at", endpoint, error);
+      // case this one is misbehaving.
+    } catch {
+      // Probe failed at this endpoint — silently move on to the next
+      // candidate. We never log endpoint or error details in production
+      // builds (they'd appear in any user's DevTools).
     } finally {
       try {
         ws?.close("probe-complete");

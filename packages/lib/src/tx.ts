@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import rjs from "@radiant-core/radiantjs";
@@ -7,6 +5,7 @@ import { Buffer } from "buffer";
 import { UnfinalizedOutput, Utxo } from "./types";
 import { parseNftScript } from "./script";
 import { MAX_REASONABLE_FEE_RATE } from "./feePolicy";
+import { bnFromValue } from "./rjsCompat";
 
 // ESM compatibility
 const { Script, PrivateKey, Transaction, crypto } = rjs;
@@ -26,7 +25,9 @@ export const buildTx = (
   const p2pkh = Script.fromAddress(address).toHex();
 
   // Keys can be given as an array if inputs are from different addresses
-  const privKeys: rjs.PrivateKey[] = (Array.isArray(wif) ? wif : [wif]).map(PrivateKey.fromWIF);
+  const privKeys: rjs.PrivateKey[] = (Array.isArray(wif) ? wif : [wif]).map(
+    PrivateKey.fromWIF
+  );
 
   inputs.forEach((input, index) => {
     if (input.script) {
@@ -41,7 +42,6 @@ export const buildTx = (
           }),
         })
       );
-      // @ts-ignore
       tx.setInputScript(index, (tx, output) => {
         const privKey = privKeys[index] || privKeys[0];
         const sigType =
@@ -53,9 +53,8 @@ export const buildTx = (
           sigType,
           index,
           output.script,
-          // Pass value as string to get around bn.js safe number limit
-          // @ts-ignore
-          new crypto.BN(`${output.satoshis}`)
+          // Pass value as string to get around bn.js safe number limit.
+          bnFromValue(`${output.satoshis}`)
         );
         const spendScript = Script.empty()
           .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
@@ -132,10 +131,12 @@ export function findTokenOutput(
   refLE: string,
   parseFn: (script: string) => Partial<{ ref: string }> = parseNftScript
 ) {
-  const vout = tx.outputs.findIndex((output: { script: { toHex: () => string } }) => {
-    const { ref } = parseFn(output.script.toHex());
-    return ref === refLE;
-  });
+  const vout = tx.outputs.findIndex(
+    (output: { script: { toHex: () => string } }) => {
+      const { ref } = parseFn(output.script.toHex());
+      return ref === refLE;
+    }
+  );
 
   if (vout >= 0) {
     return { vout, output: tx.outputs[vout] };

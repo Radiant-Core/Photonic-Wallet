@@ -4,31 +4,22 @@ import react from "@vitejs/plugin-react";
 import { lingui } from "@lingui/vite-plugin";
 import { VitePWA } from "vite-plugin-pwa";
 import topLevelAwait from "vite-plugin-top-level-await";
-//import basicSsl from "@vitejs/plugin-basic-ssl";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import path from "path";
 
 /**
  * Security headers applied to dev/preview servers.
  *
+ * The canonical policy lives in `src/config/csp.ts` and is shared with
+ * the Tauri bundle (`src-tauri/tauri.conf.json`) and static-host
+ * deployments (`public/_headers`) via the parity check at
+ * `scripts/check-csp-parity.mjs`. See R12 in REMEDIATION_PLAN.md.
+ *
  * IMPORTANT — PRODUCTION DEPLOYMENT:
  * These headers are only active during `vite dev` and `vite preview`.
  * They MUST also be set in the production web server config (Nginx/Caddy/etc.).
- *
- * Nginx example (add inside `location / { ... }`):
- *   add_header X-Frame-Options "DENY" always;
- *   add_header X-Content-Type-Options "nosniff" always;
- *   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
- *   add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
- *   add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; frame-src 'none'" always;
  */
-const SECURITY_HEADERS: Record<string, string> = {
-  "X-Frame-Options": "DENY",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "strict-origin-when-cross-origin",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  "Content-Security-Policy":
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; frame-src 'none'",
-};
+import { SECURITY_HEADERS } from "./src/config/csp";
 
 export default defineConfig({
   base: "./",
@@ -89,7 +80,10 @@ export default defineConfig({
         ],
       },
     }),
-    //basicSsl(),
+    // basicSsl serves a self-signed cert so Safari (which force-upgrades
+    // http://localhost) can load the preview server. Cert prompts once
+    // per session; click "Show Details → Visit Website" to accept.
+    basicSsl(),
   ],
   define: {
     APP_VERSION: JSON.stringify(process.env.npm_package_version),

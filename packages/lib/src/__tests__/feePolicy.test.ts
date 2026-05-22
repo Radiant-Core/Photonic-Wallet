@@ -30,7 +30,9 @@ describe("normalizeFeeRate", () => {
 
   it("clamps inputs below the minimum up to the floor", () => {
     expect(normalizeFeeRate(1)).toBe(MIN_RELAY_FEE_RATE);
-    expect(normalizeFeeRate(LEGACY_MIN_RELAY_FEE_RATE)).toBe(MIN_RELAY_FEE_RATE);
+    expect(normalizeFeeRate(LEGACY_MIN_RELAY_FEE_RATE)).toBe(
+      MIN_RELAY_FEE_RATE
+    );
     expect(normalizeFeeRate(9_999)).toBe(MIN_RELAY_FEE_RATE);
   });
 

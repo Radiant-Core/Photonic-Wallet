@@ -18,9 +18,10 @@ export const GRACE_PERIOD = 30 * 24 * 60 * 60; // 30 days grace period after exp
 /**
  * Validate a full WAVE name string (e.g., "alice.rxd")
  */
-export function validateWaveName(
-  fullName: string
-): { valid: boolean; error?: string } {
+export function validateWaveName(fullName: string): {
+  valid: boolean;
+  error?: string;
+} {
   if (!fullName) {
     return { valid: false, error: "Name is required" };
   }
@@ -39,7 +40,8 @@ export function validateWaveName(
   if (!isValidWaveName(name)) {
     return {
       valid: false,
-      error: "Name must be lowercase alphanumeric and hyphens, cannot start/end with hyphen",
+      error:
+        "Name must be lowercase alphanumeric and hyphens, cannot start/end with hyphen",
     };
   }
 
@@ -57,10 +59,10 @@ export function calculateNameCost(fullName: string): number {
   const len = name.length;
 
   // Pricing tiers (in photons) - 1 RXD = 100,000,000 photons
-  if (len <= 3) return 10_000_000_000;  // 100 RXD
-  if (len === 4) return 5_000_000_000;   // 50 RXD
-  if (len === 5) return 1_000_000_000;   // 10 RXD
-  return 500_000_000;                    // 5 RXD for 6+ chars
+  if (len <= 3) return 10_000_000_000; // 100 RXD
+  if (len === 4) return 5_000_000_000; // 50 RXD
+  if (len === 5) return 1_000_000_000; // 10 RXD
+  return 500_000_000; // 5 RXD for 6+ chars
 }
 
 /**
@@ -82,7 +84,7 @@ export function createWaveNameMetadata(
 
   // Calculate default expiration (2 years from now)
   const now = Math.floor(Date.now() / 1000);
-  const expires = options?.expires ?? (now + DEFAULT_REGISTRATION_DURATION);
+  const expires = options?.expires ?? now + DEFAULT_REGISTRATION_DURATION;
 
   return {
     v: 2,
@@ -97,7 +99,7 @@ export function createWaveNameMetadata(
       target_type: "address",
       expires, // Always include expiration
       ...(options?.data && { records: options.data }),
-    } as any,
+    } as Record<string, unknown>,
   };
 }
 
@@ -145,7 +147,7 @@ export function createWaveCommitMetadata(
       commitment,
       revealAfterHeight,
       owner: ownerAddress,
-    } as any,
+    } as Record<string, unknown>,
   };
 }
 
@@ -154,8 +156,10 @@ export function createWaveCommitMetadata(
  */
 export function canReclaimWaveName(
   expires: number,
-  currentHeight: number,
-  registrationHeight: number
+  // Kept for ABI compatibility with callers that still pass these but the
+  // current implementation only needs the expiry timestamp.
+  _currentHeight: number,
+  _registrationHeight: number
 ): { canReclaim: boolean; reclaimableAfter: number } {
   const reclaimableAfter = expires + GRACE_PERIOD;
   const now = Math.floor(Date.now() / 1000);
@@ -170,16 +174,23 @@ export function canReclaimWaveName(
 /**
  * Check if a WAVE name token is a duplicate (not the canonical/first registration)
  */
-export function isWaveDuplicate(token: any): boolean {
-  if (!token || !token.protocols) return false;
-  const hasWaveProtocol = token.protocols.includes(5); // GLYPH_WAVE = 5
-  return hasWaveProtocol && token.is_wave_duplicate === true;
+type WaveToken = {
+  protocols?: number[];
+  is_wave_duplicate?: boolean;
+};
+
+export function isWaveDuplicate(token: unknown): boolean {
+  if (!token || typeof token !== "object") return false;
+  const t = token as WaveToken;
+  if (!Array.isArray(t.protocols)) return false;
+  const hasWaveProtocol = t.protocols.includes(5); // GLYPH_WAVE = 5
+  return hasWaveProtocol && t.is_wave_duplicate === true;
 }
 
 /**
  * Get warning message for duplicate WAVE name tokens
  */
-export function getWaveDuplicateWarning(token: any): string | null {
+export function getWaveDuplicateWarning(token: unknown): string | null {
   if (!isWaveDuplicate(token)) return null;
   return "⚠️ DUPLICATE WAVE NAME: This is NOT the canonical (first) registration. It is NOT used for name resolution. Consider burning this token.";
 }
@@ -201,6 +212,6 @@ export function createWaveReclaimMetadata(
       action: "reclaim",
       originalRef,
       reclaimedAt: Math.floor(Date.now() / 1000),
-    } as any,
+    } as Record<string, unknown>,
   };
 }

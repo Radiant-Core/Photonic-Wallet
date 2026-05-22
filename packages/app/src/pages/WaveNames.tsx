@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   VStack,
@@ -33,12 +33,25 @@ import {
   Divider,
   IconButton,
   Tooltip,
-  Select,
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { SearchIcon, ExternalLinkIcon, CopyIcon, DeleteIcon } from "@chakra-ui/icons";
+import {
+  SearchIcon,
+  ExternalLinkIcon,
+  CopyIcon,
+  DeleteIcon,
+} from "@chakra-ui/icons";
 import { HiOutlineAtSymbol } from "react-icons/hi";
-import { MdEdit, MdRefresh, MdOpenInNew, MdContentCopy, MdDelete, MdSend, MdStar, MdStarBorder } from "react-icons/md";
+import {
+  MdEdit,
+  MdRefresh,
+  MdOpenInNew,
+  MdContentCopy,
+  MdDelete,
+  MdSend,
+  MdStar,
+  MdStarBorder,
+} from "react-icons/md";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import { wallet, feeRate } from "@app/signals";
@@ -46,13 +59,10 @@ import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import { SmartTokenType, TxO, ContractType } from "@app/types";
 import { GLYPH_WAVE } from "@lib/protocols";
-import { 
-  validateWaveName, 
-  calculateNameCost, 
-  createWaveNameMetadata,
+import {
+  validateWaveName,
   canReclaimWaveName,
   createWaveReclaimMetadata,
-  DEFAULT_REGISTRATION_DURATION,
   GRACE_PERIOD,
 } from "@lib/wave";
 import { photonsToRXD } from "@lib/format";
@@ -98,7 +108,10 @@ interface RecentLookup {
 export default function WaveNames() {
   const [activeTab, setActiveTab] = useState(0);
   const [resolveQuery, setResolveQuery] = useState("");
-  const [resolveResult, setResolveResult] = useState<{ name: string; target: string } | null>(null);
+  const [resolveResult, setResolveResult] = useState<{
+    name: string;
+    target: string;
+  } | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentLookups, setRecentLookups] = useState<RecentLookup[]>([]);
@@ -140,7 +153,10 @@ export default function WaveNames() {
       target,
       timestamp: Date.now(),
     };
-    const updated = [newLookup, ...recentLookups.filter(l => l.name !== name)].slice(0, 10);
+    const updated = [
+      newLookup,
+      ...recentLookups.filter((l) => l.name !== name),
+    ].slice(0, 10);
     setRecentLookups(updated);
     localStorage.setItem("waveRecentLookups", JSON.stringify(updated));
   };
@@ -162,7 +178,9 @@ export default function WaveNames() {
 
   // Fetch user's primary WAVE name preference
   const primaryWaveName = useLiveQuery(async () => {
-    const preference = await db.kvp.get("primaryWaveName") as string | undefined;
+    const preference = (await db.kvp.get("primaryWaveName")) as
+      | string
+      | undefined;
     return preference;
   }, []);
 
@@ -185,7 +203,7 @@ export default function WaveNames() {
         const expires = attrs.expires ? parseInt(attrs.expires) : 0;
         const now = Math.floor(Date.now() / 1000);
         const gracePeriodEnd = expires + GRACE_PERIOD;
-        
+
         // Get current blockchain height for reclaim check
         const currentHeight = await electrumWorker.value.getBlockHeight();
         const { canReclaim, reclaimableAfter } = canReclaimWaveName(
@@ -193,13 +211,17 @@ export default function WaveNames() {
           currentHeight,
           token.height || 0
         );
-        
-        let status: "active" | "expiring" | "expired" | "grace" | "reclaimable" = "active";
-        
+
+        let status:
+          | "active"
+          | "expiring"
+          | "expired"
+          | "grace"
+          | "reclaimable" = "active";
+
         if (expires > 0) {
           const daysUntilExpiry = Math.floor((expires - now) / 86400);
-          const daysUntilGraceEnd = Math.floor((gracePeriodEnd - now) / 86400);
-          
+
           if (canReclaim) {
             status = "reclaimable";
           } else if (now > gracePeriodEnd) {
@@ -213,7 +235,13 @@ export default function WaveNames() {
 
         // Check if target needs update (transferred from another owner)
         const target = attrs.target || "";
-        const needsTargetUpdate = !!(target && target !== wallet.value.address && !target.startsWith("ref:") && !target.startsWith("op:") && isP2pkh(target));
+        const needsTargetUpdate = !!(
+          target &&
+          target !== wallet.value.address &&
+          !target.startsWith("ref:") &&
+          !target.startsWith("op:") &&
+          isP2pkh(target)
+        );
 
         records.push({
           ref: token.ref,
@@ -252,16 +280,19 @@ export default function WaveNames() {
   const displayNames = waveNames ?? cachedNames ?? [];
 
   // Filter names based on search
-  const filteredNames = displayNames.filter(record =>
-    searchQuery === "" ||
-    record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    record.target.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredNames = displayNames.filter(
+    (record) =>
+      searchQuery === "" ||
+      record.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      record.target.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleResolve = async () => {
     if (!resolveQuery.trim()) return;
 
-    const fullName = resolveQuery.includes(".") ? resolveQuery : `${resolveQuery}.rxd`;
+    const fullName = resolveQuery.includes(".")
+      ? resolveQuery
+      : `${resolveQuery}.rxd`;
     const validation = validateWaveName(fullName);
 
     if (!validation.valid) {
@@ -303,7 +334,12 @@ export default function WaveNames() {
     <Container maxW="container.lg" py={8}>
       <PageHeader>{"WAVE Names"}</PageHeader>
 
-      <Tabs index={activeTab} onChange={setActiveTab} variant="enclosed" colorScheme="brand">
+      <Tabs
+        index={activeTab}
+        onChange={setActiveTab}
+        variant="enclosed"
+        colorScheme="brand"
+      >
         <TabList>
           <Tab>{"My Names"}</Tab>
           <Tab>{"Resolver"}</Tab>
@@ -360,7 +396,9 @@ export default function WaveNames() {
                     <Text fontSize="sm" color="gray.500">
                       {filteredNames.length === 0
                         ? "No names found"
-                        : `Showing ${filteredNames.length} of ${displayNames.length} names${isLoadingNames ? " (loading...)" : ""}`}
+                        : `Showing ${filteredNames.length} of ${
+                            displayNames.length
+                          } names${isLoadingNames ? " (loading...)" : ""}`}
                     </Text>
                   )}
 
@@ -421,14 +459,23 @@ export default function WaveNames() {
                           {resolveResult.name}
                         </Text>
                       </HStack>
-                      <Text fontFamily="mono" fontSize="sm" wordBreak="break-all">
+                      <Text
+                        fontFamily="mono"
+                        fontSize="sm"
+                        wordBreak="break-all"
+                      >
                         {"Target:"} {resolveResult.target}
                       </Text>
                       <HStack>
                         <Button
                           size="sm"
                           leftIcon={<Icon as={MdContentCopy} />}
-                          onClick={() => copyToClipboard(resolveResult.target, "Target address")}
+                          onClick={() =>
+                            copyToClipboard(
+                              resolveResult.target,
+                              "Target address"
+                            )
+                          }
                         >
                           {"Copy Target"}
                         </Button>
@@ -436,7 +483,9 @@ export default function WaveNames() {
                           size="sm"
                           leftIcon={<Icon as={MdOpenInNew} />}
                           onClick={() => {
-                            window.location.href = `#/send?address=${encodeURIComponent(resolveResult.target)}`;
+                            window.location.href = `#/send?address=${encodeURIComponent(
+                              resolveResult.target
+                            )}`;
                           }}
                         >
                           {"Send To"}
@@ -473,14 +522,21 @@ export default function WaveNames() {
                             cursor="pointer"
                             onClick={() => {
                               setResolveQuery(lookup.name);
-                              setResolveResult({ name: lookup.name, target: lookup.target });
+                              setResolveResult({
+                                name: lookup.name,
+                                target: lookup.target,
+                              });
                             }}
                             _hover={{ bg: "whiteAlpha.100" }}
                           >
                             <HStack justify="space-between">
                               <VStack align="start" spacing={0}>
                                 <Text fontWeight="medium">{lookup.name}</Text>
-                                <Text fontSize="xs" color="gray.500" fontFamily="mono">
+                                <Text
+                                  fontSize="xs"
+                                  color="gray.500"
+                                  fontFamily="mono"
+                                >
                                   {lookup.target.slice(0, 20)}...
                                 </Text>
                               </VStack>
@@ -491,7 +547,10 @@ export default function WaveNames() {
                                 variant="ghost"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  copyToClipboard(lookup.target, "Target address");
+                                  copyToClipboard(
+                                    lookup.target,
+                                    "Target address"
+                                  );
                                 }}
                               />
                             </HStack>
@@ -509,12 +568,14 @@ export default function WaveNames() {
           <TabPanel>
             <ContentContainer>
               <VStack spacing={4} align="center" py={8}>
-                <Text fontSize="lg">{"Ready to register a new WAVE name?"}</Text>
+                <Text fontSize="lg">
+                  {"Ready to register a new WAVE name?"}
+                </Text>
                 <Button
                   colorScheme="brand"
                   size="lg"
                   leftIcon={<Icon as={HiOutlineAtSymbol} />}
-                  onClick={() => window.location.href = "#/names"}
+                  onClick={() => (window.location.href = "#/names")}
                 >
                   {"Go to Registration Page"}
                 </Button>
@@ -527,13 +588,37 @@ export default function WaveNames() {
   );
 }
 
-function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord; primaryName?: string; onCopy?: (text: string, label: string) => void }) {
+function WaveNameCard({
+  record,
+  primaryName,
+  onCopy,
+}: {
+  record: WaveNameRecord;
+  primaryName?: string;
+  onCopy?: (text: string, label: string) => void;
+}) {
   const isPrimary = record.name === primaryName;
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const { isOpen: isRenewOpen, onOpen: onRenewOpen, onClose: onRenewClose } = useDisclosure();
-  const { isOpen: isBurnOpen, onOpen: onBurnOpen, onClose: onBurnClose } = useDisclosure();
-  const { isOpen: isTransferOpen, onOpen: onTransferOpen, onClose: onTransferClose } = useDisclosure();
-  const { isOpen: isReclaimOpen, onOpen: onReclaimOpen, onClose: onReclaimClose } = useDisclosure();
+  const {
+    isOpen: isRenewOpen,
+    onOpen: onRenewOpen,
+    onClose: onRenewClose,
+  } = useDisclosure();
+  const {
+    isOpen: isBurnOpen,
+    onOpen: onBurnOpen,
+    onClose: onBurnClose,
+  } = useDisclosure();
+  const {
+    isOpen: isTransferOpen,
+    onOpen: onTransferOpen,
+    onClose: onTransferClose,
+  } = useDisclosure();
+  const {
+    isOpen: isReclaimOpen,
+    onOpen: onReclaimOpen,
+    onClose: onReclaimClose,
+  } = useDisclosure();
   const toast = useToast();
   const [newTarget, setNewTarget] = useState(record.target);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -564,13 +649,19 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
     setIsBurning(true);
     try {
       // Get the NFT UTXO
-      const txo = await db.txo.get({ id: record.txoId }) as TxO;
+      const txo = (await db.txo.get({ id: record.txoId })) as TxO;
       if (!txo) {
         throw new Error("Token UTXO not found");
       }
 
-      // Create reclaim metadata (burn envelope)
-      const reclaimMetadata = createWaveReclaimMetadata(record.name, record.ref);
+      // Create reclaim metadata (burn envelope). Currently informational;
+      // burnNft only accepts a reason string, so the metadata is not yet
+      // attached on-chain — tracked separately as a follow-up.
+      const _reclaimMetadata = createWaveReclaimMetadata(
+        record.name,
+        record.ref
+      );
+      void _reclaimMetadata;
 
       // Build burn transaction that includes reclaim metadata
       const nftRefBE = Outpoint.fromString(record.ref);
@@ -584,7 +675,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
       // Burn the expired NFT
       const { tx } = burnNft(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         { ...txo, txid: nftTxid, vout: nftVout },
         rxdUtxos,
         undefined,
@@ -617,7 +708,8 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
       console.error("Reclaim failed:", error);
       toast({
         title: "Reclaim Failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
         status: "error",
       });
     } finally {
@@ -638,7 +730,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
     setIsUpdating(true);
     try {
       // Get the NFT UTXO
-      const txo = await db.txo.get({ id: record.txoId }) as TxO;
+      const txo = (await db.txo.get({ id: record.txoId })) as TxO;
       if (!txo) {
         throw new Error("Token UTXO not found");
       }
@@ -653,7 +745,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
       const mutRefLE = mutRefBE.reverse().toString();
 
       // Fetch current location of the mutable contract UTXO
-      const refResponse = await electrumWorker.value.getRef(mutRefBE.toString());
+      const refResponse = await electrumWorker.value.getRef(
+        mutRefBE.toString()
+      );
       if (!refResponse?.length) {
         throw new Error("Mutable contract UTXO not found");
       }
@@ -684,11 +778,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
       // contractOutputIndex=0, refHashIndex=1, refIndex=0, tokenOutputIndex=1
       const glyph = encodeGlyphMutable("mod", payload, 0, 1, 0, 1);
       const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
-      const nftOutputScript = nftAuthScript(
-        wallet.value.address,
-        nftRefLE,
-        [{ ref: mutRefLE, scriptSigHash: glyph.scriptSigHash }]
-      );
+      const nftOutputScript = nftAuthScript(wallet.value.address, nftRefLE, [
+        { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },
+      ]);
 
       const nftInput: UnfinalizedInput = { ...txo };
       const mutInput: UnfinalizedInput = {
@@ -732,7 +824,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
       const rawTx = buildTx(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         inputs,
         outputs,
         false,
@@ -790,14 +882,16 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
     setIsRenewing(true);
     try {
-      // Renewal extends expiration by 2 years from now
-      const newExpires = Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60;
-
-      // Similar to update but only changing expires attribute
-      // For now, show a message that renewal is not yet implemented on-chain
+      // Renewal would extend expiration by 2 years from now once implemented.
+      // Currently this UI surface only informs the user — the on-chain
+      // renewal flow is not wired up yet.
       toast({
         title: "Renewal not available",
-        description: `On-chain renewal will be implemented in a future update. Your name is still active until ${record.expires ? new Date(record.expires * 1000).toLocaleDateString() : "N/A"}.`,
+        description: `On-chain renewal will be implemented in a future update. Your name is still active until ${
+          record.expires
+            ? new Date(record.expires * 1000).toLocaleDateString()
+            : "N/A"
+        }.`,
         status: "info",
       });
       onRenewClose();
@@ -824,7 +918,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
     setIsBurning(true);
     try {
-      const txo = await db.txo.get({ id: record.txoId }) as TxO;
+      const txo = (await db.txo.get({ id: record.txoId })) as TxO;
       if (!txo) {
         throw new Error("Token UTXO not found");
       }
@@ -835,7 +929,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
       const result = burnNft(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         txo,
         rxdUtxos,
         burnReason || undefined,
@@ -860,7 +954,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
         description: (
           <VStack align="start" spacing={1}>
             <Text>{record.name} has been permanently destroyed</Text>
-            <Text fontSize="sm">Photons returned: {photonsToRXD(result.photonsReturned)} RXD</Text>
+            <Text fontSize="sm">
+              Photons returned: {photonsToRXD(result.photonsReturned)} RXD
+            </Text>
           </VStack>
         ),
         status: "success",
@@ -918,7 +1014,7 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
     setIsTransferring(true);
     try {
-      const txo = await db.txo.get({ id: record.txoId }) as TxO;
+      const txo = (await db.txo.get({ id: record.txoId })) as TxO;
       if (!txo) {
         throw new Error("Token UTXO not found");
       }
@@ -930,14 +1026,14 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
       const ref = Outpoint.fromString(record.ref);
       const refLE = ref.reverse().toString();
 
-      const { tx, selected } = transferNonFungible(
+      const { tx } = transferNonFungible(
         rxdUtxos as SelectableInput[],
         txo,
         refLE,
         wallet.value.address,
         transferAddress,
         feeRate.value,
-        wallet.value.wif
+        wallet.value.wif.toString()
       );
 
       const txid = await electrumWorker.value.broadcast(tx.toString());
@@ -955,7 +1051,10 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
       toast({
         title: "WAVE Name Transferred",
-        description: `${record.name} sent to ${transferAddress.substring(0, 20)}...`,
+        description: `${record.name} sent to ${transferAddress.substring(
+          0,
+          20
+        )}...`,
         status: "success",
         duration: 10000,
       });
@@ -1030,7 +1129,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
                   {"⚠️ Target Update Required"}
                 </Text>
                 <Text fontSize="xs">
-                  {"This WAVE name was transferred to you. The target still points to the previous owner. Click 'Update Target' to set it to your address."}
+                  {
+                    "This WAVE name was transferred to you. The target still points to the previous owner. Click 'Update Target' to set it to your address."
+                  }
                 </Text>
                 <Button
                   size="xs"
@@ -1047,12 +1148,18 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
 
           {(record.expires ?? 0) > 0 && (
             <VStack align="start" spacing={0}>
-              <Text fontSize="xs" color={
-                record.status === "expiring" ? "orange.400" : 
-                record.status === "expired" || record.status === "grace" ? "red.400" : 
-                record.status === "reclaimable" ? "purple.400" :
-                "gray.500"
-              }>
+              <Text
+                fontSize="xs"
+                color={
+                  record.status === "expiring"
+                    ? "orange.400"
+                    : record.status === "expired" || record.status === "grace"
+                    ? "red.400"
+                    : record.status === "reclaimable"
+                    ? "purple.400"
+                    : "gray.500"
+                }
+              >
                 {record.status === "expiring" && "⚠️ Expires soon: "}
                 {record.status === "expired" && "❌ Expired: "}
                 {record.status === "grace" && "⏰ Grace period ends: "}
@@ -1062,7 +1169,8 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
               </Text>
               {record.gracePeriodEnd && record.status !== "reclaimable" && (
                 <Text fontSize="xs" color="gray.500">
-                  (Grace until: {new Date(record.gracePeriodEnd * 1000).toLocaleDateString()})
+                  (Grace until:{" "}
+                  {new Date(record.gracePeriodEnd * 1000).toLocaleDateString()})
                 </Text>
               )}
             </VStack>
@@ -1201,7 +1309,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
               <Alert status="info" borderRadius="md">
                 <AlertIcon />
                 <Text>
-                  {"Renewal extends your name registration for another 2 years from the renewal date."}
+                  {
+                    "Renewal extends your name registration for another 2 years from the renewal date."
+                  }
                 </Text>
               </Alert>
               <FormControl>
@@ -1211,10 +1321,15 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
               {record.expires && (
                 <Box>
                   <Text fontSize="sm" color="gray.400">
-                    {"Current expiration:"} {new Date(record.expires * 1000).toLocaleDateString()}
+                    {"Current expiration:"}{" "}
+                    {new Date(record.expires * 1000).toLocaleDateString()}
                   </Text>
                   <Text fontSize="sm" color="green.400">
-                    {"New expiration:"} {new Date((Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60) * 1000).toLocaleDateString()}
+                    {"New expiration:"}{" "}
+                    {new Date(
+                      (Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60) *
+                        1000
+                    ).toLocaleDateString()}
                   </Text>
                 </Box>
               )}
@@ -1249,9 +1364,13 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
               <Alert status="error" borderRadius="md">
                 <AlertIcon />
                 <VStack align="start" spacing={1}>
-                  <Text fontWeight="bold">{"Warning: This action is irreversible!"}</Text>
+                  <Text fontWeight="bold">
+                    {"Warning: This action is irreversible!"}
+                  </Text>
                   <Text fontSize="sm">
-                    {"Burning will permanently destroy this WAVE name. The photons will be returned to your wallet."}
+                    {
+                      "Burning will permanently destroy this WAVE name. The photons will be returned to your wallet."
+                    }
                   </Text>
                 </VStack>
               </Alert>
@@ -1317,7 +1436,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
               <Alert status="info" borderRadius="md">
                 <AlertIcon />
                 <Text fontSize="sm">
-                  {"The recipient will own this WAVE name and can update its target address. The new owner should update the target after receiving."}
+                  {
+                    "The recipient will own this WAVE name and can update its target address. The new owner should update the target after receiving."
+                  }
                 </Text>
               </Alert>
             </VStack>
@@ -1373,7 +1494,9 @@ function WaveNameCard({ record, primaryName, onCopy }: { record: WaveNameRecord;
                     {"3. The name becomes available for new registration"}
                   </Text>
                   <Text fontSize="sm" color="gray.500">
-                    {"Photons from the burned token will be returned to your wallet."}
+                    {
+                      "Photons from the burned token will be returned to your wallet."
+                    }
                   </Text>
                 </VStack>
               </Alert>

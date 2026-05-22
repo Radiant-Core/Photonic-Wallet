@@ -1,12 +1,12 @@
 import { electrumWorker } from "@app/electrum/Electrum";
 import { wallet } from "@app/signals";
-import { lockWallet } from "@app/wallet";
+import { lockWallet, wipeSecrets } from "@app/wallet";
+import { autoLockMs } from "@app/autoLock";
 import { useToast } from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { useEffect, useRef, useCallback } from "react";
 
 type Timeout = ReturnType<typeof setTimeout>;
-const LOCK_INACTIVITY_TIME = 600000; // 10 minutes
 const LOCK_VISIBILITY_GRACE = 30000; // 30 seconds grace period when tab hidden
 
 async function reactivate() {
@@ -25,7 +25,7 @@ function deactivate() {
 function armLockTimer(
   timerRef: React.MutableRefObject<Timeout | undefined>,
   toast: ReturnType<typeof useToast>,
-  delay: number = LOCK_INACTIVITY_TIME
+  delay: number
 ) {
   clearTimeout(timerRef.current);
   if (wallet.value.exists && !wallet.value.locked) {
@@ -45,12 +45,16 @@ export default function useActivityDetector() {
   const timer = useRef<Timeout>();
   const visibilityTimer = useRef<Timeout>();
 
+  // Read once per effect run — the effect re-mounts whenever `autoLockMs`
+  // changes, so a settings update propagates immediately.
+  const delay = autoLockMs.value;
+
   // Reset timer on user activity
   const resetTimer = useCallback(() => {
     clearTimeout(timer.current);
     reactivate();
-    armLockTimer(timer, toast);
-  }, [toast]);
+    armLockTimer(timer, toast, delay);
+  }, [toast, delay]);
 
   // Activity event handlers
   const onMouseMove = useCallback(() => resetTimer(), [resetTimer]);
@@ -63,7 +67,7 @@ export default function useActivityDetector() {
       // Tab is active, allow syncing and sync any pending subscriptions
       clearTimeout(visibilityTimer.current);
       reactivate();
-      armLockTimer(timer, toast);
+      armLockTimer(timer, toast, delay);
     } else {
       // Tab is inactive - set shorter grace period before locking
       clearTimeout(timer.current);
@@ -76,20 +80,27 @@ export default function useActivityDetector() {
         deactivate();
       }, LOCK_VISIBILITY_GRACE);
     }
-  }, [toast]);
+  }, [toast, delay]);
 
   const onFocus = useCallback(() => {
     reactivate();
-    armLockTimer(timer, toast);
-  }, [toast]);
+    armLockTimer(timer, toast, delay);
+  }, [toast, delay]);
 
   const onBlur = useCallback(() => {
     deactivate();
   }, []);
 
+  // R4: wipe secret bytes when the tab is torn down so a forensic memory
+  // dump after page-close has no recoverable mnemonic/WIF. We can't await
+  // anything here — `wipeSecrets` is synchronous and idempotent.
+  const onBeforeUnload = useCallback(() => {
+    wipeSecrets();
+  }, []);
+
   useEffect(() => {
     // Arm timer immediately on mount if wallet is unlocked
-    armLockTimer(timer, toast);
+    armLockTimer(timer, toast, delay);
 
     // Listen for logout broadcasts from other tabs
     let bc: BroadcastChannel | undefined;
@@ -118,6 +129,8 @@ export default function useActivityDetector() {
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onBeforeUnload);
 
     return () => {
       clearTimeout(timer.current);
@@ -129,7 +142,20 @@ export default function useActivityDetector() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onBeforeUnload);
       bc?.close();
     };
-  }, [onMouseMove, onKeyDown, onTouchStart, onPointerDown, onVisibilityChange, onFocus, onBlur, toast]);
+  }, [
+    onMouseMove,
+    onKeyDown,
+    onTouchStart,
+    onPointerDown,
+    onVisibilityChange,
+    onFocus,
+    onBlur,
+    onBeforeUnload,
+    toast,
+    delay,
+  ]);
 }

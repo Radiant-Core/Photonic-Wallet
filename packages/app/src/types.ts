@@ -3,6 +3,7 @@
 import type { EncryptedData } from "@lib/encryption";
 import { ElectrumUtxo, NetworkKey } from "@lib/types";
 import { CreateToastFnReturn } from "@chakra-ui/react";
+import type { SecretBytes } from "./secretBytes";
 
 export type ScriptGroup = "rxd" | "ref" | "nft" | "ft";
 
@@ -124,10 +125,10 @@ export interface SmartToken {
   height?: number;
   swapPending?: boolean;
   // Encrypted NFT fields (GLYPH_ENCRYPTED protocol)
-  crypto?: unknown;        // payload.crypto — encryption metadata stub
-  main?: unknown;          // payload.main — on-chain ciphertext or file metadata
+  crypto?: unknown; // payload.crypto — encryption metadata stub
+  main?: unknown; // payload.main — on-chain ciphertext or file metadata
   // WAVE protocol fields
-  is_wave_duplicate?: boolean;  // True if this is a duplicate WAVE name registration
+  is_wave_duplicate?: boolean; // True if this is a duplicate WAVE name registration
 }
 
 export interface Subscription {
@@ -170,12 +171,27 @@ export interface WalletState {
   ready: boolean;
   exists: boolean;
   locked: boolean;
-  wif?: string;
+  /**
+   * Spending WIF as zeroable bytes. Replaces the prior `wif?: string` so
+   * the persistent unlocked-session reference can be cleared on lock
+   * (R4 — JS strings cannot be wiped). Materialise to a string only
+   * inside a signing op via `wif.toString()`.
+   */
+  wif?: SecretBytes;
   address: string;
-  swapWif?: string;
+  /** Swap-WIF as zeroable bytes. See `wif` above. */
+  swapWif?: SecretBytes;
   swapAddress: string;
-  /** BIP-39 mnemonic; available while wallet is unlocked, cleared on lock */
-  mnemonic?: string;
+  /** BIP-39 mnemonic as zeroable bytes; cleared on lock. */
+  mnemonic?: SecretBytes;
+  /**
+   * BIP-44 SLIP-0044 coin type used for HD derivation (mirrors
+   * `SavedWallet.coinType`). Hydrated on `loadWalletFromSaved` and refreshed
+   * on `unlockWallet` so encryption-key derivation (R26) matches what the
+   * wallet uses for spending. Undefined → legacy default `0` for legacy
+   * unlocked sessions, `DEFAULT_COIN_TYPE` for new wallets.
+   */
+  coinType?: number;
 }
 
 export enum ElectrumStatus {

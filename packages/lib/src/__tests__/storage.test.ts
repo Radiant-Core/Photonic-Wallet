@@ -110,8 +110,12 @@ describe("Locator Encryption", () => {
     expect(result1.nonce).not.toEqual(result2.nonce);
 
     // Both decrypt to same value
-    expect(decryptLocator(result1.encrypted, result1.nonce, key)).toEqual(locator);
-    expect(decryptLocator(result2.encrypted, result2.nonce, key)).toEqual(locator);
+    expect(decryptLocator(result1.encrypted, result1.nonce, key)).toEqual(
+      locator
+    );
+    expect(decryptLocator(result2.encrypted, result2.nonce, key)).toEqual(
+      locator
+    );
   });
 });
 
@@ -134,9 +138,6 @@ describe("LocalStorage Adapter", () => {
 
   it("should upload and download small data", async () => {
     const data = new TextEncoder().encode("Hello, encrypted world!");
-    const contentHash = crypto.getRandomValues(new Uint8Array(32));
-    // Overwrite with real hash of data
-
     const realHash = sha256(data);
 
     const pointer = await adapter.upload(data, realHash);
@@ -163,9 +164,9 @@ describe("LocalStorage Adapter", () => {
     const missingPointer = "nonexistent-key";
     const contentHash = crypto.getRandomValues(new Uint8Array(32));
 
-    await expect(
-      adapter.download(missingPointer, contentHash)
-    ).rejects.toThrow("Blob not found");
+    await expect(adapter.download(missingPointer, contentHash)).rejects.toThrow(
+      "Blob not found"
+    );
   });
 
   it("should call progress callback during upload", async () => {
@@ -290,7 +291,9 @@ describe("Storage Manager", () => {
     });
 
     const encryptedData = crypto.getRandomValues(new Uint8Array(100));
-    const locatorKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
+    const locatorKey = crypto.getRandomValues(
+      new Uint8Array(XCHACHA20_KEY_SIZE)
+    );
 
     const result = await manager.uploadEncrypted(encryptedData, locatorKey);
 
@@ -308,9 +311,14 @@ describe("Storage Manager", () => {
     });
 
     const encryptedData = crypto.getRandomValues(new Uint8Array(100));
-    const locatorKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
+    const locatorKey = crypto.getRandomValues(
+      new Uint8Array(XCHACHA20_KEY_SIZE)
+    );
 
-    const uploadResult = await manager.uploadEncrypted(encryptedData, locatorKey);
+    const uploadResult = await manager.uploadEncrypted(
+      encryptedData,
+      locatorKey
+    );
 
     const downloadResult = await manager.downloadEncrypted(
       uploadResult.encryptedLocator,
@@ -329,10 +337,15 @@ describe("Storage Manager", () => {
     });
 
     const encryptedData = crypto.getRandomValues(new Uint8Array(100));
-    const locatorKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
+    const locatorKey = crypto.getRandomValues(
+      new Uint8Array(XCHACHA20_KEY_SIZE)
+    );
     const wrongKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
 
-    const uploadResult = await manager.uploadEncrypted(encryptedData, locatorKey);
+    const uploadResult = await manager.uploadEncrypted(
+      encryptedData,
+      locatorKey
+    );
 
     await expect(
       manager.downloadEncrypted(
@@ -368,7 +381,9 @@ describe("Storage Full Integration", () => {
     );
 
     // 2. Upload encrypted content
-    const locatorKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
+    const locatorKey = crypto.getRandomValues(
+      new Uint8Array(XCHACHA20_KEY_SIZE)
+    );
     const uploadResult = await manager.uploadEncrypted(
       encryptedContent,
       locatorKey
@@ -399,9 +414,15 @@ describe("Storage Full Integration", () => {
     });
 
     const encryptedData = new Uint8Array(1000);
-    const locatorKey = crypto.getRandomValues(new Uint8Array(XCHACHA20_KEY_SIZE));
+    const locatorKey = crypto.getRandomValues(
+      new Uint8Array(XCHACHA20_KEY_SIZE)
+    );
 
-    const progressEvents: Array<{ loaded: number; total: number; stage: string }> = [];
+    const progressEvents: Array<{
+      loaded: number;
+      total: number;
+      stage: string;
+    }> = [];
 
     await manager.uploadEncrypted(encryptedData, locatorKey, {
       onProgress: (loaded, total, stage) => {

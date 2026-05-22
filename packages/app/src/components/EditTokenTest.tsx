@@ -15,7 +15,6 @@ import {
 } from "@lib/script";
 import { buildTx, findTokenOutput } from "@lib/tx";
 import { SmartTokenPayload, UnfinalizedInput, Utxo } from "@lib/types";
-import { t } from "@lingui/macro";
 import { Transaction } from "@radiant-core/radiantjs";
 
 // Testing mutable tokens
@@ -31,6 +30,7 @@ export default function EditTokenTest({
     if (!wallet.value.wif) {
       return;
     }
+    const wif = wallet.value.wif.toString();
 
     const nftRefBE = Outpoint.fromString(token.ref);
     const nftRefLE = nftRefBE.reverse().toString();
@@ -108,7 +108,7 @@ export default function EditTokenTest({
 
     const tx = buildTx(
       wallet.value.address,
-      wallet.value.wif,
+      wif,
       inputs,
       outputs,
       false,
@@ -139,7 +139,7 @@ export default function EditTokenTest({
 
     const revertTx = buildTx(
       wallet.value.address,
-      wallet.value.wif,
+      wif,
       [newNftInput, ...revertFund.funding],
       [newNftOutput, ...revertFund.change],
       false

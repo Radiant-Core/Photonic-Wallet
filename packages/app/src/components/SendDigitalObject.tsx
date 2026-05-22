@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import { SelectableInput } from "@lib/coinSelect";
 import {
   Modal,
@@ -33,7 +32,7 @@ import Identifier from "./Identifier";
 import Outpoint from "@lib/Outpoint";
 import { feeRate, network, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
-import { updateRxdBalances, updateWalletUtxos, updateNFTOwned } from "@app/utxos";
+import { updateWalletUtxos, updateNFTOwned } from "@app/utxos";
 import { BsQrCodeScan } from "react-icons/bs";
 import AddressInput from "./AddressInput";
 import { TransferError, transferNonFungible } from "@lib/transfer";
@@ -106,15 +105,21 @@ export default function SendDigitalObject({
         wallet.value.address,
         toAddress.current?.value as string,
         feeRate.value,
-        wallet.value.wif as string
+        wallet.value.wif!.toString()
       );
 
       const rawTx = tx.toString();
       const txid = tx.hash;
 
       // Calculate fee from inputs and outputs
-      const inputTotal = selected.inputs.reduce((sum, input) => sum + input.value, 0);
-      const outputTotal = selected.outputs.reduce((sum, output) => sum + output.value, 0);
+      const inputTotal = selected.inputs.reduce(
+        (sum, input) => sum + input.value,
+        0
+      );
+      const outputTotal = selected.outputs.reduce(
+        (sum, output) => sum + output.value,
+        0
+      );
       const fee = inputTotal - outputTotal;
 
       // SECURITY FIX (C4): Show confirmation modal before broadcasting
@@ -180,12 +185,19 @@ export default function SendDigitalObject({
           changeScript,
           txid,
           [],
-          [{ script: p2pkhScript(wallet.value.address), value: 0, txid, vout: 0 }]
+          [
+            {
+              script: p2pkhScript(wallet.value.address),
+              value: 0,
+              txid,
+              vout: 0,
+            },
+          ]
         );
       }
       updateNFTOwned(wallet.value.address);
 
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
     } catch (error) {
       console.error("Broadcast error:", error);
       toast({
@@ -290,19 +302,21 @@ export default function SendDigitalObject({
                 <strong>NFT:</strong> {pendingTx?.nftName}
               </Text>
               <Text>
-                <strong>Fee:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+                <strong>Fee:</strong> {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                {network.value.ticker}
               </Text>
               <Text>
                 <strong>Total Cost:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+                {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                {network.value.ticker}
               </Text>
               <Text fontSize="xs" color="gray.500">
                 <strong>TxID:</strong> {pendingTx?.txid}
               </Text>
               <Divider my={2} />
               <Text fontSize="sm" color="orange.500">
-                Please verify the recipient address before confirming. This action cannot be undone.
+                Please verify the recipient address before confirming. This
+                action cannot be undone.
               </Text>
             </VStack>
           </ModalBody>

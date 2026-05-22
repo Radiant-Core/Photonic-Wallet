@@ -18,7 +18,6 @@ import {
   useClipboard,
   useDisclosure,
 } from "@chakra-ui/react";
-import { Trans, t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import db from "@app/db";
@@ -51,7 +50,12 @@ import ActionIcon from "./ActionIcon";
 import { MdDeleteForever, MdEdit, MdLock, MdTimer } from "react-icons/md";
 import { TbArrowUpRight, TbBox } from "react-icons/tb";
 import mime from "mime";
-import { GLYPH_ENCRYPTED, GLYPH_MUT, GLYPH_NFT, GLYPH_TIMELOCK } from "@lib/protocols";
+import {
+  GLYPH_ENCRYPTED,
+  GLYPH_MUT,
+  GLYPH_NFT,
+  GLYPH_TIMELOCK,
+} from "@lib/protocols";
 import EditDigitalObject from "./EditDigitalObject";
 
 export const PropertyCard = ({
@@ -128,7 +132,9 @@ export default function ViewDigitalObject({
 
   // Decrypted bytes held in memory only — never written to any persistent storage
   const [decryptedBytes, setDecryptedBytes] = useState<Uint8Array | null>(null);
-  const [decryptedMime, setDecryptedMime] = useState<string>("application/octet-stream");
+  const [decryptedMime, setDecryptedMime] = useState<string>(
+    "application/octet-stream"
+  );
 
   // TODO show loading or 404
   if (!txo || !nft) {
@@ -159,9 +165,11 @@ export default function ViewDigitalObject({
     successDisclosure.onOpen();
   };
 
-  const isEncrypted = !!(nft.p?.includes(GLYPH_ENCRYPTED));
-  const isTimelocked = !!(nft.p?.includes(GLYPH_TIMELOCK));
-  const isMutable = !!(nft.p?.includes(GLYPH_NFT) && nft.p?.includes(GLYPH_MUT));
+  const isEncrypted = !!nft.p?.includes(GLYPH_ENCRYPTED);
+  const isTimelocked = !!nft.p?.includes(GLYPH_TIMELOCK);
+  const isMutable = !!(
+    nft.p?.includes(GLYPH_NFT) && nft.p?.includes(GLYPH_MUT)
+  );
   const isIPFS = nft.remote?.u?.startsWith("ipfs://");
   const isKnownEmbed = [
     "text/plain",
@@ -199,7 +207,13 @@ export default function ViewDigitalObject({
           <HStack spacing={2} flexWrap="wrap" align="center">
             <span>{nft.name || "Unnamed token"}</span>
             {isEncrypted && !decryptedBytes && (
-              <Tooltip label={isTimelocked ? "Timelocked encrypted content" : "Contains encrypted content"}>
+              <Tooltip
+                label={
+                  isTimelocked
+                    ? "Timelocked encrypted content"
+                    : "Contains encrypted content"
+                }
+              >
                 <Badge
                   colorScheme={isTimelocked ? "orange" : "blue"}
                   display="flex"
@@ -227,7 +241,13 @@ export default function ViewDigitalObject({
               </Tooltip>
             )}
             {isEncrypted && decryptedBytes && (
-              <Badge colorScheme="green" display="flex" alignItems="center" gap={1} fontSize="xs">
+              <Badge
+                colorScheme="green"
+                display="flex"
+                alignItems="center"
+                gap={1}
+                fontSize="xs"
+              >
                 <Icon as={MdLock} />
                 {"Decrypted"}
               </Badge>
@@ -282,7 +302,9 @@ export default function ViewDigitalObject({
                 />
               </GridItem>
               {nft.embed && !isKnownEmbed && (
-                <Warning>{"Files may be unsafe and result in loss of funds"}</Warning>
+                <Warning>
+                  {"Files may be unsafe and result in loss of funds"}
+                </Warning>
               )}
               {nft.swapPending && (
                 <Alert
@@ -304,7 +326,9 @@ export default function ViewDigitalObject({
                 <GridItem
                   as={DownloadLink}
                   data={decryptedBytes}
-                  filename={`decrypted.${mime.getExtension(decryptedMime) || "dat"}`}
+                  filename={`decrypted.${
+                    mime.getExtension(decryptedMime) || "dat"
+                  }`}
                   // SECURITY: Force octet-stream to prevent browser from executing malicious content
                   // See: Security Audit H11 - MIME sniffing protection
                   mimeType="application/octet-stream"

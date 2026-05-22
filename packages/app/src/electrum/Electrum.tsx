@@ -30,7 +30,7 @@ try {
     : new Worker(new URL("./worker/electrumWorker.ts", import.meta.url), {
         type: "module",
       });
-  
+
   // Add error listener to catch worker initialization failures
   if (worker instanceof Worker) {
     worker.onerror = (e) => {
@@ -108,7 +108,12 @@ export default function Electrum() {
   const serversRef = useRef<string[] | undefined>();
   const stableServers = (() => {
     const prev = serversRef.current;
-    if (prev && servers && prev.length === servers.length && prev.every((s, i) => s === servers[i])) {
+    if (
+      prev &&
+      servers &&
+      prev.length === servers.length &&
+      prev.every((s, i) => s === servers[i])
+    ) {
       return prev;
     }
     serversRef.current = servers;
@@ -118,7 +123,10 @@ export default function Electrum() {
   // Reconnect when server config changes or when wallet is ready
   useEffect(() => {
     if (stableServers && wallet.value.address) {
-      console.debug("[Electrum] Connecting with servers:", stableServers.length);
+      console.debug(
+        "[Electrum] Connecting with servers:",
+        stableServers.length
+      );
       electrumWorker.value.setServers(stableServers);
       electrumWorker.value.connect(wallet.value.address);
     }
@@ -139,25 +147,33 @@ export default function Electrum() {
       discoveryRanRef.current = true;
       console.debug("[Electrum] Starting vault discovery");
       try {
+        // Materialise WIFs only for the duration of the worker calls; refs
+        // fall out of scope when this effect returns.
+        const wifStr = wallet.value.wif.toString();
+        const swapWifStr = wallet.value.swapWif?.toString();
         // Scan main address - also try swapWif for decryption if main fails
         const mainCount = await electrumWorker.value.discoverVaults(
-          wallet.value.wif,
+          wifStr,
           wallet.value.address,
-          wallet.value.swapWif // Try swap WIF if main fails to decrypt
+          swapWifStr // Try swap WIF if main fails to decrypt
         );
         if (mainCount > 0) {
-          console.log(`[Electrum] Discovered ${mainCount} vault(s) on main address`);
+          console.log(
+            `[Electrum] Discovered ${mainCount} vault(s) on main address`
+          );
         }
 
         // Scan swap address if different from main
-        if (wallet.value.swapWif && wallet.value.swapAddress) {
+        if (swapWifStr && wallet.value.swapAddress) {
           const swapCount = await electrumWorker.value.discoverVaults(
-            wallet.value.swapWif,
+            swapWifStr,
             wallet.value.swapAddress,
-            wallet.value.wif // Try main WIF if swap fails to decrypt
+            wifStr // Try main WIF if swap fails to decrypt
           );
           if (swapCount > 0) {
-            console.log(`[Electrum] Discovered ${swapCount} vault(s) on swap address`);
+            console.log(
+              `[Electrum] Discovered ${swapCount} vault(s) on swap address`
+            );
           }
         }
       } catch (error) {

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import {
   Modal,
   ModalOverlay,
@@ -170,11 +169,9 @@ export default function EditDigitalObject({
       // tokenOutputIndex=1 (NFT token is output 1)
       const glyph = encodeGlyphMutable("mod", payload, 0, 1, 0, 1);
       const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
-      const nftOutputScript = nftAuthScript(
-        wallet.value.address,
-        nftRefLE,
-        [{ ref: mutRefLE, scriptSigHash: glyph.scriptSigHash }]
-      );
+      const nftOutputScript = nftAuthScript(wallet.value.address, nftRefLE, [
+        { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },
+      ]);
 
       const nftInput: UnfinalizedInput = { ...txo };
       const mutInput: UnfinalizedInput = {
@@ -213,7 +210,7 @@ export default function EditDigitalObject({
 
       const rawTx = buildTx(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         inputs,
         outputs,
         false,
@@ -227,7 +224,11 @@ export default function EditDigitalObject({
       ).toString();
 
       const txid2 = await electrumWorker.value.broadcast(rawTx);
-      db.broadcast.put({ txid: txid2, date: Date.now(), description: "nft_edit" });
+      db.broadcast.put({
+        txid: txid2,
+        date: Date.now(),
+        description: "nft_edit",
+      });
 
       // Update local glyph record immediately
       if (token.id) {
@@ -240,10 +241,9 @@ export default function EditDigitalObject({
       }
 
       toast({ status: "success", title: "Token updated" });
-      onSuccess && onSuccess(txid2);
+      if (onSuccess) onSuccess(txid2);
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : "Transaction failed";
+      const msg = error instanceof Error ? error.message : "Transaction failed";
       setErrorMessage(msg);
       setHasError(true);
       setLoading(false);
@@ -291,9 +291,18 @@ export default function EditDigitalObject({
                 {attrEntries.length > 0 && (
                   <SimpleGrid columns={2} gap={2} mb={2}>
                     {attrEntries.map(([k, v]) => (
-                      <Tag key={k} size="md" borderRadius="full" variant="solid" colorScheme="blue">
+                      <Tag
+                        key={k}
+                        size="md"
+                        borderRadius="full"
+                        variant="solid"
+                        colorScheme="blue"
+                      >
                         <TagLabel>
-                          <Text as="span" fontWeight="bold">{k}</Text>: {v}
+                          <Text as="span" fontWeight="bold">
+                            {k}
+                          </Text>
+                          : {v}
                         </TagLabel>
                         <TagCloseButton onClick={() => removeAttr(k)} />
                       </Tag>
@@ -313,7 +322,9 @@ export default function EditDigitalObject({
                     onChange={(e) => setAttrVal(e.target.value)}
                     placeholder={"Value"}
                     size="sm"
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addAttr())}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && (e.preventDefault(), addAttr())
+                    }
                   />
                   <IconButton
                     aria-label={"Add attribute"}
@@ -326,12 +337,7 @@ export default function EditDigitalObject({
             </VStack>
           </ModalBody>
           <ModalFooter>
-            <Button
-              type="submit"
-              variant="primary"
-              isLoading={loading}
-              mr={4}
-            >
+            <Button type="submit" variant="primary" isLoading={loading} mr={4}>
               {"Update Token"}
             </Button>
             <Button onClick={onClose}>{"Cancel"}</Button>

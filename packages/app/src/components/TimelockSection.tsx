@@ -8,7 +8,6 @@
  */
 
 import { useState } from "react";
-import { t } from "@lingui/macro";
 import {
   Box,
   Button,
@@ -25,16 +24,12 @@ import {
   Text,
 } from "@chakra-ui/react";
 import {
-  resolveTimelockParams,
   validateTimelockState,
-  initialTimelockState,
   type TimelockSectionState,
 } from "../timelockHelpers";
 import { type TimelockMode } from "@lib/timelock";
 
-export type {
-  TimelockSectionState,
-} from "../timelockHelpers";
+export type { TimelockSectionState } from "../timelockHelpers";
 export {
   resolveTimelockParams,
   validateTimelockState,
@@ -78,8 +73,9 @@ export function TimelockSection({
   const update = (patch: Partial<TimelockSectionState>) =>
     onChange({ ...state, ...patch });
 
-  const validationError =
-    state.enabled ? validateTimelockState(state, currentBlock) : null;
+  const validationError = state.enabled
+    ? validateTimelockState(state, currentBlock)
+    : null;
 
   // Minimum datetime-local value = now + 5 minutes
   const minDatetime = new Date(Date.now() + 5 * 60 * 1000)
@@ -186,7 +182,7 @@ export function TimelockSection({
                         parseInt(state.unlockValue, 10) - currentBlock;
                       if (isNaN(blocksLeft) || blocksLeft <= 0) return null;
                       const mins = blocksLeft * 2;
-                      return "~${mins} min (~${blocksLeft} blocks)";
+                      return `~${mins} min (~${blocksLeft} blocks)`;
                     })()}
                   </FormHelperText>
                 )}
@@ -217,7 +213,7 @@ export function TimelockSection({
                 {"Hint for viewers"}
               </FormLabel>
               <Input
-                placeholder={"e.g. \"Reveal on New Year's Day\""}
+                placeholder={'e.g. "Reveal on New Year\'s Day"'}
                 value={state.hint}
                 onChange={(e) => update({ hint: e.target.value })}
                 isDisabled={disabled}
@@ -241,7 +237,9 @@ export function TimelockSection({
           >
             <Text fontSize="xs" color="orange.200">
               ⚠️{" "}
-              {"Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost."}
+              {
+                "Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost."
+              }
             </Text>
           </Box>
         </Stack>

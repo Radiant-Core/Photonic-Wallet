@@ -36,7 +36,11 @@ export default function UnsafeImage({ src }: { src: string }) {
           Show image
         </Button>
       ) : (
-        <Button mt={4} isDisabled title="URL scheme not allowed (only https and ipfs are permitted)">
+        <Button
+          mt={4}
+          isDisabled
+          title="URL scheme not allowed (only https and ipfs are permitted)"
+        >
           Show image
         </Button>
       )}

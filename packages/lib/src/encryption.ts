@@ -24,7 +24,6 @@ import { ml_kem768 } from "@noble/post-quantum/ml-kem";
 const CHUNK_SIZE = 32768; // 32 KB chunks (avoid Web Crypto API quota limits)
 const XCHACHA20_NONCE_SIZE = 24;
 export const XCHACHA20_KEY_SIZE = 32;
-const POLY1305_TAG_SIZE = 16;
 // Note: ML-KEM-768 (post-quantum) temporarily removed pending library support
 // Will be added as hybrid X25519+ML-KEM when available
 
@@ -81,7 +80,9 @@ export type CryptoRecipient = {
   /** Key identifier — matches REP-3006 crypto.key.wrap.recipients[].kid */
   kid: string;
   /** Wrap algorithm — REP-3006 crypto.key.wrap.alg */
-  alg: "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305";
+  alg:
+    | "x25519-hkdf-xchacha20poly1305"
+    | "x25519mlkem768-hkdf-xchacha20poly1305";
   /** Base64 wrapped CEK (nonce || ciphertext) — REP-3006 wrapped_cek */
   wrapped_cek: string;
   /** Base64 ephemeral X25519 public key — REP-3006 epk */
@@ -146,12 +147,16 @@ export function encryptXChaCha20Poly1305(
   aad?: Uint8Array
 ): { ciphertext: Uint8Array; nonce: Uint8Array } {
   if (key.length !== XCHACHA20_KEY_SIZE) {
-    throw new Error(`Key must be ${XCHACHA20_KEY_SIZE} bytes, got ${key.length}`);
+    throw new Error(
+      `Key must be ${XCHACHA20_KEY_SIZE} bytes, got ${key.length}`
+    );
   }
 
   const usedNonce = nonce ?? randomBytes(XCHACHA20_NONCE_SIZE);
   if (usedNonce.length !== XCHACHA20_NONCE_SIZE) {
-    throw new Error(`Nonce must be ${XCHACHA20_NONCE_SIZE} bytes, got ${usedNonce.length}`);
+    throw new Error(
+      `Nonce must be ${XCHACHA20_NONCE_SIZE} bytes, got ${usedNonce.length}`
+    );
   }
 
   const cipher = xchacha20poly1305(key, usedNonce, aad);
@@ -175,10 +180,14 @@ export function decryptXChaCha20Poly1305(
   aad?: Uint8Array
 ): Uint8Array {
   if (key.length !== XCHACHA20_KEY_SIZE) {
-    throw new Error(`Key must be ${XCHACHA20_KEY_SIZE} bytes, got ${key.length}`);
+    throw new Error(
+      `Key must be ${XCHACHA20_KEY_SIZE} bytes, got ${key.length}`
+    );
   }
   if (nonce.length !== XCHACHA20_NONCE_SIZE) {
-    throw new Error(`Nonce must be ${XCHACHA20_NONCE_SIZE} bytes, got ${nonce.length}`);
+    throw new Error(
+      `Nonce must be ${XCHACHA20_NONCE_SIZE} bytes, got ${nonce.length}`
+    );
   }
 
   const cipher = xchacha20poly1305(key, nonce, aad);
@@ -217,7 +226,12 @@ export function encryptChunked(
     // Random nonce per chunk for maximum security
     const nonce = randomBytes(XCHACHA20_NONCE_SIZE);
 
-    const { ciphertext } = encryptXChaCha20Poly1305(chunkPlaintext, key, nonce, aad);
+    const { ciphertext } = encryptXChaCha20Poly1305(
+      chunkPlaintext,
+      key,
+      nonce,
+      aad
+    );
     chunks.push({ ciphertext, nonce });
   }
 
@@ -244,7 +258,12 @@ export function decryptChunked(
     new DataView(chunkIndex.buffer).setUint32(0, i, false);
     const aad = concatBytes(plaintextHash, chunkIndex);
 
-    const decrypted = decryptXChaCha20Poly1305(chunk.ciphertext, key, chunk.nonce, aad);
+    const decrypted = decryptXChaCha20Poly1305(
+      chunk.ciphertext,
+      key,
+      chunk.nonce,
+      aad
+    );
     decryptedChunks.push(decrypted);
   }
 
@@ -462,7 +481,8 @@ export function wrapCEK(
   // SECURITY FIX (C8): Determine PQ mode and bind to HKDF info
   // This prevents downgrade attacks by ensuring hybrid and classical modes
   // produce different KEKs - an attacker cannot strip ML-KEM and still decrypt
-  const isHybrid = recipientPublicKey.mlkem && recipientPublicKey.mlkem.length > 0;
+  const isHybrid =
+    recipientPublicKey.mlkem && recipientPublicKey.mlkem.length > 0;
   const hkdfInfo = isHybrid
     ? new TextEncoder().encode("glyph-kek-hybrid-v1")
     : new TextEncoder().encode("glyph-kek-classical-v1");
@@ -474,12 +494,7 @@ export function wrapCEK(
   );
 
   // Derive KEK from shared secret with mode-bound HKDF info
-  const kek = deriveKeyHKDF(
-    ephemeral.sharedSecret,
-    undefined,
-    hkdfInfo,
-    32
-  );
+  const kek = deriveKeyHKDF(ephemeral.sharedSecret, undefined, hkdfInfo, 32);
 
   // Wrap CEK using XChaCha20-Poly1305, binding AAD (e.g. cek_hash) to the wrap
   const nonce = randomBytes(XCHACHA20_NONCE_SIZE);
@@ -528,12 +543,7 @@ export function unwrapCEK(
   const sharedSecret = decapsulateHybrid(encaps, recipientKeyPair);
 
   // Derive KEK with mode-bound HKDF info
-  const kek = deriveKeyHKDF(
-    sharedSecret,
-    undefined,
-    hkdfInfo,
-    32
-  );
+  const kek = deriveKeyHKDF(sharedSecret, undefined, hkdfInfo, 32);
 
   // Unwrap CEK (AAD must match what was used in wrapCEK)
   const nonce = wrappedCEK.slice(0, XCHACHA20_NONCE_SIZE);
@@ -593,7 +603,8 @@ export function buildEncryptedMetadata(params: {
       enc: "xchacha20poly1305",
       size: params.size,
       chunks: params.numChunks,
-      scheme: (params.encryptionScheme as "chunked-aead-v1") ?? "chunked-aead-v1",
+      scheme:
+        (params.encryptionScheme as "chunked-aead-v1") ?? "chunked-aead-v1",
     },
     crypto: {
       mode: "encrypted",
@@ -718,7 +729,9 @@ export async function decryptWallet(
   data: EncryptedData & { version?: number },
   password: string
 ): Promise<Uint8Array> {
-  if ((data as any).version === WALLET_V2_MAGIC) {
+  // The version discriminator is already in the function signature
+  // (`& { version?: number }`); no cast needed.
+  if (data.version === WALLET_V2_MAGIC) {
     return _decryptWalletV2(data, password);
   }
   return _decryptWalletV1(data, password);

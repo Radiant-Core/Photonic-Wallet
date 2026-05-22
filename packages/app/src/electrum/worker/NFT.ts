@@ -122,81 +122,96 @@ export class NFTWorker implements Subscription {
     this.ready = false;
     this.lastReceivedStatus = status;
 
-    const { added, confs, spent } = await this.updateTXOs(
-      scriptHash,
-      status,
-      manual
-    );
+    // R10 follow-up: electrum requests reject pending promises on socket
+    // close (the heavy-history "excessive resource usage" path drops the
+    // socket mid-fetch). Wrap the body so the rejection doesn't escape
+    // as an unhandled promise — and so `this.ready` is restored in
+    // `finally` so the next sync attempt isn't permanently skipped.
+    try {
+      const { added, confs, spent } = await this.updateTXOs(
+        scriptHash,
+        status,
+        manual
+      );
 
-    const existingRefs: { [key: string]: SmartToken } = {};
-    const newRefs: { [key: string]: TxO } = {};
-    const scriptRefMap: { [key: string]: string } = {};
-    for (const txo of added) {
-      const { ref: refLE } = parseNftScript(txo.script);
-      if (!refLE) continue;
-      const ref = reverseRef(refLE);
-      scriptRefMap[txo.script] = ref;
-      const glyph = ref && (await db.glyph.get({ ref }));
-      if (glyph) {
-        existingRefs[ref] = glyph;
-      } else {
-        newRefs[ref] = txo;
+      const existingRefs: { [key: string]: SmartToken } = {};
+      const newRefs: { [key: string]: TxO } = {};
+      const scriptRefMap: { [key: string]: string } = {};
+      for (const txo of added) {
+        const { ref: refLE } = parseNftScript(txo.script);
+        if (!refLE) continue;
+        const ref = reverseRef(refLE);
+        scriptRefMap[txo.script] = ref;
+        const glyph = ref && (await db.glyph.get({ ref }));
+        if (glyph) {
+          existingRefs[ref] = glyph;
+        } else {
+          newRefs[ref] = txo;
+        }
       }
-    }
 
-    const { related, accepted } = await this.addTokens(newRefs);
-    await this.addRelated(related);
+      const { related, accepted } = await this.addTokens(newRefs);
+      await this.addRelated(related);
 
-    // Insert txos and glyphs
-    // IndexedDB doesn't seem to like lots of inserts at once so batch them
-    const chunks = arrayChunks(added, 10000);
-    for (const chunk of chunks) {
-      await db.transaction("rw", db.txo, db.glyph, async () => {
-        const ids = (await db.txo.bulkPut(chunk, undefined, {
-          allKeys: true,
-        })) as number[];
-        const newGlyphs = new Map<string, SmartToken>();
-        chunk.map((txo, index) => {
-          const ref = scriptRefMap[txo.script];
-          if (!newGlyphs.has(ref)) {
-            newGlyphs.set(ref, existingRefs[ref] || accepted[ref]);
-          }
-          const glyph = newGlyphs.get(ref);
-          if (glyph) {
-            glyph.lastTxoId = ids[index];
-            glyph.spent = 0;
+      // Insert txos and glyphs
+      // IndexedDB doesn't seem to like lots of inserts at once so batch them
+      const chunks = arrayChunks(added, 10000);
+      for (const chunk of chunks) {
+        await db.transaction("rw", db.txo, db.glyph, async () => {
+          const ids = (await db.txo.bulkPut(chunk, undefined, {
+            allKeys: true,
+          })) as number[];
+          const newGlyphs = new Map<string, SmartToken>();
+          chunk.map((txo, index) => {
+            const ref = scriptRefMap[txo.script];
+            if (!newGlyphs.has(ref)) {
+              newGlyphs.set(ref, existingRefs[ref] || accepted[ref]);
+            }
+            const glyph = newGlyphs.get(ref);
+            if (glyph) {
+              glyph.lastTxoId = ids[index];
+              glyph.spent = 0;
+            }
+          });
+          const validGlyphs = Array.from(newGlyphs.values()).filter(Boolean);
+          for (const validGlyph of validGlyphs) {
+            await db.glyph.put(validGlyph);
           }
         });
-        const validGlyphs = Array.from(newGlyphs.values()).filter(Boolean);
-        for (const validGlyph of validGlyphs) {
-          await db.glyph.put(validGlyph);
+      }
+
+      // Update any NFTs that have been transferred
+      await db.transaction("rw", db.glyph, async () => {
+        for (const lastTxo of spent) {
+          await db.glyph.where({ lastTxoId: lastTxo.id }).modify({ spent: 1 });
         }
       });
+
+      // Update heights
+      await db.transaction("rw", db.glyph, async () => {
+        for (const [lastTxoId, conf] of confs) {
+          await db.glyph
+            .where({ lastTxoId })
+            .modify({ height: conf.height || Infinity });
+        }
+      });
+
+      setSubscriptionStatus(scriptHash, status, false, ContractType.NFT);
+    } catch (err) {
+      console.warn("[NFT] subscription update failed:", err);
+      // Queue the status so a future ready window retries it.
+      if (status) this.receivedStatuses.push(status);
+    } finally {
+      this.ready = true;
     }
 
-    // Update any NFTs that have been transferred
-    await db.transaction("rw", db.glyph, async () => {
-      for (const lastTxo of spent) {
-        await db.glyph.where({ lastTxoId: lastTxo.id }).modify({ spent: 1 });
-      }
-    });
-
-    // Update heights
-    await db.transaction("rw", db.glyph, async () => {
-      for (const [lastTxoId, conf] of confs) {
-        await db.glyph
-          .where({ lastTxoId })
-          .modify({ height: conf.height || Infinity });
-      }
-    });
-
-    setSubscriptionStatus(scriptHash, status, false, ContractType.NFT);
-    this.ready = true;
     if (this.receivedStatuses.length > 0) {
       const lastStatus = this.receivedStatuses.pop();
       this.receivedStatuses = [];
       if (lastStatus) {
-        this.onSubscriptionReceived(scriptHash, lastStatus);
+        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+          console.warn("[NFT] requeued sync failed:", e)
+        );
       }
     }
 
@@ -262,7 +277,10 @@ export class NFTWorker implements Subscription {
 
     // Fetch reveals, object is indexed by txid
     // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
-    const revealTxResults: [string, { tx: Transaction; delegates: string[] }][] = [];
+    const revealTxResults: [
+      string,
+      { tx: Transaction; delegates: string[] }
+    ][] = [];
     for (const revealTxId of revealTxIds) {
       // Check if it's cached
       let hex = await opfs.getTx(revealTxId);
@@ -285,7 +303,10 @@ export class NFTWorker implements Subscription {
               hex = ""; // Clear to skip processing
             }
           } catch (verifyError) {
-            console.error(`[NFT] Transaction verification failed for ${revealTxId}:`, verifyError);
+            console.error(
+              `[NFT] Transaction verification failed for ${revealTxId}:`,
+              verifyError
+            );
             hex = ""; // Clear to skip processing
           }
         }
@@ -301,9 +322,12 @@ export class NFTWorker implements Subscription {
 
         // Look for delegate burn
         const delegates = tx.outputs
-          .map((o: { script: { toHex: () => string } }) => parseDelegateBurnScript(o.script.toHex()) as string)
+          .map(
+            (o: { script: { toHex: () => string } }) =>
+              parseDelegateBurnScript(o.script.toHex()) as string
+          )
           .filter(Boolean);
-        delegates.length && console.debug(`Found delegates`, delegates);
+        if (delegates.length) console.debug(`Found delegates`, delegates);
         delegates.forEach(foundDelegates.add, foundDelegates);
 
         // Also save delegates so we don't need to look for them again later in saveGlyph
@@ -342,13 +366,16 @@ export class NFTWorker implements Subscription {
               hex = ""; // Clear to skip processing
             }
           } catch (verifyError) {
-            console.error(`[NFT] Transaction verification failed for ${refBE.getTxid()}:`, verifyError);
+            console.error(
+              `[NFT] Transaction verification failed for ${refBE.getTxid()}:`,
+              verifyError
+            );
             hex = ""; // Clear to skip processing
           }
         }
 
         // Store in cache only if verification passed
-        hex && (await opfs.putTx(refBE.toString(), hex));
+        if (hex) await opfs.putTx(refBE.toString(), hex);
       }
 
       if (hex) {
@@ -363,8 +390,9 @@ export class NFTWorker implements Subscription {
     }
     const delegateRefMap = Object.fromEntries(delegateRefResults);
 
-    Object.keys(delegateRefMap).length &&
+    if (Object.keys(delegateRefMap).length) {
       console.debug("Delegate refs", delegateRefMap);
+    }
 
     const accepted: { [key: string]: SmartToken } = {};
     // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
@@ -459,7 +487,10 @@ export class NFTWorker implements Subscription {
 
     // Look for related tokens in outputs
     const outputTokens = reveal.outputs
-      .map((o: { script: { toHex: () => string } }) => parseNftScript(o.script.toHex()).ref) // TODO handle FT, dat
+      .map(
+        (o: { script: { toHex: () => string } }) =>
+          parseNftScript(o.script.toHex()).ref
+      ) // TODO handle FT, dat
       .filter(Boolean) as string[];
     // Validate any author and container properties
     const allRefs = [...delegatedRefs, ...outputTokens];

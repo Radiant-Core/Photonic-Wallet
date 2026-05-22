@@ -12,7 +12,6 @@ import {
   ModalProps,
   Link,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import Identifier from "./Identifier";
 import { Link as RouterLink } from "react-router-dom";
 import { ExternalLinkIcon } from "@chakra-ui/icons";

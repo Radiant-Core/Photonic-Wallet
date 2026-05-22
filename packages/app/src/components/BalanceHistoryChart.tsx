@@ -2,11 +2,18 @@
  * Balance History Chart - Visualize wallet balance over time
  */
 import { useMemo } from "react";
-import { Box, Text, Spinner, Alert, AlertIcon, VStack, HStack } from "@chakra-ui/react";
+import {
+  Box,
+  Text,
+  Spinner,
+  Alert,
+  AlertIcon,
+  VStack,
+  HStack,
+} from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
-import { BroadcastResult } from "@app/types";
 import dayjs from "dayjs";
 
 interface BalancePoint {
@@ -30,14 +37,14 @@ export default function BalanceHistoryChart() {
 
     // Group transactions by date and calculate running balance
     const sortedTxs = [...transactions].sort((a, b) => a.date - b.date);
-    
+
     for (const tx of sortedTxs) {
       const dateStr = dayjs(tx.date).format("YYYY-MM-DD");
-      
+
       // Simplified balance calculation - in real implementation would track actual UTXO changes
       // For now, we'll simulate balance changes based on transaction types
       let balanceChange = 0;
-      
+
       if (tx.description?.includes("vault_claim")) {
         balanceChange = 1000; // Simulated vault claim amount
       } else if (tx.description?.includes("vault_create")) {
@@ -47,9 +54,9 @@ export default function BalanceHistoryChart() {
       } else if (tx.description?.includes("mint")) {
         balanceChange = 100; // Simulated mint amount
       }
-      
+
       runningBalance += balanceChange;
-      
+
       points.push({
         date: dateStr,
         balance: runningBalance,
@@ -88,37 +95,45 @@ export default function BalanceHistoryChart() {
     );
   }
 
-  const maxBalance = Math.max(...chartData.map(d => d.balance));
-  const minBalance = Math.min(...chartData.map(d => d.balance));
+  const maxBalance = Math.max(...chartData.map((d) => d.balance));
+  const minBalance = Math.min(...chartData.map((d) => d.balance));
 
   return (
     <Box>
       <Text fontWeight="bold" mb={4}>{t`Balance History (Last 30 Days)`}</Text>
-      
+
       {/* Simple bar chart visualization using Chakra UI */}
       <Box bg="gray.800" p={4} borderRadius="md" overflowX="auto">
         <VStack align="stretch" spacing={2}>
           {chartData.map((point, index) => {
-            const heightPercent = maxBalance > 0 ? (point.balance / maxBalance) * 100 : 0;
+            const heightPercent =
+              maxBalance > 0 ? (point.balance / maxBalance) * 100 : 0;
             const isRecent = index >= chartData.length - 7;
-            
+
             return (
               <HStack key={point.date} spacing={3} align="center">
                 <Text fontSize="xs" w="60px" color="whiteAlpha.600">
                   {dayjs(point.date).format("MMM DD")}
                 </Text>
-                
+
                 {/* Bar visualization */}
-                <Box flex={1} h="20px" bg="gray.700" borderRadius="sm" position="relative" overflow="hidden">
-                  <Box 
-                    h="100%" 
+                <Box
+                  flex={1}
+                  h="20px"
+                  bg="gray.700"
+                  borderRadius="sm"
+                  position="relative"
+                  overflow="hidden"
+                >
+                  <Box
+                    h="100%"
                     w={`${heightPercent}%`}
                     bg={isRecent ? "blue.400" : "blue.600"}
                     borderRadius="sm"
                     transition="all 0.2s"
                   />
                 </Box>
-                
+
                 <Text fontSize="xs" w="80px" textAlign="right">
                   {point.balance.toLocaleString()} RXD
                 </Text>
@@ -127,10 +142,19 @@ export default function BalanceHistoryChart() {
           })}
         </VStack>
       </Box>
-      
-      <HStack mt={4} justify="space-between" fontSize="xs" color="whiteAlpha.600">
-        <Text>{t`Min`}: {minBalance.toLocaleString()} RXD</Text>
-        <Text>{t`Max`}: {maxBalance.toLocaleString()} RXD</Text>
+
+      <HStack
+        mt={4}
+        justify="space-between"
+        fontSize="xs"
+        color="whiteAlpha.600"
+      >
+        <Text>
+          {t`Min`}: {minBalance.toLocaleString()} RXD
+        </Text>
+        <Text>
+          {t`Max`}: {maxBalance.toLocaleString()} RXD
+        </Text>
       </HStack>
     </Box>
   );

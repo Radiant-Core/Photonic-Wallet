@@ -110,6 +110,14 @@ export type WalletFile = {
   iv: string;
   mac: string;
   net: NetworkKey;
+  /**
+   * SLIP-0044 coin type used to derive the wallet keys.
+   *   - Omitted or 512 → modern wallets (Photonic Wallet v3.0.0+).
+   *   - 0 → legacy wallets created before v3.0.0. MUST be set explicitly,
+   *     otherwise the CLI derives at the modern path and produces a
+   *     different address than the app holds the UTXOs at.
+   */
+  coinType?: number;
 };
 
 export type Config = {

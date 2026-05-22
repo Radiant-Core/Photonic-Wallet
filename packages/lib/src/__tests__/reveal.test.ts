@@ -7,9 +7,7 @@ import {
   validateReveal,
   estimateRevealOutputSize,
   buildRevealTx,
-  REVEAL_MARKER,
   REVEAL_VERSION,
-  type RevealProof,
 } from "../reveal";
 import { GLYPH_TIMELOCK } from "../protocols";
 import rjs from "@radiant-core/radiantjs";
@@ -56,21 +54,20 @@ describe("createRevealProof", () => {
   });
 
   it("rejects a CEK of the wrong length", () => {
-    expect(() =>
-      createRevealProof(TOKEN_REF, new Uint8Array(16))
-    ).toThrow(/32 bytes/);
+    expect(() => createRevealProof(TOKEN_REF, new Uint8Array(16))).toThrow(
+      /32 bytes/
+    );
   });
 
   it("rejects an invalid token_ref", () => {
-    expect(() =>
-      createRevealProof("not-a-ref", makeCEK())
-    ).toThrow(/token_ref/);
+    expect(() => createRevealProof("not-a-ref", makeCEK())).toThrow(
+      /token_ref/
+    );
   });
 
   it("rejects a CEK that doesn't match a provided commitment hash", () => {
     const cek = makeCEK(0xab);
-    const wrongHash =
-      "sha256:" + bytesToHex(sha256(makeCEK(0xcd))); // hash of a different CEK
+    const wrongHash = "sha256:" + bytesToHex(sha256(makeCEK(0xcd))); // hash of a different CEK
     expect(() =>
       createRevealProof(TOKEN_REF, cek, { cekHash: wrongHash })
     ).toThrow(/does not match/);
@@ -175,8 +172,12 @@ describe("validateReveal", () => {
   it("rejects a tx with multiple reveal outputs", () => {
     const { script } = createRevealProof(TOKEN_REF, makeCEK());
     const tx = new Transaction();
-    tx.addOutput(new Transaction.Output({ script: new Script(script), satoshis: 0 }));
-    tx.addOutput(new Transaction.Output({ script: new Script(script), satoshis: 0 }));
+    tx.addOutput(
+      new Transaction.Output({ script: new Script(script), satoshis: 0 })
+    );
+    tx.addOutput(
+      new Transaction.Output({ script: new Script(script), satoshis: 0 })
+    );
     const result = validateReveal(tx, TOKEN_REF);
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/Multiple/);

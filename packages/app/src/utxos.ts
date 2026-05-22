@@ -74,18 +74,12 @@ export async function updateRxdBalances(id: string) {
   });
 }
 
-// Update NFT owned status for an address
-export async function updateNFTOwned(address: string) {
-  await db.transaction("rw", db.txo, db.balance, async () => {
-    // Count unspent NFTs for this address
-    const script = db.txo
-      .where({ contractType: ContractType.NFT, spent: 0 })
-      .filter((txo) => {
-        // Check if this NFT belongs to the address (by script match)
-        return txo.script.includes(address.slice(0, 20)); // Simplified check
-      });
-    // This is a simplified implementation - in practice, you'd need proper script parsing
-  });
+// Update NFT owned status for an address.
+// Stub: the body previously built an unused Dexie query that never executed.
+// Kept as a no-op so call sites compile; the real implementation needs
+// proper script parsing rather than a substring match.
+export async function updateNFTOwned(_address: string) {
+  void _address;
 }
 
 // Update FT balances

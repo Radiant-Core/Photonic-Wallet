@@ -17,9 +17,15 @@ export * from "./burn";
 export * from "./royalty";
 export * from "./soulbound";
 export {
-  createContainer, addItemToContainer, removeItemFromContainer,
-  createChildRelationship, validateContainer, getContainerStats,
-  createChildToken, isChildToken, getContainerRef,
+  createContainer,
+  addItemToContainer,
+  removeItemFromContainer,
+  createChildRelationship,
+  validateContainer,
+  getContainerStats,
+  createChildToken,
+  isChildToken,
+  getContainerRef,
 } from "./container";
 export * from "./authority";
 export * from "./wavenaming";
@@ -33,8 +39,8 @@ export {
   createWaveReclaimMetadata,
   isWaveDuplicate,
   getWaveDuplicateWarning,
-} from './wave';
-export * from './crypto';
+} from "./wave";
+export * from "./crypto";
 export * from "./encryption";
 export * from "./timelock";
 export * from "./reveal";

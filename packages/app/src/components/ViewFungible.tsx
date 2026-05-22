@@ -20,7 +20,6 @@ import {
   useClipboard,
   useDisclosure,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { CopyIcon } from "@chakra-ui/icons";
@@ -230,7 +229,9 @@ export default function ViewFungible({
                 </Flex>
               </GridItem>
               {token.embed && !isKnownEmbed && (
-                <Warning>{"Files may be unsafe and result in loss of funds"}</Warning>
+                <Warning>
+                  {"Files may be unsafe and result in loss of funds"}
+                </Warning>
               )}
               {!token.embed && token.remote && !isIPFS && (
                 <Warning>

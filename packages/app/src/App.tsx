@@ -17,6 +17,7 @@ import { ViewPanelProvider } from "./layouts/ViewPanelLayout";
 import Electrum from "./electrum/Electrum";
 import WalletNotifier from "./components/WalletNotifier";
 import { loadWalletFromSaved } from "./wallet";
+import { loadAutoLockMs } from "./autoLock";
 import useActivityDetector from "./hooks/useActivityDetector";
 import ConsolidationModal from "./components/ConsolidationModal";
 import ActivityNotifications from "./components/ActivityNotifications";
@@ -75,6 +76,9 @@ export default function App() {
         network.value = config.networks[net as NetworkKey];
         feeRate.value = normalizeFeeRate(savedFeeRate);
       });
+      // Hydrate the configurable idle-lock interval (R4). Fire-and-forget;
+      // signal stays at default until the Dexie read resolves.
+      void loadAutoLockMs();
     }
   }, [saved]);
 

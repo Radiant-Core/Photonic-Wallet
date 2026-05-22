@@ -53,7 +53,6 @@ const DEFAULT_RPC_CONFIG: SwapRpcConfig = {
 };
 
 // SECURITY FIX (H8): Use IndexedDB instead of localStorage for better security
-const STORAGE_KEY = "photonic.swap.rpcConfig";
 const DB_KEY = "swapRpcConfig";
 
 /**
@@ -72,7 +71,8 @@ function validateSwapRpcUrl(url: string): { valid: boolean; error?: string } {
     if (url.startsWith("http://")) {
       return {
         valid: false,
-        error: "Insecure HTTP URL is not allowed. Use https:// for secure connections.",
+        error:
+          "Insecure HTTP URL is not allowed. Use https:// for secure connections.",
       };
     }
     return {
@@ -99,7 +99,7 @@ function validateSwapRpcUrl(url: string): { valid: boolean; error?: string } {
  */
 async function loadStoredConfig(): Promise<SwapRpcConfig> {
   try {
-    const stored = await db.kvp.get(DB_KEY) as SwapRpcConfig | undefined;
+    const stored = (await db.kvp.get(DB_KEY)) as SwapRpcConfig | undefined;
     if (!stored || typeof stored.url !== "string" || !stored.url) {
       return DEFAULT_RPC_CONFIG;
     }
@@ -113,8 +113,10 @@ async function loadStoredConfig(): Promise<SwapRpcConfig> {
 
     return {
       url: stored.url,
-      username: typeof stored.username === "string" ? stored.username : undefined,
-      password: typeof stored.password === "string" ? stored.password : undefined,
+      username:
+        typeof stored.username === "string" ? stored.username : undefined,
+      password:
+        typeof stored.password === "string" ? stored.password : undefined,
     };
   } catch {
     return DEFAULT_RPC_CONFIG;
@@ -122,15 +124,15 @@ async function loadStoredConfig(): Promise<SwapRpcConfig> {
 }
 
 let rpcConfig: SwapRpcConfig = DEFAULT_RPC_CONFIG;
-let rpcConfigInitialized = false;
 
 // Initialize config asynchronously
-loadStoredConfig().then(config => {
-  rpcConfig = config;
-  rpcConfigInitialized = true;
-}).catch(() => {
-  rpcConfigInitialized = true;
-});
+loadStoredConfig()
+  .then((config) => {
+    rpcConfig = config;
+  })
+  .catch(() => {
+    // Falls back to DEFAULT_RPC_CONFIG already assigned above.
+  });
 
 /**
  * Save swap RPC config to IndexedDB with scheme validation
@@ -185,13 +187,17 @@ async function rpcCall<T>(method: string, params: unknown[] = []): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`RPC request failed: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `RPC request failed: ${response.status} ${response.statusText}`
+    );
   }
 
   const data = await response.json();
-  
+
   if (data.error) {
-    throw new Error(`RPC error: ${data.error.message || JSON.stringify(data.error)}`);
+    throw new Error(
+      `RPC error: ${data.error.message || JSON.stringify(data.error)}`
+    );
   }
 
   return data.result as T;
@@ -248,7 +254,11 @@ export async function getSwapHistoryByWant(
   limit = 100,
   offset = 0
 ): Promise<SwapOffer[]> {
-  return rpcCall<SwapOffer[]>("getswaphistorybywant", [wantTokenRef, limit, offset]);
+  return rpcCall<SwapOffer[]>("getswaphistorybywant", [
+    wantTokenRef,
+    limit,
+    offset,
+  ]);
 }
 
 /**
@@ -261,7 +271,9 @@ export async function getSwapCount(tokenRef: string): Promise<SwapOrderCounts> {
 /**
  * Get order counts by wanted token
  */
-export async function getSwapCountByWant(wantTokenRef: string): Promise<SwapOrderCounts> {
+export async function getSwapCountByWant(
+  wantTokenRef: string
+): Promise<SwapOrderCounts> {
   return rpcCall<SwapOrderCounts>("getswapcountbywant", [wantTokenRef]);
 }
 
@@ -381,9 +393,11 @@ function encodeOutput(script: string, value: number) {
   return result;
 }
 
-export function parsePriceTerms(
-  priceTermsHex: string
-): { script: string; value: number; outputs: { script: string; value: number }[] } | null {
+export function parsePriceTerms(priceTermsHex: string): {
+  script: string;
+  value: number;
+  outputs: { script: string; value: number }[];
+} | null {
   try {
     const bytes = hexToBytes(priceTermsHex);
     if (bytes.length === 0) {
@@ -415,7 +429,9 @@ export function parsePriceTerms(
           throw new Error("Invalid output script");
         }
 
-        const script = bytesToHex(bytes.slice(offset, offset + scriptLen.value));
+        const script = bytesToHex(
+          bytes.slice(offset, offset + scriptLen.value)
+        );
         offset += scriptLen.value;
         outputs.push({ script, value });
       }
@@ -455,9 +471,12 @@ export function encodePriceTermsOutputs(
   outputs: { script: string; value: number }[]
 ): string {
   const count = encodeCompactSize(outputs.length);
-  const encodedOutputs = outputs.map((output) => encodeOutput(output.script, output.value));
+  const encodedOutputs = outputs.map((output) =>
+    encodeOutput(output.script, output.value)
+  );
   const totalSize =
-    count.length + encodedOutputs.reduce((sum, output) => sum + output.length, 0);
+    count.length +
+    encodedOutputs.reduce((sum, output) => sum + output.length, 0);
   const result = new Uint8Array(totalSize);
   let offset = 0;
   result.set(count, offset);
@@ -477,7 +496,7 @@ export function assetToSwapTokenId(
     return "00".repeat(32);
   }
 
-  return Buffer.from(sha256(Buffer.from(Outpoint.fromString(glyphRef).ref(), "hex"))).toString(
-    "hex"
-  );
+  return Buffer.from(
+    sha256(Buffer.from(Outpoint.fromString(glyphRef).ref(), "hex"))
+  ).toString("hex");
 }

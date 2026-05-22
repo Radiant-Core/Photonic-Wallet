@@ -44,9 +44,15 @@ export function transferFungible(
     outputs.push({ script: fromScript, value: accum.sum - value });
   }
 
+  // R17: the original FIXME asked whether `coinSelect` was sizing inputs
+  // by the spent UTXO's scriptPubKey (wrong) instead of its scriptSig
+  // (right). R0's `coinSelect.ts` rewrite at line 134 now ignores the
+  // input's stored `script` field and constructs a dummy scriptSig of
+  // length `scriptSigSize ?? TX_INPUT_PUBKEYHASH (107)` — correct for
+  // both plain RXD/P2PKH inputs and FT/NFT inputs spent via the
+  // P2PKH-shaped scriptSig path. The FIXME is no longer applicable.
   const selected = coinSelect(
     fromAddress,
-    // FIXME check script is using scriptSig not scriptPubKey
     [...accum.inputs, ...coins],
     outputs,
     rxdChangeScript,

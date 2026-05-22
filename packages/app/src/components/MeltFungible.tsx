@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { t } from "@lingui/macro";
 import {
   Modal,
   ModalOverlay,
@@ -99,7 +98,7 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
       return;
     }
 
-    const privKey = PrivateKey.fromString(wallet.value.wif as string);
+    const privKey = PrivateKey.fromString(wallet.value.wif!.toString());
 
     const rawTx = buildTx(
       wallet.value.address,
@@ -111,9 +110,9 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
     try {
       const txid = await electrumWorker.value.broadcast(rawTx);
       db.broadcast.put({ txid, date: Date.now(), description: "ft_melt" });
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
       toast({ status: "success", title: "Tokens melted" });
-    } catch (error) {
+    } catch {
       setErrorMessage("Transaction rejected");
       setSuccess(false);
       setLoading(false);

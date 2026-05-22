@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { t } from "@lingui/macro";
 import {
   Modal,
   ModalOverlay,
@@ -83,7 +82,7 @@ export default function MeltDigitalObject({
 
     selected.inputs[0].script = asset.script;
 
-    const privKey = PrivateKey.fromString(wallet.value.wif as string);
+    const privKey = PrivateKey.fromString(wallet.value.wif!.toString());
 
     const rawTx = buildTx(
       wallet.value.address,
@@ -97,9 +96,9 @@ export default function MeltDigitalObject({
       const txid = await electrumWorker.value.broadcast(rawTx);
       console.log("[Melt] Broadcast result txid:", txid, "type:", typeof txid);
       db.broadcast.put({ txid, date: Date.now(), description: "nft_melt" });
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
       toast({ status: "success", title: "Token melted" });
-    } catch (error) {
+    } catch {
       setErrorMessage("Transaction rejected");
       setSuccess(false);
       setLoading(false);

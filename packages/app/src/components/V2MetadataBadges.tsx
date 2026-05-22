@@ -1,6 +1,5 @@
 import React from "react";
 import { HStack, Badge, Tooltip, Icon } from "@chakra-ui/react";
-import { Trans } from "@lingui/macro";
 import {
   MdLock,
   MdVerified,
@@ -28,13 +27,16 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
   const showContainer = isContainer(metadata);
   const showAuthority = isAuthority(metadata);
   const showWave = isWaveName(metadata);
-  const showCreatorSig = typeof metadata.creator === "object" && metadata.creator.sig;
+  const showCreatorSig =
+    typeof metadata.creator === "object" && metadata.creator.sig;
 
   return (
     <HStack spacing={2} flexWrap="wrap">
       {showRoyalty && (
         <Tooltip
-          label={`${metadata.royalty!.enforced ? "Enforced" : "Advisory"} Royalty: ${metadata.royalty!.bps / 100}%`}
+          label={`${
+            metadata.royalty!.enforced ? "Enforced" : "Advisory"
+          } Royalty: ${metadata.royalty!.bps / 100}%`}
         >
           <Badge
             colorScheme={metadata.royalty!.enforced ? "purple" : "gray"}
@@ -50,7 +52,12 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
 
       {showSoulbound && (
         <Tooltip label="Non-transferable (Soulbound)">
-          <Badge colorScheme="orange" display="flex" alignItems="center" gap={1}>
+          <Badge
+            colorScheme="orange"
+            display="flex"
+            alignItems="center"
+            gap={1}
+          >
             <Icon as={MdLock} />
             Soulbound
           </Badge>
@@ -86,7 +93,9 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
 
       {showContainer && (
         <Tooltip
-          label={`Collection (${metadata.container?.minted || 0}/${metadata.container?.max_items || "∞"})`}
+          label={`Collection (${metadata.container?.minted || 0}/${
+            metadata.container?.max_items || "∞"
+          })`}
         >
           <Badge colorScheme="teal" display="flex" alignItems="center" gap={1}>
             <Icon as={MdFolder} />

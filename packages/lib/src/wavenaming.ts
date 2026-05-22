@@ -45,16 +45,17 @@ export function createWaveName(
     p: [GLYPH_NFT, GLYPH_MUT, GLYPH_WAVE], // WAVE names must be mutable NFTs
     name: `${name}${options?.domain ? `.${options.domain}` : ""}`,
     type: "wave_name",
-    attrs: waveName as any,
+    attrs: waveName as unknown as Record<string, unknown>,
   };
 }
 
 /**
  * Validate WAVE name token
  */
-export function validateWaveName(
-  metadata: GlyphV2Metadata
-): { valid: boolean; errors: string[] } {
+export function validateWaveName(metadata: GlyphV2Metadata): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   // Must have WAVE protocol
@@ -113,9 +114,11 @@ export function isValidWaveName(name: string): boolean {
 /**
  * Resolve WAVE name to target
  */
-export function resolveWaveName(
-  metadata: GlyphV2Metadata
-): { target?: string; target_type?: string; error?: string } {
+export function resolveWaveName(metadata: GlyphV2Metadata): {
+  target?: string;
+  target_type?: string;
+  error?: string;
+} {
   const validation = validateWaveName(metadata);
   if (!validation.valid) {
     return { error: validation.errors.join(", ") };
@@ -149,7 +152,7 @@ export function updateWaveNameTarget(
       ...waveName,
       target: newTarget,
       target_type: newTargetType || waveName.target_type,
-    } as any,
+    } as unknown as Record<string, unknown>,
   };
 }
 
@@ -174,7 +177,7 @@ export function addWaveNameRecord(
     attrs: {
       ...waveName,
       records,
-    } as any,
+    } as unknown as Record<string, unknown>,
   };
 }
 
@@ -187,7 +190,9 @@ export function getFullWaveName(metadata: GlyphV2Metadata): string | undefined {
   const waveName = metadata.attrs as WaveNameMetadata;
   if (!waveName.name) return undefined;
 
-  return waveName.domain ? `${waveName.name}.${waveName.domain}` : waveName.name;
+  return waveName.domain
+    ? `${waveName.name}.${waveName.domain}`
+    : waveName.name;
 }
 
 /**
@@ -232,7 +237,8 @@ export function parseWaveName(
  */
 export async function checkWaveNameAvailability(
   name: string,
-  domain: string = "rxd"
+  // Reserved for the future indexer query; currently only the name is checked.
+  _domain: string = "rxd"
 ): Promise<{ available: boolean; owner?: string; ref?: string }> {
   // Placeholder - actual implementation would query indexer
   // For now, just validate format

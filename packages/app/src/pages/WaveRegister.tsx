@@ -12,7 +12,6 @@ import {
   Alert,
   AlertIcon,
   AlertDescription,
-  Box,
   Divider,
   useToast,
   Spinner,
@@ -22,9 +21,9 @@ import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import { wallet, feeRate } from "@app/signals";
 import { mintToken } from "@lib/mint";
-import { 
-  createWaveNameMetadata, 
-  validateWaveName, 
+import {
+  createWaveNameMetadata,
+  validateWaveName,
   calculateNameCost,
 } from "@lib/wave";
 import { photonsToRXD } from "@lib/format";
@@ -43,9 +42,11 @@ export default function WaveRegister() {
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
   const [serverCanVerify, setServerCanVerify] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  
-  const [registrationPhase, setRegistrationPhase] = useState<"idle" | "broadcasting" | "complete">("idle");
-  
+
+  const [registrationPhase, setRegistrationPhase] = useState<
+    "idle" | "broadcasting" | "complete"
+  >("idle");
+
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -69,7 +70,9 @@ export default function WaveRegister() {
       setServerCanVerify(null);
       try {
         // Query RXinDexer for name availability
-        const available = await electrumWorker.value.checkWaveAvailable(fullName);
+        const available = await electrumWorker.value.checkWaveAvailable(
+          fullName
+        );
         setIsAvailable(available);
         setServerCanVerify(true);
       } catch (error) {
@@ -126,13 +129,20 @@ export default function WaveRegister() {
       // Registration fee output
       const registrationFee = calculateNameCost(fullName);
       const feeAddress = "1GrwkQNJfjbEJjH25heszNZLpbZou8nfXG";
-      const feeOutput = { script: p2pkhScript(feeAddress), value: registrationFee };
+      const feeOutput = {
+        script: p2pkhScript(feeAddress),
+        value: registrationFee,
+      };
 
       // mintToken does its own internal commit+reveal — broadcast both
       const { commitTx, revealTx } = mintToken(
         "nft",
-        { method: "direct", params: { address: wallet.value.address }, value: 1 },
-        wallet.value.wif,
+        {
+          method: "direct",
+          params: { address: wallet.value.address },
+          value: 1,
+        },
+        wallet.value.wif.toString(),
         utxos,
         metadata,
         [],
@@ -140,11 +150,23 @@ export default function WaveRegister() {
         [feeOutput]
       );
 
-      const commitTxId = await electrumWorker.value.broadcast(commitTx.toString());
-      const revealTxId = await electrumWorker.value.broadcast(revealTx.toString());
+      const commitTxId = await electrumWorker.value.broadcast(
+        commitTx.toString()
+      );
+      const revealTxId = await electrumWorker.value.broadcast(
+        revealTx.toString()
+      );
 
-      await db.broadcast.put({ txid: commitTxId, date: Date.now(), description: "wave_name_commit" });
-      await db.broadcast.put({ txid: revealTxId, date: Date.now(), description: "wave_name_reveal" });
+      await db.broadcast.put({
+        txid: commitTxId,
+        date: Date.now(),
+        description: "wave_name_commit",
+      });
+      await db.broadcast.put({
+        txid: revealTxId,
+        date: Date.now(),
+        description: "wave_name_reveal",
+      });
 
       setRegistrationPhase("complete");
 
@@ -167,7 +189,8 @@ export default function WaveRegister() {
       setRegistrationPhase("idle");
       toast({
         title: "Registration Failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
         status: "error",
       });
     } finally {
@@ -177,16 +200,12 @@ export default function WaveRegister() {
 
   return (
     <Container maxW="container.md" py={8}>
-      <PageHeader>
-        {"Register WAVE Name"}
-      </PageHeader>
+      <PageHeader>{"Register WAVE Name"}</PageHeader>
 
       <ContentContainer>
         <VStack spacing={6} align="stretch">
           <FormControl isInvalid={!!name && !validation.valid}>
-            <FormLabel>
-              WAVE Name
-            </FormLabel>
+            <FormLabel>WAVE Name</FormLabel>
             <HStack>
               <Input
                 value={name}
@@ -197,32 +216,47 @@ export default function WaveRegister() {
               <Text fontWeight="bold">.rxd</Text>
             </HStack>
             <FormHelperText>
-              {!name && "Enter a name (3-63 characters, lowercase alphanumeric and hyphens)"}
-              {name && !validation.valid && <Text color="red.400">{validation.error}</Text>}
+              {!name &&
+                "Enter a name (3-63 characters, lowercase alphanumeric and hyphens)"}
+              {name && !validation.valid && (
+                <Text color="red.400">{validation.error}</Text>
+              )}
               {name && validation.valid && isChecking && (
                 <HStack>
                   <Spinner size="xs" />
                   Checking availability...
                 </HStack>
               )}
-              {name && validation.valid && !isChecking && isAvailable === true && serverCanVerify === true && (
-                <Text color="green.400">
-                  ✓ Available
-                </Text>
-              )}
-              {name && validation.valid && !isChecking && isAvailable === true && serverCanVerify === false && (
-                <Alert status="warning" size="sm" borderRadius="md" py={1}>
-                  <AlertIcon boxSize={4} />
-                  <AlertDescription fontSize="sm">
-                    Server cannot verify availability. If the name is already taken: (1) the registration fee is sent to the protocol treasury and is non-refundable, (2) the name will continue to resolve to the original registrant's address — not yours, and (3) anyone sending funds to this name will have them delivered to the original registrant, not you.
-                  </AlertDescription>
-                </Alert>
-              )}
-              {name && validation.valid && !isChecking && isAvailable === false && (
-                <Text color="red.400">
-                  ✗ Name already registered
-                </Text>
-              )}
+              {name &&
+                validation.valid &&
+                !isChecking &&
+                isAvailable === true &&
+                serverCanVerify === true && (
+                  <Text color="green.400">✓ Available</Text>
+                )}
+              {name &&
+                validation.valid &&
+                !isChecking &&
+                isAvailable === true &&
+                serverCanVerify === false && (
+                  <Alert status="warning" size="sm" borderRadius="md" py={1}>
+                    <AlertIcon boxSize={4} />
+                    <AlertDescription fontSize="sm">
+                      Server cannot verify availability. If the name is already
+                      taken: (1) the registration fee is sent to the protocol
+                      treasury and is non-refundable, (2) the name will continue
+                      to resolve to the original registrant's address — not
+                      yours, and (3) anyone sending funds to this name will have
+                      them delivered to the original registrant, not you.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              {name &&
+                validation.valid &&
+                !isChecking &&
+                isAvailable === false && (
+                  <Text color="red.400">✗ Name already registered</Text>
+                )}
             </FormHelperText>
           </FormControl>
 
@@ -231,9 +265,7 @@ export default function WaveRegister() {
               <AlertIcon />
               <AlertDescription>
                 <VStack align="start" spacing={1}>
-                  <Text fontWeight="bold">
-                    Registration Cost
-                  </Text>
+                  <Text fontWeight="bold">Registration Cost</Text>
                   <Text fontSize="lg" color="blue.300">
                     {photonsToRXD(cost)} RXD
                   </Text>
@@ -248,9 +280,7 @@ export default function WaveRegister() {
           <Divider />
 
           <FormControl>
-            <FormLabel>
-              Target Address/Reference
-            </FormLabel>
+            <FormLabel>Target Address/Reference</FormLabel>
             <HStack>
               <Input
                 value={target}
@@ -273,9 +303,7 @@ export default function WaveRegister() {
           </FormControl>
 
           <FormControl>
-            <FormLabel>
-              Description (Optional)
-            </FormLabel>
+            <FormLabel>Description (Optional)</FormLabel>
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -288,25 +316,27 @@ export default function WaveRegister() {
             <AlertDescription>
               <VStack align="start" spacing={1}>
                 <Text fontWeight="bold">Registration Info</Text>
-                <Text fontSize="sm">All WAVE names now have a default 2-year expiration with a 30-day grace period for renewal.</Text>
-                <Text fontSize="sm">Registration uses commit-reveal pattern to prevent front-running and ensure fair allocation.</Text>
+                <Text fontSize="sm">
+                  All WAVE names now have a default 2-year expiration with a
+                  30-day grace period for renewal.
+                </Text>
+                <Text fontSize="sm">
+                  Registration uses commit-reveal pattern to prevent
+                  front-running and ensure fair allocation.
+                </Text>
               </VStack>
             </AlertDescription>
           </Alert>
 
           <FormControl>
-            <FormLabel>
-              Custom Data (Optional JSON)
-            </FormLabel>
+            <FormLabel>Custom Data (Optional JSON)</FormLabel>
             <Input
               value={customData}
               onChange={(e) => setCustomData(e.target.value)}
               placeholder={'{"twitter": "@alice", "website": "alice.com"}'}
               fontFamily="mono"
             />
-            <FormHelperText>
-              Additional metadata in JSON format
-            </FormHelperText>
+            <FormHelperText>Additional metadata in JSON format</FormHelperText>
           </FormControl>
 
           {registrationPhase === "complete" ? (
@@ -322,7 +352,12 @@ export default function WaveRegister() {
               size="lg"
               onClick={handleRegister}
               isLoading={isLoading || registrationPhase === "broadcasting"}
-              isDisabled={!validation.valid || isAvailable === false || isChecking || !target}
+              isDisabled={
+                !validation.valid ||
+                isAvailable === false ||
+                isChecking ||
+                !target
+              }
               loadingText={"Registering..."}
             >
               {"Register WAVE Name"}

@@ -155,10 +155,7 @@ export default async function bundlePrepare(this: Command, inputDir?: string) {
         } else {
           const embed = tokenFile as EmbeddedTokenFile;
           const safePath = safeResolvePath(bundleDir, embed.path);
-          if (
-            fs.statSync(safePath).size >
-            config.maxFileSize
-          ) {
+          if (fs.statSync(safePath).size > config.maxFileSize) {
             throw new Error(`File '${embed.path}' is too large`);
           }
           if (!embed.contentType) {

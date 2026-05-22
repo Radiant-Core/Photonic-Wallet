@@ -38,14 +38,18 @@ export function EncryptedBadge({
       return "🔐 Passphrase-protected encrypted content";
     }
     if (recipientCount && recipientCount > 0) {
-      return `🔐 Encrypted for ${recipientCount} recipient${recipientCount > 1 ? "s" : ""}`;
+      return `🔐 Encrypted for ${recipientCount} recipient${
+        recipientCount > 1 ? "s" : ""
+      }`;
     }
     return "🔐 Encrypted content";
   };
 
   return (
     <span
-      className={`encrypted-badge ${sizeClasses[size]} ${onClick ? "clickable" : ""}`}
+      className={`encrypted-badge ${sizeClasses[size]} ${
+        onClick ? "clickable" : ""
+      }`}
       onClick={onClick}
       title={getTooltip()}
     >

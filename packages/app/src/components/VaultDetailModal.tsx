@@ -1,6 +1,23 @@
 import {
-  Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody, ModalCloseButton,
-  Button, VStack, HStack, Text, Box, Divider, Badge, Link, Table, Tbody, Tr, Td
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalFooter,
+  ModalBody,
+  ModalCloseButton,
+  Button,
+  VStack,
+  HStack,
+  Text,
+  Box,
+  Divider,
+  Badge,
+  Link,
+  Table,
+  Tbody,
+  Tr,
+  Td,
 } from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { VaultRecord } from "@app/types";
@@ -16,10 +33,21 @@ interface Props {
   currentTimestamp: number;
 }
 
-export default function VaultDetailModal({ isOpen, onClose, vault, currentHeight, currentTimestamp }: Props) {
+export default function VaultDetailModal({
+  isOpen,
+  onClose,
+  vault,
+  currentHeight,
+  currentTimestamp,
+}: Props) {
   if (!vault) return null;
 
-  const remaining = vaultTimeRemaining(vault.locktime, vault.mode, currentHeight, currentTimestamp);
+  const remaining = vaultTimeRemaining(
+    vault.locktime,
+    vault.mode,
+    currentHeight,
+    currentTimestamp
+  );
   const isUnlockable = remaining.value === 0;
 
   return (
@@ -29,8 +57,16 @@ export default function VaultDetailModal({ isOpen, onClose, vault, currentHeight
         <ModalHeader>
           <HStack>
             <Text>{t`Vault Details`}</Text>
-            <Badge colorScheme={vault.claimed ? "gray" : isUnlockable ? "green" : "orange"}>
-              {vault.claimed ? t`Claimed` : isUnlockable ? t`Unlockable` : t`Locked`}
+            <Badge
+              colorScheme={
+                vault.claimed ? "gray" : isUnlockable ? "green" : "orange"
+              }
+            >
+              {vault.claimed
+                ? t`Claimed`
+                : isUnlockable
+                ? t`Unlockable`
+                : t`Locked`}
             </Badge>
           </HStack>
         </ModalHeader>
@@ -41,12 +77,30 @@ export default function VaultDetailModal({ isOpen, onClose, vault, currentHeight
               <Text fontWeight="bold" mb={2}>{t`Vault Information`}</Text>
               <Table size="sm" variant="simple">
                 <Tbody>
-                  <Tr><Td fontWeight="medium">{t`Asset Type`}</Td><Td textTransform="uppercase">{vault.assetType}</Td></Tr>
-                  <Tr><Td fontWeight="medium">{t`Amount`}</Td><Td><Photons value={vault.value} /></Td></Tr>
-                  <Tr><Td fontWeight="medium">{t`Unlock At`}</Td><Td>{formatLocktime(vault.locktime, vault.mode)}</Td></Tr>
-                  <Tr><Td fontWeight="medium">{t`Remaining`}</Td><Td>
-                    {vault.claimed ? t`Claimed` : remaining.unit === "blocks" ? `${remaining.value.toLocaleString()} blocks` : t`Ready`}
-                  </Td></Tr>
+                  <Tr>
+                    <Td fontWeight="medium">{t`Asset Type`}</Td>
+                    <Td textTransform="uppercase">{vault.assetType}</Td>
+                  </Tr>
+                  <Tr>
+                    <Td fontWeight="medium">{t`Amount`}</Td>
+                    <Td>
+                      <Photons value={vault.value} />
+                    </Td>
+                  </Tr>
+                  <Tr>
+                    <Td fontWeight="medium">{t`Unlock At`}</Td>
+                    <Td>{formatLocktime(vault.locktime, vault.mode)}</Td>
+                  </Tr>
+                  <Tr>
+                    <Td fontWeight="medium">{t`Remaining`}</Td>
+                    <Td>
+                      {vault.claimed
+                        ? t`Claimed`
+                        : remaining.unit === "blocks"
+                        ? `${remaining.value.toLocaleString()} blocks`
+                        : t`Ready`}
+                    </Td>
+                  </Tr>
                 </Tbody>
               </Table>
             </Box>
@@ -55,14 +109,26 @@ export default function VaultDetailModal({ isOpen, onClose, vault, currentHeight
               <Text fontWeight="bold" mb={2}>{t`Transactions`}</Text>
               <HStack>
                 <Text fontWeight="medium" w="100px">{t`Created`}</Text>
-                <Link href={createExplorerUrl(vault.txid)} isExternal fontFamily="mono" fontSize="xs" color="blue.400">
+                <Link
+                  href={createExplorerUrl(vault.txid)}
+                  isExternal
+                  fontFamily="mono"
+                  fontSize="xs"
+                  color="blue.400"
+                >
                   {vault.txid.slice(0, 16)}...
                 </Link>
               </HStack>
               {vault.claimed && vault.claimTxid && (
                 <HStack mt={2}>
                   <Text fontWeight="medium" w="100px">{t`Claimed`}</Text>
-                  <Link href={createExplorerUrl(vault.claimTxid)} isExternal fontFamily="mono" fontSize="xs" color="green.400">
+                  <Link
+                    href={createExplorerUrl(vault.claimTxid)}
+                    isExternal
+                    fontFamily="mono"
+                    fontSize="xs"
+                    color="green.400"
+                  >
                     {vault.claimTxid.slice(0, 16)}...
                   </Link>
                 </HStack>
@@ -77,8 +143,16 @@ export default function VaultDetailModal({ isOpen, onClose, vault, currentHeight
                     {vault.activityLog.map((a, i) => (
                       <HStack key={i} spacing={2}>
                         <Badge size="sm">{a.action}</Badge>
-                        <Text fontSize="xs">{new Date(a.timestamp).toLocaleString()}</Text>
-                        <Link href={createExplorerUrl(a.txid)} isExternal fontSize="xs">{a.txid.slice(0, 8)}...</Link>
+                        <Text fontSize="xs">
+                          {new Date(a.timestamp).toLocaleString()}
+                        </Text>
+                        <Link
+                          href={createExplorerUrl(a.txid)}
+                          isExternal
+                          fontSize="xs"
+                        >
+                          {a.txid.slice(0, 8)}...
+                        </Link>
                       </HStack>
                     ))}
                   </VStack>

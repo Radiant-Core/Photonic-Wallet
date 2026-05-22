@@ -1,4 +1,13 @@
-import { createHashRouter, RouterProvider, useRouteError } from "react-router-dom";
+// Side-effect import — MUST be first. Installs `globalThis.process` /
+// `globalThis.Buffer` shims that `@radiant-core/radiantjs` reads at module
+// init time. Replaces the inline <script> shim that previously violated
+// the `script-src 'self'` CSP. See R28 in REMEDIATION_PLAN.md.
+import "./processShim";
+import {
+  createHashRouter,
+  RouterProvider,
+  useRouteError,
+} from "react-router-dom";
 import {
   ChakraProvider,
   extendTheme,
@@ -8,6 +17,11 @@ import {
 import ReactDOM from "react-dom/client";
 import dayjs from "dayjs";
 import localizedFormat from "dayjs/plugin/localizedFormat";
+// Side-effect import: registers the IndexedDB-backed adapter for the lib's
+// timelock-reveal store so wrapped CEKs live in IndexedDB rather than
+// localStorage. See packages/app/src/timelockStore.ts and R15 in
+// REMEDIATION_PLAN.md. Must come before any reveal-flow component renders.
+import "./timelockStore";
 import App from "./App";
 import Servers from "./pages/Servers";
 import WalletSettings from "./pages/WalletSettings";
@@ -18,7 +32,6 @@ import SettingsLayout from "./layouts/SettingsLayout";
 import Mint from "./pages/Mint";
 import Wallet from "./pages/Wallet";
 import WalletLayout from "./layouts/WalletLayout";
-import Placeholder from "./pages/Placeholder";
 import Coins from "./pages/Coins";
 import MobileHome from "./pages/MobileHome";
 import IpfsSettings from "./pages/IpfsSettings";
@@ -343,9 +356,7 @@ function ErrorPage() {
       <pre className="error-page-pre">
         {error?.message || error?.statusText || JSON.stringify(error)}
       </pre>
-      <pre className="error-page-stack">
-        {error?.stack}
-      </pre>
+      <pre className="error-page-stack">{error?.stack}</pre>
     </div>
   );
 }

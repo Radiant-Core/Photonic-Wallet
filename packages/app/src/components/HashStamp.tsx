@@ -126,7 +126,7 @@ export default function HashStamp({
         const min = minWebp(webp);
         setDataURL(url);
         setData(min);
-        onRender && onRender(min);
+        if (onRender) onRender(min);
       };
 
       toWebp();

@@ -86,9 +86,15 @@ export function EncryptToggle({
 
       {enabled && estimatedSize && (
         <Text fontSize="xs" color="gray.400" mt={2} ml={1}>
-          Estimated encrypted size: <Text as="span" color="gray.200" fontWeight="medium">{estimatedSize}</Text>
+          Estimated encrypted size:{" "}
+          <Text as="span" color="gray.200" fontWeight="medium">
+            {estimatedSize}
+          </Text>
           {numChunks !== undefined && (
-            <Text as="span" color="gray.500"> ({numChunks} chunk{numChunks !== 1 ? "s" : ""})</Text>
+            <Text as="span" color="gray.500">
+              {" "}
+              ({numChunks} chunk{numChunks !== 1 ? "s" : ""})
+            </Text>
           )}
         </Text>
       )}
@@ -105,29 +111,48 @@ export function EncryptToggle({
           borderColor="whiteAlpha.100"
         >
           <Text fontSize="sm" color="gray.200" lineHeight="tall">
-            <Text as="span" fontWeight="semibold" color="white">Content Encryption</Text>
-            {" "}protects your NFT content using XChaCha20-Poly1305 encryption before it leaves your device.
+            <Text as="span" fontWeight="semibold" color="white">
+              Content Encryption
+            </Text>{" "}
+            protects your NFT content using XChaCha20-Poly1305 encryption before
+            it leaves your device.
           </Text>
 
           <UnorderedList spacing={1} pl={1} styleType="none">
             <ListItem>
-              <Text fontSize="sm" color="gray.300">🔐 Content encrypted locally before upload</Text>
+              <Text fontSize="sm" color="gray.300">
+                🔐 Content encrypted locally before upload
+              </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">⛓️ Small files (≤512 KB) can be stored on-chain — self-sovereign but higher tx fee</Text>
+              <Text fontSize="sm" color="gray.300">
+                ⛓️ Small files (≤512 KB) can be stored on-chain — self-sovereign
+                but higher tx fee
+              </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">📦 Larger files stored off-chain (IPFS or backend) with a hash commitment on-chain</Text>
+              <Text fontSize="sm" color="gray.300">
+                📦 Larger files stored off-chain (IPFS or backend) with a hash
+                commitment on-chain
+              </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">🗝️ Access controlled by passphrase or recipient public keys</Text>
+              <Text fontSize="sm" color="gray.300">
+                🗝️ Access controlled by passphrase or recipient public keys
+              </Text>
             </ListItem>
           </UnorderedList>
 
-          <Alert status="warning" variant="left-accent" borderRadius="md" py={2}>
+          <Alert
+            status="warning"
+            variant="left-accent"
+            borderRadius="md"
+            py={2}
+          >
             <AlertIcon />
             <AlertDescription fontSize="xs" color="yellow.200">
-              Keep your passphrase or private keys safe — losing them means permanent loss of access to encrypted content.
+              Keep your passphrase or private keys safe — losing them means
+              permanent loss of access to encrypted content.
             </AlertDescription>
           </Alert>
         </VStack>

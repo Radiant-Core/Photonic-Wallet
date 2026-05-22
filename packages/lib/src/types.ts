@@ -7,8 +7,8 @@ import rjs from "@radiant-core/radiantjs";
  */
 
 // Glyph magic bytes
-export const GLYPH_MAGIC = Buffer.from('gly', 'ascii');
-export const GLYPH_MAGIC_HEX = '676c79';
+export const GLYPH_MAGIC = Buffer.from("gly", "ascii");
+export const GLYPH_MAGIC_HEX = "676c79";
 
 // Protocol version
 export const GLYPH_VERSION = {
@@ -18,20 +18,21 @@ export const GLYPH_VERSION = {
 
 // Protocol IDs per Glyph v2 spec
 export const GlyphProtocol = {
-  GLYPH_FT: 1,        // Fungible Token
-  GLYPH_NFT: 2,       // Non-Fungible Token
-  GLYPH_DAT: 3,       // Data Storage
-  GLYPH_DMINT: 4,     // Decentralized Minting
-  GLYPH_MUT: 5,       // Mutable State
-  GLYPH_BURN: 6,      // Explicit Burn
+  GLYPH_FT: 1, // Fungible Token
+  GLYPH_NFT: 2, // Non-Fungible Token
+  GLYPH_DAT: 3, // Data Storage
+  GLYPH_DMINT: 4, // Decentralized Minting
+  GLYPH_MUT: 5, // Mutable State
+  GLYPH_BURN: 6, // Explicit Burn
   GLYPH_CONTAINER: 7, // Container/Collection
   GLYPH_ENCRYPTED: 8, // Encrypted Content
-  GLYPH_TIMELOCK: 9,  // Timelocked Reveal
+  GLYPH_TIMELOCK: 9, // Timelocked Reveal
   GLYPH_AUTHORITY: 10, // Issuer Authority
-  GLYPH_WAVE: 11,     // WAVE Naming
+  GLYPH_WAVE: 11, // WAVE Naming
 } as const;
 
-export type GlyphProtocolId = typeof GlyphProtocol[keyof typeof GlyphProtocol];
+export type GlyphProtocolId =
+  (typeof GlyphProtocol)[keyof typeof GlyphProtocol];
 
 // Algorithm IDs per Glyph v2 dMint spec (REP-3010)
 export const DmintAlgorithmId = {
@@ -73,8 +74,10 @@ export type RevealDmintParams = {
   reward: number;
   premine: number;
   algorithm?: string; // 'sha256d', 'blake3', 'k12'
-  daaMode?: string;    // 'fixed', 'epoch', 'asert', 'lwma', 'schedule'
-  daaParams?: any;     // Parameters for DAA (e.g., schedule array)
+  daaMode?: string; // 'fixed', 'epoch', 'asert', 'lwma', 'schedule'
+  // DAA parameters — shape depends on `daaMode`. See `script.ts::DaaParams`
+  // for the union of fields each mode consumes.
+  daaParams?: Record<string, unknown>;
 };
 
 export type RevealPsbtParams = {
@@ -88,18 +91,18 @@ export type TokenRevealParams =
   | RevealPsbtParams;
 
 export type DmintPayload = {
-  algo: number;           // Algorithm ID: 0x00=sha256d, 0x01=blake3, 0x02=k12
-  numContracts: number;   // Number of mining contracts
+  algo: number; // Algorithm ID: 0x00=sha256d, 0x01=blake3, 0x02=k12
+  numContracts: number; // Number of mining contracts
   maxHeight: number;
   reward: number;
   premine: number;
   diff: number;
   daa?: {
-    mode: number;         // DAA mode: 0x00=fixed, 0x01=epoch, 0x02=asert, 0x03=lwma, 0x04=schedule
+    mode: number; // DAA mode: 0x00=fixed, 0x01=epoch, 0x02=asert, 0x03=lwma, 0x04=schedule
     targetBlockTime: number;
-    halfLife?: number;    // For ASERT
-    asymptote?: number;   // For ASERT
-    windowSize?: number;  // For LWMA
+    halfLife?: number; // For ASERT
+    asymptote?: number; // For ASERT
+    windowSize?: number; // For LWMA
     epochLength?: number; // For Epoch
     maxAdjustment?: number; // For Epoch
     schedule?: { height: number; difficulty: number }[]; // For Schedule
@@ -107,14 +110,14 @@ export type DmintPayload = {
 };
 
 export type SmartTokenPayload = {
-  v?: number;             // Glyph version (2 for v2)
+  v?: number; // Glyph version (2 for v2)
   p: (string | number)[];
   in?: Uint8Array[];
   by?: Uint8Array[];
   attrs?: {
     [key: string]: unknown;
   };
-  dmint?: DmintPayload;   // dMint configuration per v2 spec
+  dmint?: DmintPayload; // dMint configuration per v2 spec
   [key: string]: unknown;
 };
 

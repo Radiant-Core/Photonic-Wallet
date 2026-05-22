@@ -52,7 +52,7 @@
       }
     },
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; frame-src 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://explorer.radiantblockchain.org https://testnet.radiantexplorer.com https://swap.radiantcore.org https://*.ipfs.nftstorage.link wss://*.radiant4people.com:* wss://*.radiantcore.org:* wss://*.bladenet.online:*; img-src 'self' data: blob: https://*.ipfs.nftstorage.link https://nft.storage; font-src 'self' data:; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; worker-src 'self'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
     },
     "updater": {
       "active": false

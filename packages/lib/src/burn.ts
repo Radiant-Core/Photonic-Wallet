@@ -5,14 +5,12 @@
 
 import rjs from "@radiant-core/radiantjs";
 import { encode, decode } from "cbor-x";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
 import { Buffer } from "buffer";
 
 import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "./types";
-import { GLYPH_BURN, GLYPH_FT, GLYPH_NFT } from "./protocols";
+import { GLYPH_BURN } from "./protocols";
 import { glyphMagicBytesBuffer } from "./token";
-import { p2pkhScript, p2pkhScriptSize, parseFtScript, parseNftScript } from "./script";
+import { p2pkhScript, parseFtScript, parseNftScript } from "./script";
 import { fundTx } from "./coinSelect";
 import { buildTx } from "./tx";
 import Outpoint from "./Outpoint";
@@ -66,7 +64,9 @@ export function createBurnProof(
   // SECURITY: Enforce size cap on burn proof CBOR encoding
   // See: Security Audit H13 - Prevent CPU DoS from maliciously large burn proofs
   if (encodedProof.length > MAX_CBOR_SIZE) {
-    throw new Error(`Burn proof too large: ${encodedProof.length} bytes (max ${MAX_CBOR_SIZE})`);
+    throw new Error(
+      `Burn proof too large: ${encodedProof.length} bytes (max ${MAX_CBOR_SIZE})`
+    );
   }
 
   // Create OP_RETURN script with magic bytes and proof
@@ -99,7 +99,11 @@ export function burnNft(
   }
 
   const tokenRef = Outpoint.fromObject(tokenUtxo).toString();
-  const { script: burnProofScript, proof } = createBurnProof(tokenRef, undefined, reason);
+  const { script: burnProofScript, proof } = createBurnProof(
+    tokenRef,
+    undefined,
+    reason
+  );
 
   const p2pkh = p2pkhScript(address);
   const inputs: UnfinalizedInput[] = [tokenUtxo];
@@ -125,7 +129,8 @@ export function burnNft(
   outputs.push(...change);
 
   const tx = buildTx(address, wif, inputs, outputs, false);
-  const photonsReturned = tokenUtxo.value + change.reduce((sum, c) => sum + c.value, 0);
+  const photonsReturned =
+    tokenUtxo.value + change.reduce((sum, c) => sum + c.value, 0);
 
   return {
     tx,
@@ -154,11 +159,17 @@ export function burnFt(
   }
 
   if (amountToBurn <= 0 || amountToBurn > tokenUtxo.value) {
-    throw new Error(`Invalid burn amount. Must be between 1 and ${tokenUtxo.value}`);
+    throw new Error(
+      `Invalid burn amount. Must be between 1 and ${tokenUtxo.value}`
+    );
   }
 
   const tokenRef = Outpoint.fromObject(tokenUtxo).toString();
-  const { script: burnProofScript, proof } = createBurnProof(tokenRef, amountToBurn, reason);
+  const { script: burnProofScript, proof } = createBurnProof(
+    tokenRef,
+    amountToBurn,
+    reason
+  );
 
   const p2pkh = p2pkhScript(address);
   const inputs: UnfinalizedInput[] = [tokenUtxo];
@@ -213,7 +224,10 @@ export function validateBurn(
   // Find burn proof output (OP_RETURN)
   const burnOutput = burnTx.outputs.find((output) => {
     const script = output.script;
-    return script.chunks.length > 0 && script.chunks[0].opcodenum === Opcode.OP_RETURN;
+    return (
+      script.chunks.length > 0 &&
+      script.chunks[0].opcodenum === Opcode.OP_RETURN
+    );
   });
 
   if (!burnOutput) {
@@ -225,7 +239,7 @@ export function validateBurn(
     const nftParse = parseNftScript(output.script.toHex());
     const ftParse = parseFtScript(output.script.toHex());
     const outpointRef = nftParse.ref || ftParse.ref;
-    
+
     if (outpointRef) {
       const outputRef = Outpoint.fromString(outpointRef).toString();
       return outputRef === expectedTokenRef;
@@ -286,7 +300,8 @@ export function parseBurnProof(script: string): BurnProof | undefined {
       return undefined;
     }
 
-    const { decode } = require("cbor-x");
+    // `decode` is the already-imported ESM binding from cbor-x at the top
+    // of this file.
     const proof = decode(Buffer.from(proofData)) as BurnProof;
 
     return proof;

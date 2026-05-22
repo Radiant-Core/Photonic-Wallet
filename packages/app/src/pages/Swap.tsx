@@ -93,7 +93,7 @@ async function prepareFungible(
     wallet.value.swapAddress,
     asset.value,
     feeRate.value,
-    wallet.value.wif as string
+    wallet.value.wif!.toString()
   );
   const rawTx = tx.toString();
   const txid = await electrumWorker.value.broadcast(rawTx);
@@ -133,7 +133,7 @@ async function prepareNonFungible(
     wallet.value.address,
     wallet.value.swapAddress,
     feeRate.value,
-    wallet.value.wif as string
+    wallet.value.wif!.toString()
   );
   const rawTx = tx.toString();
   const txid = await electrumWorker.value.broadcast(rawTx);
@@ -170,7 +170,7 @@ async function prepareRadiant(coins: SelectableInput[], value: number) {
     p2pkhScript(wallet.value.swapAddress),
     value,
     feeRate.value,
-    wallet.value.wif as string
+    wallet.value.wif!.toString()
   );
 
   const rawTx = tx.toString();
@@ -243,7 +243,9 @@ const Row = ({
             minW={16}
             step={step || "1"}
           />
-          <InputRightAddon>{ticker.length > 0 ? ticker : "TOKEN"}</InputRightAddon>
+          <InputRightAddon>
+            {ticker.length > 0 ? ticker : "TOKEN"}
+          </InputRightAddon>
         </GridItem>
       )}
       <GridItem
@@ -480,7 +482,6 @@ function Swap() {
   };
 
   const runPrepareTransaction = async () => {
-
     const coins: SelectableInput[] = await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
       .toArray();
@@ -568,9 +569,13 @@ function Swap() {
     const swapOutput = (() => {
       if (from === ContractType.RXD) {
         const swapScript = p2pkhScript(wallet.value.swapAddress);
-        const vout = tx.outputs.findIndex((output) => output.script.toHex() === swapScript);
+        const vout = tx.outputs.findIndex(
+          (output) => output.script.toHex() === swapScript
+        );
         if (vout < 0) {
-          throw new SwapPrepareError("Could not locate reserved RXD swap output");
+          throw new SwapPrepareError(
+            "Could not locate reserved RXD swap output"
+          );
         }
         return { vout, output: tx.outputs[vout] };
       }
@@ -589,7 +594,9 @@ function Swap() {
           return {};
         });
         if (found.vout === undefined || !found.output) {
-          throw new SwapPrepareError("Could not locate reserved fungible swap output");
+          throw new SwapPrepareError(
+            "Could not locate reserved fungible swap output"
+          );
         }
         return { vout: found.vout, output: found.output };
       }
@@ -613,7 +620,7 @@ function Swap() {
       wallet.value.swapAddress,
       input,
       psrtOutput,
-      wallet.value.swapWif as string
+      wallet.value.swapWif!.toString()
     ).toString();
 
     let advertisementTxid: string | undefined;
@@ -644,7 +651,9 @@ function Swap() {
 
         const offeredTokenId = assetToSwapTokenId(from, send?.glyph?.ref);
         const wantTokenId = assetToSwapTokenId(to, receive?.glyph?.ref);
-        const makerOutputs = [{ script: psrtOutput.script, value: psrtOutput.value }];
+        const makerOutputs = [
+          { script: psrtOutput.script, value: psrtOutput.value },
+        ];
         const advertisementScript = buildSwapAdvertisementScript({
           offeredType: from,
           offeredTokenId,
@@ -672,7 +681,7 @@ function Swap() {
 
         const advertisementTx = buildTx(
           wallet.value.address,
-          wallet.value.wif as string,
+          wallet.value.wif!.toString(),
           funded.funding,
           [{ script: advertisementScript, value: 0 }, ...funded.change],
           false
@@ -756,7 +765,8 @@ function Swap() {
         {broadcastTxid && (
           <Alert status="success" mb={4}>
             <AlertIcon />
-            Public swap advertisement broadcast: {broadcastTxid.substring(0, 16)}...
+            Public swap advertisement broadcast:{" "}
+            {broadcastTxid.substring(0, 16)}...
           </Alert>
         )}
         <ViewSwap
@@ -801,7 +811,9 @@ function Swap() {
         <RadioGroup
           value={mode === SwapMode.BROADCAST ? "broadcast" : "private"}
           onChange={(value) =>
-            setMode(value === "broadcast" ? SwapMode.BROADCAST : SwapMode.PRIVATE)
+            setMode(
+              value === "broadcast" ? SwapMode.BROADCAST : SwapMode.PRIVATE
+            )
           }
         >
           <Stack direction={{ base: "column", md: "row" }} spacing={6}>
@@ -847,9 +859,7 @@ function Swap() {
           onClick={prepareTransaction}
           isLoading={preparing}
           loadingText={
-            mode === SwapMode.BROADCAST
-              ? "Broadcasting offer…"
-              : "Preparing…"
+            mode === SwapMode.BROADCAST ? "Broadcasting offer…" : "Preparing…"
           }
         >
           Prepare Transaction

@@ -102,7 +102,14 @@ export type FileSizeEstimate = {
 
 export type EncryptionProgress = {
   /** Current stage */
-  stage: "reading" | "encrypting" | "decrypting" | "uploading" | "downloading" | "building" | "complete";
+  stage:
+    | "reading"
+    | "encrypting"
+    | "decrypting"
+    | "uploading"
+    | "downloading"
+    | "building"
+    | "complete";
   /** Bytes processed */
   loaded: number;
   /** Total bytes */
@@ -246,7 +253,11 @@ export async function encryptContent(
       XCHACHA20_KEY_SIZE
     );
     const nonce = randomBytes(24);
-    const { ciphertext: wrappedCEKCt } = encryptXChaCha20Poly1305(cek, kek, nonce);
+    const { ciphertext: wrappedCEKCt } = encryptXChaCha20Poly1305(
+      cek,
+      kek,
+      nonce
+    );
     // Encode: salt (32) || nonce (24) || ciphertext
     const wrappedCEK = concatBytes(passphraseSalt, nonce, wrappedCEKCt);
 
@@ -268,16 +279,24 @@ export async function encryptContent(
       new TextEncoder().encode("glyph-locator-passphrase-v1"),
       32
     );
-  } else if (options.mode === "recipient" && options.recipientPublicKeys?.length) {
+  } else if (
+    options.mode === "recipient" &&
+    options.recipientPublicKeys?.length
+  ) {
     // Recipient mode: wrap CEK for each recipient with hybrid KEM
     // cek_hash not yet in metadata at this point — build it first for AAD
     const recipientCekHashAad = new TextEncoder().encode(
-      `sha256:${Array.from(sha256(cek)).map((b) => b.toString(16).padStart(2, "0")).join("")}`
+      `sha256:${Array.from(sha256(cek))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")}`
     );
     for (let idx = 0; idx < options.recipientPublicKeys.length; idx++) {
       const { wrappedCEK, ephemeral } = wrapCEK(
         cek,
-        { x25519: options.recipientPublicKeys[idx], mlkem: options.recipientMlkemPublicKeys?.[idx] },
+        {
+          x25519: options.recipientPublicKeys[idx],
+          mlkem: options.recipientMlkemPublicKeys?.[idx],
+        },
         recipientCekHashAad
       );
       metadata = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
@@ -303,7 +322,10 @@ export async function encryptContent(
   if (options.selfKeypair) {
     const { wrappedCEK: selfWrappedCEK, ephemeral: selfEphemeral } = wrapCEK(
       cek,
-      { x25519: options.selfKeypair.x25519PublicKey, mlkem: options.selfKeypair.mlkemPublicKey },
+      {
+        x25519: options.selfKeypair.x25519PublicKey,
+        mlkem: options.selfKeypair.mlkemPublicKey,
+      },
       cekHashAad
     );
     metadata = addRecipientToMetadata(metadata, selfWrappedCEK, selfEphemeral);
@@ -330,7 +352,9 @@ export async function encryptContent(
 /**
  * Concatenate encrypted chunks into single Uint8Array
  */
-function concatenateChunks(chunks: { ciphertext: Uint8Array; nonce: Uint8Array }[]): Uint8Array {
+function concatenateChunks(
+  chunks: { ciphertext: Uint8Array; nonce: Uint8Array }[]
+): Uint8Array {
   // Each chunk: [nonce (24 bytes)][ciphertext (variable)][tag (16 bytes)]
   const totalLength = chunks.reduce(
     (sum, chunk) => sum + 24 + chunk.ciphertext.length,
@@ -360,7 +384,11 @@ function concatenateChunks(chunks: { ciphertext: Uint8Array; nonce: Uint8Array }
 export async function decryptContent(
   encryptedContent: Uint8Array,
   options: DecryptionOptions,
-  onProgress?: (progress: Omit<EncryptionProgress, "stage"> & { stage: "downloading" | "decrypting" | "complete" }) => void
+  onProgress?: (
+    progress: Omit<EncryptionProgress, "stage"> & {
+      stage: "downloading" | "decrypting" | "complete";
+    }
+  ) => void
 ): Promise<Uint8Array> {
   const { metadata } = options;
 
@@ -389,18 +417,26 @@ export async function decryptContent(
     let unwrapped = false;
 
     for (const recipient of recipients) {
-      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.epk, "base64"));
+      const ephemeralBytes = new Uint8Array(
+        Buffer.from(recipient.epk, "base64")
+      );
       // Only try recipients marked as passphrase-mode (sentinel ephemeral key)
-      if (!ephemeralBytes.every((b, i) => b === PASSPHRASE_SENTINEL[i])) continue;
+      if (!ephemeralBytes.every((b, i) => b === PASSPHRASE_SENTINEL[i]))
+        continue;
 
       try {
         // wrapped_cek layout: salt (32) || nonce (24) || ciphertext
-        const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.wrapped_cek, "base64"));
+        const wrappedCEKBuf = new Uint8Array(
+          Buffer.from(recipient.wrapped_cek, "base64")
+        );
         const passphraseSalt = wrappedCEKBuf.slice(0, 32);
         const nonce = wrappedCEKBuf.slice(32, 56);
         const ciphertext = wrappedCEKBuf.slice(56);
 
-        const { key: passphraseKey } = deriveKeyScrypt(options.passphrase, passphraseSalt);
+        const { key: passphraseKey } = deriveKeyScrypt(
+          options.passphrase,
+          passphraseSalt
+        );
         const kek = deriveKeyHKDF(
           passphraseKey,
           passphraseSalt,
@@ -418,7 +454,9 @@ export async function decryptContent(
     }
 
     if (!unwrapped) {
-      throw new Error("Invalid passphrase or no matching passphrase recipient found");
+      throw new Error(
+        "Invalid passphrase or no matching passphrase recipient found"
+      );
     }
   } else if (options.privateKey) {
     // Recipient mode: iterate all recipients until unwrapCEK succeeds for this private key.
@@ -427,26 +465,37 @@ export async function decryptContent(
 
     const recipientKeyPair: HybridKeyPair =
       options.privateKey instanceof Uint8Array
-        ? { x25519PrivateKey: options.privateKey, x25519PublicKey: new Uint8Array(32) }
+        ? {
+            x25519PrivateKey: options.privateKey,
+            x25519PublicKey: new Uint8Array(32),
+          }
         : options.privateKey!;
 
     // SECURITY: Cap recipient count to prevent DoS from excessive iteration
     // See: Security Audit H14 - Cap recipient iteration
     const MAX_RECIPIENTS = 100;
     if (recipients.length > MAX_RECIPIENTS) {
-      throw new Error(`Too many recipients: ${recipients.length} (max ${MAX_RECIPIENTS})`);
+      throw new Error(
+        `Too many recipients: ${recipients.length} (max ${MAX_RECIPIENTS})`
+      );
     }
 
     for (const recipient of recipients) {
       // Skip passphrase-sentinel recipients (all-zero epk)
-      const ephemeralBytes = new Uint8Array(Buffer.from(recipient.epk, "base64"));
+      const ephemeralBytes = new Uint8Array(
+        Buffer.from(recipient.epk, "base64")
+      );
       if (ephemeralBytes.every((b) => b === 0)) continue;
 
       try {
         const ephemeral = {
           x25519EphemeralPublicKey: ephemeralBytes,
           ...(recipient.mlkem_ct
-            ? { mlkemCiphertext: new Uint8Array(Buffer.from(recipient.mlkem_ct, "base64")) }
+            ? {
+                mlkemCiphertext: new Uint8Array(
+                  Buffer.from(recipient.mlkem_ct, "base64")
+                ),
+              }
             : {}),
         };
 
@@ -478,7 +527,9 @@ export async function decryptContent(
   });
 
   // Decrypt chunks
-  const plaintextHash = new Uint8Array(Buffer.from(metadata.main.hash.replace("sha256:", ""), "hex"));
+  const plaintextHash = new Uint8Array(
+    Buffer.from(metadata.main.hash.replace("sha256:", ""), "hex")
+  );
   const decrypted = decryptChunked(
     { chunks, plaintextHash },
     cek,
@@ -513,7 +564,9 @@ function parseEncryptedContent(
     // For the last chunk, read remaining data
     // For other chunks, read CHUNK_SIZE + POLY1305_TAG_SIZE
     const isLastChunk = i === numChunks - 1;
-    const chunkSize = isLastChunk ? data.length - offset : CHUNK_SIZE + POLY1305_TAG_SIZE;
+    const chunkSize = isLastChunk
+      ? data.length - offset
+      : CHUNK_SIZE + POLY1305_TAG_SIZE;
 
     const ciphertext = data.slice(offset, offset + chunkSize);
     offset += chunkSize;
@@ -541,7 +594,9 @@ export function deriveLocatorKeyFromPassphrase(
   if (!recipient?.wrapped_cek) {
     throw new Error("No passphrase recipient found in stub");
   }
-  const wrappedCEKBuf = new Uint8Array(Buffer.from(recipient.wrapped_cek, "base64"));
+  const wrappedCEKBuf = new Uint8Array(
+    Buffer.from(recipient.wrapped_cek, "base64")
+  );
   const passphraseSalt = wrappedCEKBuf.slice(0, 32);
   const { key: passphraseKey } = deriveKeyScrypt(passphrase, passphraseSalt);
   return deriveKeyHKDF(

@@ -14,8 +14,6 @@ import {
   Radio,
   RadioGroup,
   Stack,
-  Alert,
-  AlertIcon,
 } from "@chakra-ui/react";
 import License from "./License";
 import { useState } from "react";

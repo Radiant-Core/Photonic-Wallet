@@ -16,7 +16,6 @@ import {
   AlertIcon,
   ModalProps,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { decryptKeys } from "@app/keys";
 import { wallet } from "@app/signals";
 import db from "@app/db";
@@ -24,7 +23,12 @@ import db from "@app/db";
 interface Props {
   header: string;
   allowClose?: boolean;
-  onSuccess?: (mnemonic: string, wif: string, swapWif: string) => void;
+  onSuccess?: (
+    mnemonic: string,
+    wif: string,
+    swapWif: string,
+    coinType?: number
+  ) => void;
 }
 
 export default function PasswordModal({
@@ -52,10 +56,8 @@ export default function PasswordModal({
     requestAnimationFrame(async () => {
       const pwd: string = password.current?.value || "";
       try {
-        const { mnemonic, wif, swapWif, swapAddress } = await decryptKeys(
-          wallet.value.net,
-          pwd
-        );
+        const { mnemonic, wif, swapWif, swapAddress, coinType } =
+          await decryptKeys(wallet.value.net, pwd);
 
         // For old wallets, put swapAddress into database and signal
         if (!wallet.value.swapAddress) {
@@ -63,8 +65,10 @@ export default function PasswordModal({
           wallet.value.swapAddress = swapAddress;
         }
 
-        onSuccess && onSuccess(mnemonic, wif, swapWif);
-      } catch (error) {
+        // R26: hand coinType to consumers so the unlock chain can plumb it
+        // into wallet.value and downstream encryption-key derivation.
+        if (onSuccess) onSuccess(mnemonic, wif, swapWif, coinType);
+      } catch {
         setSuccess(false);
         setLoading(false);
       }

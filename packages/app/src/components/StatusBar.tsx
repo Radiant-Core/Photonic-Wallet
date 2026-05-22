@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { t } from "@lingui/macro";
 import { Icon, Spinner, useToast } from "@chakra-ui/react";
 import { LockIcon, SettingsIcon, UnlockIcon } from "@chakra-ui/icons";
 import {

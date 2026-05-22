@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 /**
  * Radiant Vault — CLTV-based Coin & Token Timelocking
  *
@@ -29,6 +28,7 @@
 
 import rjs from "@radiant-core/radiantjs";
 import { sha256 } from "@noble/hashes/sha256";
+import { secp256k1 } from "@noble/curves/secp256k1";
 import { Buffer } from "buffer";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import {
@@ -38,6 +38,7 @@ import {
 } from "./encryption";
 import { randomBytes } from "@noble/hashes/utils";
 import { normalizeFeeRate } from "./feePolicy";
+import { bnFromValue, transactionFromHex, setInputSequence } from "./rjsCompat";
 
 const { Script, Opcode, Address, Transaction, PrivateKey, crypto } = rjs;
 type Script = rjs.Script;
@@ -57,6 +58,27 @@ export const LOCKTIME_THRESHOLD = 500_000_000;
 
 /** Magic bytes identifying a vault OP_RETURN: "vault" in hex */
 export const VAULT_MAGIC_BYTES = "7661756c74"; // "vault"
+
+/**
+ * Vault OP_RETURN payload version. v2 uses ECDH-derived encryption keys —
+ * either the sender or the recipient can decrypt with their respective
+ * private key. v1 (HKDF over public data) is permanently rejected: it was
+ * never confidential and the wallet has not shipped to production.
+ */
+export const VAULT_PAYLOAD_VERSION = 2;
+
+/** Compressed secp256k1 public key length, in bytes. */
+const COMPRESSED_PUBKEY_LEN = 33;
+
+/** XChaCha20 nonce length, in bytes. */
+const XCHACHA20_NONCE_LEN = 24;
+
+/** HKDF info string. Includes a context tag and the version so future
+ *  changes get a fresh key space without ambiguity. */
+const VAULT_HKDF_INFO = new TextEncoder().encode("radiant-vault|ecdh|v2");
+/** Fixed HKDF salt for the vault key derivation. The ECDH shared secret
+ *  carries the entropy; a fixed public salt is fine for HKDF-Extract. */
+const VAULT_HKDF_SALT = new TextEncoder().encode("radiant-vault-v2-salt");
 
 /** nSequence value that enables CLTV (must be < 0xFFFFFFFF) */
 export const CLTV_SEQUENCE = 0xfffffffe;
@@ -99,8 +121,19 @@ export type VaultParams = {
   locktime: number;
   /** Asset type being locked */
   assetType: VaultAssetType;
-  /** Recipient address (P2PKH) */
+  /** Recipient address (P2PKH). The redeem script enforces unlock by this pkh. */
   recipientAddress: string;
+  /**
+   * Recipient's compressed secp256k1 public key (66 hex chars, 33 bytes).
+   *
+   * Required to encrypt the OP_RETURN metadata for any vault whose recipient
+   * differs from the sender (third-party vault). For a self-vault
+   * (`recipientAddress` equals the sender's address derived from `wif`), this
+   * may be omitted and the library will use the sender's own pubkey.
+   *
+   * MUST hash to `recipientAddress`'s pkh; mismatches are rejected.
+   */
+  recipientPubKey?: string;
   /** For NFT/FT: the token ref in little-endian hex (72 chars) */
   ref?: string;
   /** Amount in photons (RXD/FT) or 1 for NFT */
@@ -312,7 +345,9 @@ export function vaultFtNativeScript(
   script.add(Opcode.OP_CHECKLOCKTIMEVERIFY);
   script.add(Opcode.OP_DROP);
   // P2PKH
-  script.add(Script.buildPublicKeyHashOut(Address.fromString(recipientAddress)));
+  script.add(
+    Script.buildPublicKeyHashOut(Address.fromString(recipientAddress))
+  );
   // FT conservation (same pattern as ftScript in script.ts)
   script.add(
     Script.fromASM(
@@ -356,7 +391,6 @@ export function p2shOutputScript(redeemScriptHex: string): string {
 export function p2shAddress(redeemScriptHex: string): string {
   const redeemBuf = Buffer.from(redeemScriptHex, "hex");
   const hash = crypto.Hash.sha256ripemd160(redeemBuf);
-  // @ts-ignore — fromScriptHash exists at runtime
   return Address.fromScriptHash(hash).toString();
 }
 
@@ -509,80 +543,171 @@ export function parseVaultRedeemScript(
 // ============================================================================
 
 /**
- * Derive an encryption key for vault OP_RETURN metadata.
- * Uses HKDF with the recipient's pubkey hash as IKM and "radiant-vault-v1" as info.
- * Both sender and recipient can derive this key from the shared ECDH secret,
- * but for simplicity we use the recipient's pubkey directly.
+ * Resolve the recipient's 33-byte compressed pubkey for a vault.
+ *
+ * If `params.recipientPubKey` is supplied, validates that its HASH160 equals
+ * the pkh embedded in `params.recipientAddress` and returns the bytes.
+ * Otherwise — only for self-vaults where `recipientAddress` matches the
+ * sender's own address — returns the sender's pubkey.
+ *
+ * Throws with an actionable message when the vault is third-party but no
+ * `recipientPubKey` was supplied: the lib cannot derive a pubkey from a
+ * P2PKH address alone (HASH160 is one-way).
  */
-function deriveVaultMetadataKey(senderWif: string, recipientAddress: string, debug = false): Uint8Array {
-  const privKey = PrivateKey.fromWIF(senderWif);
-  const recipientAddr = new Address(recipientAddress);
-  const pubKeyBuffer = privKey.toPublicKey().toBuffer();
-  const ikm = new Uint8Array(
-    Buffer.concat([
-      pubKeyBuffer,
-      recipientAddr.hashBuffer,
-    ])
-  );
+function resolveRecipientPubKey(
+  params: VaultParams,
+  senderPubBytes: Uint8Array
+): Uint8Array {
+  const recipientAddr = new Address(params.recipientAddress);
+  const recipientPkh = new Uint8Array(recipientAddr.hashBuffer);
 
-  if (debug) {
-    console.debug(`[deriveVaultMetadataKey] WIF (first 10 chars): ${senderWif.slice(0, 10)}...`);
-    console.debug(`[deriveVaultMetadataKey] Recipient: ${recipientAddress}`);
-    console.debug(`[deriveVaultMetadataKey] PubKey length: ${pubKeyBuffer.length}, hash: ${bytesToHex(pubKeyBuffer.slice(0, 8))}...`);
-    console.debug(`[deriveVaultMetadataKey] Recipient hash (first 8 bytes): ${bytesToHex(recipientAddr.hashBuffer.slice(0, 8))}...`);
-    console.debug(`[deriveVaultMetadataKey] IKM length: ${ikm.length}`);
+  if (params.recipientPubKey) {
+    const supplied = hexToBytes(params.recipientPubKey);
+    if (supplied.length !== COMPRESSED_PUBKEY_LEN) {
+      throw new Error(
+        `recipientPubKey must be ${COMPRESSED_PUBKEY_LEN} bytes (66 hex chars); got ${supplied.length}`
+      );
+    }
+    const suppliedPkh = new Uint8Array(
+      crypto.Hash.sha256ripemd160(Buffer.from(supplied))
+    );
+    if (!constantTimeEqual(suppliedPkh, recipientPkh)) {
+      throw new Error(
+        "recipientPubKey does not hash to the pkh in recipientAddress"
+      );
+    }
+    return supplied;
   }
 
-  const key = deriveKeyHKDF(
-    ikm,
-    undefined,
-    new TextEncoder().encode("radiant-vault-v1"),
-    32
+  // Self-vault path: sender == recipient. Verify by hashing the sender's
+  // own pubkey against the recipient pkh.
+  const senderPkh = new Uint8Array(
+    crypto.Hash.sha256ripemd160(Buffer.from(senderPubBytes))
   );
-
-  if (debug) {
-    console.debug(`[deriveVaultMetadataKey] Derived key (first 8 bytes): ${bytesToHex(key.slice(0, 8))}...`);
+  if (constantTimeEqual(senderPkh, recipientPkh)) {
+    return senderPubBytes;
   }
 
-  return key;
+  throw new Error(
+    "Vault recipient differs from sender; supply params.recipientPubKey " +
+      "(33-byte compressed secp256k1, hex) — it cannot be derived from a P2PKH address."
+  );
+}
+
+/** Constant-time byte-array equality. */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/**
+ * Derive the vault OP_RETURN encryption key from an ECDH shared secret.
+ *
+ * Either the sender (knows senderPriv, recipientPub) or the recipient (knows
+ * recipientPriv, senderPub) can compute the same key:
+ *   sharedSecret = ECDH(senderPriv, recipientPub)
+ *                = ECDH(recipientPriv, senderPub)
+ *   IKM          = SHA-256(sharedSecret)        // collapse 33-byte point to 32 bytes
+ *   key          = HKDF-SHA-256(IKM, salt=VAULT_HKDF_SALT, info=VAULT_HKDF_INFO, 32)
+ *
+ * Observers without one of the private keys cannot recover the shared secret
+ * and therefore cannot decrypt the metadata.
+ *
+ * The function is symmetric in the two pubkeys (since ECDH is) and is safe to
+ * call as the sender (passing senderPriv + recipientPub) or as the recipient
+ * (passing recipientPriv + senderPub).
+ *
+ * For self-vaults (sender == recipient), senderPub == recipientPub, and the
+ * shared secret degenerates to senderPriv²·G — still only computable by the
+ * private-key holder, so confidentiality is preserved.
+ */
+function deriveVaultMetadataKey(
+  ownPrivBytes: Uint8Array,
+  peerPubBytes: Uint8Array
+): Uint8Array {
+  if (ownPrivBytes.length !== 32) {
+    throw new Error(`private key must be 32 bytes; got ${ownPrivBytes.length}`);
+  }
+  if (peerPubBytes.length !== COMPRESSED_PUBKEY_LEN) {
+    throw new Error(
+      `peer pubkey must be ${COMPRESSED_PUBKEY_LEN} bytes; got ${peerPubBytes.length}`
+    );
+  }
+
+  // `secp256k1.getSharedSecret` returns the compressed shared point (33B).
+  const sharedPoint = secp256k1.getSharedSecret(
+    ownPrivBytes,
+    peerPubBytes,
+    true
+  );
+  // Hash the point to a uniform 32-byte IKM before HKDF-Extract.
+  const ikm = sha256(sharedPoint);
+  return deriveKeyHKDF(ikm, VAULT_HKDF_SALT, VAULT_HKDF_INFO, 32);
 }
 
 /**
  * Build encrypted OP_RETURN output script for vault recovery metadata.
  *
- * Format: OP_RETURN <"vault"> <encrypted-payload>
- * Payload (before encryption): CBOR-like compact binary:
- *   [version:1] [assetType:1] [mode:1] [locktime:4LE] [pkh:20] [refLen:1] [ref:0|36] [labelLen:2LE] [label:utf8]
+ * Output script: OP_RETURN <"vault"> <push body>
+ *
+ * Body layout (v2):
+ *   [version=2 : 1B]
+ *   [senderPub  : 33B compressed secp256k1]
+ *   [recipientPub : 33B compressed secp256k1]
+ *   [nonce       : 24B for XChaCha20-Poly1305]
+ *   [ciphertext  : variable, includes 16B Poly1305 tag]
+ *
+ * Ciphertext encrypts the same compact metadata used by v1 (asset type, mode,
+ * locktime, pkh, ref, label) — see `encodeVaultMetadata`.
+ *
+ * The two pubkeys are both written so that either party can decrypt with only
+ * their own private key — neither has to recall who the counterparty was.
  */
 export function buildVaultOpReturn(
   params: VaultParams,
-  senderWif: string,
-  debug = false
+  senderWif: string
 ): string {
-  const metadata = encodeVaultMetadata(params);
-  const key = deriveVaultMetadataKey(senderWif, params.recipientAddress, debug);
-  const nonce = randomBytes(24);
-  const { ciphertext } = encryptXChaCha20Poly1305(metadata, key, nonce);
-  const payload = Buffer.concat([Buffer.from(nonce), Buffer.from(ciphertext)]);
-
-  if (debug) {
-    console.debug("[buildVaultOpReturn] Metadata length:", metadata.length);
-    console.debug("[buildVaultOpReturn] Payload length:", payload.length);
-    console.debug("[buildVaultOpReturn] Magic bytes:", VAULT_MAGIC_BYTES);
+  const privKey = PrivateKey.fromWIF(senderWif);
+  const senderPriv = new Uint8Array(privKey.toBuffer());
+  const senderPub = new Uint8Array(privKey.toPublicKey().toBuffer());
+  if (senderPub.length !== COMPRESSED_PUBKEY_LEN) {
+    throw new Error(
+      "Vault encryption requires a compressed sender public key. " +
+        "Uncompressed P2PKH keys are not supported."
+    );
   }
+
+  const recipientPub = resolveRecipientPubKey(params, senderPub);
+
+  const metadata = encodeVaultMetadata(params);
+  const key = deriveVaultMetadataKey(senderPriv, recipientPub);
+  const nonce = randomBytes(XCHACHA20_NONCE_LEN);
+  const { ciphertext } = encryptXChaCha20Poly1305(metadata, key, nonce);
+
+  const body = new Uint8Array(
+    1 +
+      COMPRESSED_PUBKEY_LEN +
+      COMPRESSED_PUBKEY_LEN +
+      XCHACHA20_NONCE_LEN +
+      ciphertext.length
+  );
+  let o = 0;
+  body[o++] = VAULT_PAYLOAD_VERSION;
+  body.set(senderPub, o);
+  o += COMPRESSED_PUBKEY_LEN;
+  body.set(recipientPub, o);
+  o += COMPRESSED_PUBKEY_LEN;
+  body.set(nonce, o);
+  o += XCHACHA20_NONCE_LEN;
+  body.set(ciphertext, o);
 
   const script = new Script();
   script.add(Opcode.OP_RETURN);
   script.add(Buffer.from(VAULT_MAGIC_BYTES, "hex")); // "vault"
-  script.add(payload);
-  const scriptHex = script.toHex();
-
-  if (debug) {
-    console.debug("[buildVaultOpReturn] Script starts with:", scriptHex.slice(0, 20));
-    console.debug("[buildVaultOpReturn] Has vault magic:", scriptHex.includes(VAULT_MAGIC_BYTES));
-  }
-
-  return scriptHex;
+  script.add(Buffer.from(body));
+  return script.toHex();
 }
 
 /**
@@ -601,7 +726,9 @@ function encodeVaultMetadata(params: VaultParams): Uint8Array {
     ? new TextEncoder().encode(params.label)
     : new Uint8Array(0);
 
-  const buf = new Uint8Array(1 + 1 + 1 + 4 + 20 + 1 + ref.length + 2 + label.length);
+  const buf = new Uint8Array(
+    1 + 1 + 1 + 4 + 20 + 1 + ref.length + 2 + label.length
+  );
   let offset = 0;
 
   buf[offset++] = 1; // version
@@ -653,7 +780,8 @@ export function decodeVaultMetadata(data: Uint8Array): VaultParams | null {
     const locktime = view.getUint32(offset, true);
     offset += 4;
 
-    const pkh = bytesToHex(data.slice(offset, offset + 20));
+    // pkh is stored in the encrypted payload for diagnostic purposes but
+    // the redeem script is the authoritative source. Skip 20 bytes.
     offset += 20;
 
     const refLen = data[offset++];
@@ -685,77 +813,96 @@ export function decodeVaultMetadata(data: Uint8Array): VaultParams | null {
 }
 
 /**
- * Attempt to decrypt and parse vault OP_RETURN from a transaction output script.
- * Returns null if not a vault OP_RETURN or decryption fails.
+ * Attempt to decrypt and parse a vault OP_RETURN from a transaction output
+ * script. Either the sender or the recipient can call this — the function
+ * inspects the embedded pubkeys to determine which side `ownWif` represents
+ * and runs ECDH against the counterparty's pubkey.
+ *
+ * Returns `null` for any of:
+ *   - The script is not a vault OP_RETURN.
+ *   - The payload version is not the current `VAULT_PAYLOAD_VERSION` (v1
+ *     payloads from earlier alpha builds are permanently rejected).
+ *   - `ownWif`'s pubkey is neither party of the vault.
+ *   - AEAD decryption fails (tampered, wrong key, or truncated payload).
+ *   - The decrypted metadata fails to decode.
+ *
+ * Never throws on malformed input — returns `null`.
  */
 export function parseVaultOpReturn(
   scriptHex: string,
-  senderWif: string,
-  recipientAddress: string,
-  debug = false
+  ownWif: string
 ): VaultParams | null {
   try {
-    // OP_RETURN (6a) + push "vault" (05 7661756c74) + push <encrypted>
+    // OP_RETURN (6a) + push "vault" (05 7661756c74) + push <body>
     if (!scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)) {
       return null;
     }
 
-    // Extract encrypted payload after magic bytes
-    // Script: 6a (OP_RETURN) + 05 (PUSHBYTES_5) + 7661756c74 ("vault") + <push> <payload>
-    // Offset = len("6a05") + len("7661756c74") = 4 + 10 = 14 hex chars
+    // Extract body bytes after the magic-string push.
+    // Script prefix: 6a (OP_RETURN) + 05 (PUSHBYTES_5) + 7661756c74 ("vault")
     const afterMagic = scriptHex.slice(4 + VAULT_MAGIC_BYTES.length);
-    // Parse the push data length
     const pushByte = parseInt(afterMagic.slice(0, 2), 16);
-    let payloadHex: string;
+    let bodyHex: string;
     if (pushByte < 0x4c) {
-      payloadHex = afterMagic.slice(2, 2 + pushByte * 2);
+      bodyHex = afterMagic.slice(2, 2 + pushByte * 2);
     } else if (pushByte === 0x4c) {
       const len = parseInt(afterMagic.slice(2, 4), 16);
-      payloadHex = afterMagic.slice(4, 4 + len * 2);
+      bodyHex = afterMagic.slice(4, 4 + len * 2);
     } else if (pushByte === 0x4d) {
       const len =
         parseInt(afterMagic.slice(2, 4), 16) |
         (parseInt(afterMagic.slice(4, 6), 16) << 8);
-      payloadHex = afterMagic.slice(6, 6 + len * 2);
+      bodyHex = afterMagic.slice(6, 6 + len * 2);
     } else {
-      if (debug) console.debug(`[parseVaultOpReturn] Unsupported push byte: ${pushByte}`);
       return null;
     }
 
-    const payload = Buffer.from(payloadHex, "hex");
-    if (debug) console.debug(`[parseVaultOpReturn] Payload length: ${payload.length}`);
-    if (payload.length < 25) {
-      if (debug) console.debug(`[parseVaultOpReturn] Payload too short: ${payload.length} < 25`);
+    const body = hexToBytes(bodyHex);
+    const MIN_LEN =
+      1 +
+      COMPRESSED_PUBKEY_LEN +
+      COMPRESSED_PUBKEY_LEN +
+      XCHACHA20_NONCE_LEN +
+      16;
+    if (body.length < MIN_LEN) return null;
+
+    const version = body[0];
+    if (version !== VAULT_PAYLOAD_VERSION) return null;
+
+    let o = 1;
+    const senderPub = body.slice(o, o + COMPRESSED_PUBKEY_LEN);
+    o += COMPRESSED_PUBKEY_LEN;
+    const recipientPub = body.slice(o, o + COMPRESSED_PUBKEY_LEN);
+    o += COMPRESSED_PUBKEY_LEN;
+    const nonce = body.slice(o, o + XCHACHA20_NONCE_LEN);
+    o += XCHACHA20_NONCE_LEN;
+    const ciphertext = body.slice(o);
+
+    // Identify which party `ownWif` is and pick the counterparty pubkey for ECDH.
+    const ownPriv = PrivateKey.fromWIF(ownWif);
+    const ownPub = new Uint8Array(ownPriv.toPublicKey().toBuffer());
+    let peerPub: Uint8Array;
+    if (constantTimeEqual(ownPub, senderPub)) {
+      peerPub = recipientPub;
+    } else if (constantTimeEqual(ownPub, recipientPub)) {
+      peerPub = senderPub;
+    } else {
+      // Not a party to this vault.
       return null;
     }
 
-    const nonce = new Uint8Array(payload.slice(0, 24));
-    const ciphertext = new Uint8Array(payload.slice(24));
-    if (debug) console.debug(`[parseVaultOpReturn] Nonce: ${bytesToHex(nonce.slice(0, 8))}..., Ciphertext length: ${ciphertext.length}`);
-
-    const key = deriveVaultMetadataKey(senderWif, recipientAddress, debug);
-    // Debug logging is now inside deriveVaultMetadataKey
+    const ownPrivBytes = new Uint8Array(ownPriv.toBuffer());
+    const key = deriveVaultMetadataKey(ownPrivBytes, peerPub);
 
     let plaintext: Uint8Array;
     try {
       plaintext = decryptXChaCha20Poly1305(ciphertext, key, nonce);
-      if (debug) console.debug(`[parseVaultOpReturn] Decryption successful, plaintext length: ${plaintext.length}`);
-    } catch (decryptErr) {
-      if (debug) console.debug(`[parseVaultOpReturn] Decryption failed:`, decryptErr);
+    } catch {
       return null;
     }
 
-    const metadata = decodeVaultMetadata(plaintext);
-    if (debug) {
-      if (metadata) {
-        console.debug(`[parseVaultOpReturn] Metadata decoded successfully:`, metadata);
-      } else {
-        console.debug(`[parseVaultOpReturn] Metadata decode failed - version check failed or format error`);
-      }
-    }
-    return metadata;
-  } catch (err) {
-    if (debug) console.debug(`[parseVaultOpReturn] Unexpected error:`, err);
+    return decodeVaultMetadata(plaintext);
+  } catch {
     return null;
   }
 }
@@ -779,7 +926,13 @@ export function parseVaultOpReturn(
  * @returns Built transaction and selection info
  */
 export function buildVaultTx(
-  coins: { txid: string; vout: number; script: string; value: number; scriptSig?: string }[],
+  coins: {
+    txid: string;
+    vout: number;
+    script: string;
+    value: number;
+    scriptSig?: string;
+  }[],
   fromAddress: string,
   wif: string,
   params: VaultParams,
@@ -788,7 +941,7 @@ export function buildVaultTx(
 ): { rawTx: string; txid: string; redeemScriptHex: string; p2shAddr: string } {
   const redeemScriptHex = buildRedeemScript(params);
   const p2shScript = p2shOutputScript(redeemScriptHex);
-  const opReturnScript = buildVaultOpReturn(params, wif, true); // Debug mode on
+  const opReturnScript = buildVaultOpReturn(params, wif);
   const p2shAddr = p2shAddress(redeemScriptHex);
 
   const tx = new Transaction();
@@ -851,11 +1004,12 @@ export function buildVaultTx(
   tx.change(fromAddress);
   // Clamp the caller's rate to the network floor (Radiant Core post-V2 min relay).
   const effectiveFeeRate = normalizeFeeRate(feeRate);
-  // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
   // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
   const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
-  const finalFee = Math.ceil((estimatedSize + tokenScriptSize) * effectiveFeeRate);
+  const finalFee = Math.ceil(
+    (estimatedSize + tokenScriptSize) * effectiveFeeRate
+  );
   tx.fee(finalFee);
   // Sign the RXD funding inputs (added via tx.from)
   tx.sign(privKey);
@@ -865,21 +1019,17 @@ export function buildVaultTx(
     const sigType =
       crypto.Signature.SIGHASH_ALL | crypto.Signature.SIGHASH_FORKID;
     for (let i = 0; i < tokenUtxos.length; i++) {
-      // @ts-ignore — Sighash.sign exists at runtime
       const tokenSig = Transaction.Sighash.sign(
         tx,
         privKey,
         sigType,
         i,
-        // @ts-ignore — fromHex exists at runtime
         Script.fromHex(tokenUtxos[i].script),
-        // @ts-ignore — BN accepts string at runtime
-        new crypto.BN(`${tokenUtxos[i].value}`)
+        bnFromValue(`${tokenUtxos[i].value}`)
       );
       const tokenScriptSig = Script.empty()
         .add(Buffer.concat([tokenSig.toBuffer(), Buffer.from([sigType])]))
         .add(privKey.toPublicKey().toBuffer());
-      // @ts-ignore — setScript exists at runtime
       tx.inputs[i].setScript(tokenScriptSig);
     }
   }
@@ -900,7 +1050,13 @@ export function buildVaultTx(
  * A single OP_RETURN contains encrypted metadata for all tranches.
  */
 export function buildVestingTx(
-  coins: { txid: string; vout: number; script: string; value: number; scriptSig?: string }[],
+  coins: {
+    txid: string;
+    vout: number;
+    script: string;
+    value: number;
+    scriptSig?: string;
+  }[],
   fromAddress: string,
   wif: string,
   tranches: VestingTranche[],
@@ -969,7 +1125,18 @@ export function buildVestingTx(
     );
   }
 
-  // Single OP_RETURN with all tranche metadata
+  // Single OP_RETURN with all tranche metadata.
+  // All tranches MUST share a recipient — otherwise the recipient could
+  // decrypt one tranche but not another, or different recipients would each
+  // see all tranches. Enforce explicitly.
+  const recipient0 = tranches[0].recipientAddress;
+  for (const t of tranches) {
+    if (t.recipientAddress !== recipient0) {
+      throw new Error(
+        "All vesting tranches must share the same recipientAddress"
+      );
+    }
+  }
   // Encode each tranche's metadata and concatenate with length prefixes
   const metadataParts: Buffer[] = [];
   for (const tranche of tranches) {
@@ -984,20 +1151,47 @@ export function buildVestingTx(
     ...metadataParts,
   ]);
 
-  // Encrypt the combined metadata
-  const key = deriveVaultMetadataKey(wif, tranches[0].recipientAddress);
-  const nonce = randomBytes(24);
+  // Encrypt the combined metadata under the ECDH-derived vault key.
+  const senderPriv = new Uint8Array(privKey.toBuffer());
+  const senderPub = new Uint8Array(privKey.toPublicKey().toBuffer());
+  if (senderPub.length !== COMPRESSED_PUBKEY_LEN) {
+    throw new Error(
+      "Vault encryption requires a compressed sender public key. " +
+        "Uncompressed P2PKH keys are not supported."
+    );
+  }
+  const recipientPub = resolveRecipientPubKey(tranches[0], senderPub);
+  const key = deriveVaultMetadataKey(senderPriv, recipientPub);
+  const nonce = randomBytes(XCHACHA20_NONCE_LEN);
   const { ciphertext } = encryptXChaCha20Poly1305(
     new Uint8Array(allMetadata),
     key,
     nonce
   );
-  const payload = Buffer.concat([Buffer.from(nonce), Buffer.from(ciphertext)]);
+
+  // Body layout matches the single-vault format so future tooling can share
+  // a parser: [v=2][senderPub][recipientPub][nonce][ciphertext].
+  const body = new Uint8Array(
+    1 +
+      COMPRESSED_PUBKEY_LEN +
+      COMPRESSED_PUBKEY_LEN +
+      XCHACHA20_NONCE_LEN +
+      ciphertext.length
+  );
+  let o = 0;
+  body[o++] = VAULT_PAYLOAD_VERSION;
+  body.set(senderPub, o);
+  o += COMPRESSED_PUBKEY_LEN;
+  body.set(recipientPub, o);
+  o += COMPRESSED_PUBKEY_LEN;
+  body.set(nonce, o);
+  o += XCHACHA20_NONCE_LEN;
+  body.set(ciphertext, o);
 
   const opReturnScript = new Script();
   opReturnScript.add(Opcode.OP_RETURN);
   opReturnScript.add(Buffer.from(VAULT_MAGIC_BYTES, "hex"));
-  opReturnScript.add(payload);
+  opReturnScript.add(Buffer.from(body));
 
   tx.addOutput(
     new Transaction.Output({
@@ -1010,11 +1204,12 @@ export function buildVestingTx(
   tx.change(fromAddress);
   // Clamp the caller's rate to the network floor (Radiant Core post-V2 min relay).
   const effectiveFeeRate = normalizeFeeRate(feeRate);
-  // @ts-ignore — _estimateSize exists at runtime
   const estimatedSize = tx._estimateSize();
   // Add buffer for token input scriptSigs (~107 bytes each: 72B sig + 1B type + 33B pubkey)
   const tokenScriptSize = (tokenUtxos?.length || 0) * 107;
-  const finalFee = Math.ceil((estimatedSize + tokenScriptSize) * effectiveFeeRate);
+  const finalFee = Math.ceil(
+    (estimatedSize + tokenScriptSize) * effectiveFeeRate
+  );
   tx.fee(finalFee);
   tx.sign(privKey);
   tx.seal();
@@ -1230,7 +1425,6 @@ export function claimVaultTx(
   const tx = new Transaction();
 
   // Set nLockTime to the vault's locktime
-  // @ts-ignore — nLockTime exists at runtime
   tx.nLockTime = parsed.locktime;
 
   // For P2SH vaults (RXD, NFT): on-chain scriptPubKey is the P2SH output script.
@@ -1248,9 +1442,9 @@ export function claimVaultTx(
       satoshis: vaultUtxo.value,
     }),
   });
-  // Set nSequence to enable CLTV
-  // @ts-ignore — sequenceNumber is writable at runtime
-  input.sequenceNumber = CLTV_SEQUENCE;
+  // Set nSequence to enable CLTV (sequenceNumber is declared readonly upstream
+  // but is writable at runtime — see rjsCompat).
+  setInputSequence(input, CLTV_SEQUENCE);
   tx.addInput(input);
 
   // Add funding UTXOs (selected above)
@@ -1300,64 +1494,57 @@ export function claimVaultTx(
   if (parsed.assetType === "ft") {
     // Native FT vault: scriptSig = <sig> <pubkey> (standard P2PKH)
     // The native output script handles CLTV+DROP and FT conservation directly.
-    // @ts-ignore — Sighash.sign accepts these args at runtime
     const sig = Transaction.Sighash.sign(
       tx,
       privKey,
       sigType,
       0,
-      // @ts-ignore — fromHex exists at runtime
       Script.fromHex(vaultUtxo.redeemScriptHex),
-      // @ts-ignore — BN accepts string at runtime
-      new crypto.BN(`${vaultUtxo.value}`)
+      bnFromValue(`${vaultUtxo.value}`)
     );
     const scriptSig = Script.empty()
       .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
       .add(pubKey.toBuffer());
-    // @ts-ignore — setScript exists at runtime
     tx.inputs[0].setScript(scriptSig);
   } else {
     // P2SH vault (RXD, NFT): scriptSig = <sig> <pubkey> <serialized-redeem-script>
     const redeemScriptBuf = Buffer.from(vaultUtxo.redeemScriptHex, "hex");
-    // @ts-ignore — Sighash.sign accepts these args at runtime
     const sig = Transaction.Sighash.sign(
       tx,
       privKey,
       sigType,
       0,
-      // @ts-ignore — fromHex exists at runtime
       Script.fromHex(vaultUtxo.redeemScriptHex),
-      // @ts-ignore — BN accepts string at runtime
-      new crypto.BN(`${vaultUtxo.value}`)
+      bnFromValue(`${vaultUtxo.value}`)
     );
     const scriptSig = Script.empty()
       .add(Buffer.concat([sig.toBuffer(), Buffer.from([sigType])]))
       .add(pubKey.toBuffer())
       .add(redeemScriptBuf);
-    // @ts-ignore — setScript exists at runtime
     tx.inputs[0].setScript(scriptSig);
   }
 
   // Sign any additional funding inputs (standard P2PKH)
   if (hasFunding) {
     for (let i = 1; i < tx.inputs.length; i++) {
-      // @ts-ignore — Sighash.sign and input.output exist at runtime
+      // We added these inputs via tx.from() above, so .output is set.
+      const inputOutput = tx.inputs[i].output;
+      if (!inputOutput) {
+        throw new Error(
+          `claimVaultTx: funding input ${i} has no associated output (radiantjs internal invariant violated)`
+        );
+      }
       const fundingSig = Transaction.Sighash.sign(
         tx,
         privKey,
         sigType,
         i,
-        // @ts-ignore — input.output exists at runtime
-        tx.inputs[i].output.script,
-        // @ts-ignore
-        new crypto.BN(`${tx.inputs[i].output.satoshis}`)
+        inputOutput.script,
+        bnFromValue(`${inputOutput.satoshis}`)
       );
       const fundingScriptSig = Script.empty()
-        .add(
-          Buffer.concat([fundingSig.toBuffer(), Buffer.from([sigType])])
-        )
+        .add(Buffer.concat([fundingSig.toBuffer(), Buffer.from([sigType])]))
         .add(pubKey.toBuffer());
-      // @ts-ignore — setScript exists at runtime
       tx.inputs[i].setScript(fundingScriptSig);
     }
   }
@@ -1486,8 +1673,7 @@ export function formatLocktime(locktime: number, mode: VaultMode): string {
  * Returns an array of output indices that contain vault magic bytes.
  */
 export function findVaultOpReturnOutputs(rawTxHex: string): number[] {
-  // @ts-ignore — Transaction.fromString exists at runtime
-  const tx = Transaction(rawTxHex);
+  const tx = transactionFromHex(rawTxHex);
   const indices: number[] = [];
 
   for (let i = 0; i < tx.outputs.length; i++) {
@@ -1505,30 +1691,29 @@ export function findVaultOpReturnOutputs(rawTxHex: string): number[] {
  * Attempt to recover vault records from a raw transaction by decrypting
  * the OP_RETURN metadata with the wallet's private key.
  *
- * This is used during wallet restore from seed. For each vault creation
- * transaction found in history, this function attempts to decrypt the
- * OP_RETURN and reconstruct the full VaultRecord (including redeem script).
+ * Used during wallet restore from seed. For each vault creation transaction
+ * found in history, this function tries to decrypt the OP_RETURN (works
+ * whether the wallet was the sender or the recipient) and reconstructs the
+ * full VaultRecord including the redeem script.
  *
  * @param rawTxHex Raw transaction hex
- * @param txid Transaction ID
+ * @param _txid Transaction ID (unused; retained for caller logging)
  * @param wif Wallet's WIF private key (for decryption)
  * @param walletAddress The wallet's P2PKH address
  * @returns Array of recovered vault records (may be empty)
  */
 export function recoverVaultsFromTx(
   rawTxHex: string,
-  txid: string,
+  _txid: string,
   wif: string,
-  walletAddress: string,
-  debug = false
+  walletAddress: string
 ): {
   vout: number;
   redeemScriptHex: string;
   p2shScriptHex: string;
   params: VaultParams;
 }[] {
-  // @ts-ignore — Transaction constructor accepts hex at runtime
-  const tx = Transaction(rawTxHex);
+  const tx = transactionFromHex(rawTxHex);
   const results: {
     vout: number;
     redeemScriptHex: string;
@@ -1536,34 +1721,12 @@ export function recoverVaultsFromTx(
     params: VaultParams;
   }[] = [];
 
-  if (debug) {
-    console.debug(`[recoverVaults] ${txid}: ${tx.outputs.length} outputs`);
-  }
-
   // Find OP_RETURN outputs with vault magic
   for (let i = 0; i < tx.outputs.length; i++) {
     const scriptHex = tx.outputs[i].script.toHex();
-
-    if (debug) {
-      console.debug(`[recoverVaults] ${txid}: output ${i} script starts with: ${scriptHex.slice(0, 20)}...`);
-    }
-
     if (!scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)) continue;
 
-    if (debug) {
-      console.debug(`[recoverVaults] ${txid}: output ${i} has vault magic bytes!`);
-    }
-
-    // Try decrypting with this wallet as sender, using own address as recipient
-    const parsed = parseVaultOpReturn(scriptHex, wif, walletAddress, debug);
-
-    if (debug) {
-      if (parsed) {
-        console.debug(`[recoverVaults] ${txid}: output ${i} full recovery successful`, parsed);
-      }
-      // Detailed debug is now inside parseVaultOpReturn
-    }
-
+    const parsed = parseVaultOpReturn(scriptHex, wif);
     if (!parsed) continue;
 
     // Reconstruct the redeem script from decoded metadata

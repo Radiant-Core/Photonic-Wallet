@@ -1,7 +1,6 @@
 import db from "@app/db";
 import useContractNotifier from "@app/hooks/useContractNotifier";
 import { useToast } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEffect, useRef } from "react";
 
@@ -48,7 +47,9 @@ function ReadyForNotifications({
       }
       if (notifyCount > maxNotifications) {
         toast({
-          title: `Suppressed ${notifyCount - maxNotifications} more notifications`,
+          title: `Suppressed ${
+            notifyCount - maxNotifications
+          } more notifications`,
         });
       }
       if (maxId > 0) {

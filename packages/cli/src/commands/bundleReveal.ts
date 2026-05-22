@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import chalk from "chalk";
 import { Command } from "commander";
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@photonic/lib/electrumWsClient";
 import {
   electrumToCoinSel,
   errorMessage,

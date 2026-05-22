@@ -4,7 +4,6 @@ import { Flex, FlexProps, Heading, IconButton, Spacer } from "@chakra-ui/react";
 import { PropsWithChildren } from "react";
 import { openMenu } from "@app/signals";
 import Logo from "./Logo";
-import { t } from "@lingui/macro";
 
 export default function PageHeader({
   back = false,

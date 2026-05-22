@@ -19,7 +19,7 @@ import { loading, syncSwaps } from "@app/swap";
 
 export default function SwapLayout() {
   // Trigger rerender when language changes
-  language.value;
+  void language.value;
 
   const { pathname } = useLocation();
   const headings: { [key: string]: string } = {

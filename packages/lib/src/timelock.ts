@@ -119,7 +119,10 @@ export function computeCEKHash(cek: Uint8Array): Uint8Array {
  * @param cek The raw CEK bytes to verify
  * @param commitmentHex SHA256 hex from on-chain metadata
  */
-export function verifyCEKReveal(cek: Uint8Array, commitmentHex: string): boolean {
+export function verifyCEKReveal(
+  cek: Uint8Array,
+  commitmentHex: string
+): boolean {
   const actual = bytesToHex(sha256(cek));
   return actual === commitmentHex.toLowerCase();
 }
@@ -206,7 +209,13 @@ function getTimelockInfo(
   // GlyphV2Metadata: metadata.app?.timelock
   const glyph = metadata as GlyphV2Metadata;
   const app = (glyph as Record<string, unknown>).app as
-    | { timelock?: { mode?: TimelockMode; unlock_at?: number; unlock_time?: number } }
+    | {
+        timelock?: {
+          mode?: TimelockMode;
+          unlock_at?: number;
+          unlock_time?: number;
+        };
+      }
     | undefined;
   if (app?.timelock) {
     return {
@@ -348,34 +357,95 @@ export function formatUnlockCondition(
 const REVEALS_STORAGE_KEY = "glyph_timelock_reveals";
 
 /**
- * Persist a reveal record to localStorage.
- * Call this immediately after minting — before the user navigates away.
+ * Pluggable storage backend for persisted reveal records.
+ *
+ * The library ships a default `localStorage` backend for standalone /
+ * test use. The app overrides it at startup with an IndexedDB-backed
+ * adapter (see R15 in REMEDIATION_PLAN.md) — IndexedDB is not
+ * survey-readable from browser extensions on the same set of platforms
+ * `localStorage` is, and lives in a separate quota / clearing tier.
+ *
+ * All methods are async so adapters backed by IDB / fetch / etc. work
+ * naturally. Synchronous backends just resolve immediately.
  */
-export function saveReveal(reveal: TimelockReveal): void {
-  const existing = loadReveals();
-  const updated = existing.filter((r) => r.tokenRef !== reveal.tokenRef);
-  updated.push(reveal);
-  localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(updated));
+export interface TimelockRevealStore {
+  load(): Promise<TimelockReveal[]>;
+  save(reveal: TimelockReveal): Promise<void>;
+  /** Update the record whose tokenRef matches `tempId` to use `confirmedTokenRef`. No-op if missing. */
+  rename(tempId: string, confirmedTokenRef: string): Promise<void>;
+  delete(tokenRef: string): Promise<void>;
 }
 
-/**
- * Load all persisted reveal records.
- */
-export function loadReveals(): TimelockReveal[] {
-  try {
-    const raw = localStorage.getItem(REVEALS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as TimelockReveal[];
-  } catch {
-    return [];
+/** Default localStorage-backed adapter. Used when nothing else is registered. */
+class LocalStorageRevealStore implements TimelockRevealStore {
+  async load(): Promise<TimelockReveal[]> {
+    try {
+      const raw =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem(REVEALS_STORAGE_KEY)
+          : null;
+      if (!raw) return [];
+      return JSON.parse(raw) as TimelockReveal[];
+    } catch {
+      return [];
+    }
+  }
+
+  async save(reveal: TimelockReveal): Promise<void> {
+    if (typeof localStorage === "undefined") return;
+    const existing = await this.load();
+    const updated = existing.filter((r) => r.tokenRef !== reveal.tokenRef);
+    updated.push(reveal);
+    localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(updated));
+  }
+
+  async rename(tempId: string, confirmedTokenRef: string): Promise<void> {
+    if (typeof localStorage === "undefined") return;
+    const reveals = await this.load();
+    const idx = reveals.findIndex((r) => r.tokenRef === tempId);
+    if (idx === -1) return;
+    reveals[idx] = { ...reveals[idx], tokenRef: confirmedTokenRef };
+    localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(reveals));
+  }
+
+  async delete(tokenRef: string): Promise<void> {
+    if (typeof localStorage === "undefined") return;
+    const updated = (await this.load()).filter((r) => r.tokenRef !== tokenRef);
+    localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(updated));
   }
 }
 
+let activeStore: TimelockRevealStore = new LocalStorageRevealStore();
+
 /**
- * Get the reveal record for a specific token.
+ * Register a custom storage backend for timelock reveals.
+ *
+ * The app calls this at startup with a Dexie/IndexedDB adapter so the
+ * wrapped CEK lives in IndexedDB rather than localStorage.
  */
-export function getReveal(tokenRef: string): TimelockReveal | undefined {
-  return loadReveals().find((r) => r.tokenRef === tokenRef);
+export function setTimelockRevealStore(store: TimelockRevealStore): void {
+  activeStore = store;
+}
+
+/**
+ * Persist a reveal record. Call immediately after minting — before the
+ * user navigates away — so the wrapped CEK is durable.
+ */
+export async function saveReveal(reveal: TimelockReveal): Promise<void> {
+  await activeStore.save(reveal);
+}
+
+/** Load all persisted reveal records. */
+export async function loadReveals(): Promise<TimelockReveal[]> {
+  return activeStore.load();
+}
+
+/** Get the reveal record for a specific token, if any. */
+export async function getReveal(
+  tokenRef: string
+): Promise<TimelockReveal | undefined> {
+  const reveals = await activeStore.load();
+  return reveals.find((r) => r.tokenRef === tokenRef);
 }
 
 // ============================================================================
@@ -395,7 +465,12 @@ export function getReveal(tokenRef: string): TimelockReveal | undefined {
 export function wrapCEKForStorage(
   cekHex: string,
   selfKeypair: HybridKeyPair
-): { cek: string; wrappedCek: string; ephemeralX25519: string; ephemeralMlkem?: string } {
+): {
+  cek: string;
+  wrappedCek: string;
+  ephemeralX25519: string;
+  ephemeralMlkem?: string;
+} {
   const cek = hexToBytes(cekHex);
 
   // Use self-as-recipient pattern: encrypt CEK to our own key
@@ -438,7 +513,9 @@ export function unwrapCEKForStorage(
     const wrappedCEK = hexToBytes(reveal.wrappedCek || reveal.cek);
     const ephemeral = {
       x25519EphemeralPublicKey: hexToBytes(reveal.ephemeralX25519),
-      mlkemCiphertext: reveal.ephemeralMlkem ? hexToBytes(reveal.ephemeralMlkem) : undefined,
+      mlkemCiphertext: reveal.ephemeralMlkem
+        ? hexToBytes(reveal.ephemeralMlkem)
+        : undefined,
     };
 
     const cek = unwrapCEK(wrappedCEK, ephemeral, selfKeypair);
@@ -454,18 +531,14 @@ export function unwrapCEKForStorage(
  * @param tempId Temporary id used before broadcast (e.g., empty string or txid placeholder)
  * @param confirmedTokenRef The actual txid:vout token ref after broadcast
  */
-export function confirmReveal(tempId: string, confirmedTokenRef: string): void {
-  const reveals = loadReveals();
-  const idx = reveals.findIndex((r) => r.tokenRef === tempId);
-  if (idx === -1) return;
-  reveals[idx] = { ...reveals[idx], tokenRef: confirmedTokenRef };
-  localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(reveals));
+export async function confirmReveal(
+  tempId: string,
+  confirmedTokenRef: string
+): Promise<void> {
+  await activeStore.rename(tempId, confirmedTokenRef);
 }
 
-/**
- * Remove a reveal record (e.g., after successful on-chain reveal broadcast).
- */
-export function deleteReveal(tokenRef: string): void {
-  const updated = loadReveals().filter((r) => r.tokenRef !== tokenRef);
-  localStorage.setItem(REVEALS_STORAGE_KEY, JSON.stringify(updated));
+/** Remove a reveal record (e.g., after successful on-chain reveal broadcast). */
+export async function deleteReveal(tokenRef: string): Promise<void> {
+  await activeStore.delete(tokenRef);
 }

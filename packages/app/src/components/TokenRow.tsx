@@ -34,8 +34,8 @@ export default function TokenRow({
   defaultIcon?: IconType;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
-  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
-  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
+  const isEncrypted = !!glyph?.p?.includes(GLYPH_ENCRYPTED);
+  const isTimelocked = !!glyph?.p?.includes(GLYPH_TIMELOCK);
 
   const short = ref.shortInput();
   return (
@@ -78,7 +78,10 @@ export default function TokenRow({
             <Identifier>{short}</Identifier>
           )}
           {(isEncrypted || isTimelocked) && (
-            <Tooltip label={isTimelocked ? "Timelocked" : "Encrypted"} placement="top">
+            <Tooltip
+              label={isTimelocked ? "Timelocked" : "Encrypted"}
+              placement="top"
+            >
               <Icon
                 as={isTimelocked ? MdTimer : MdLock}
                 boxSize={3.5}

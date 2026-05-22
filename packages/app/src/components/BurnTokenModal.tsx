@@ -25,9 +25,7 @@ import {
   NumberDecrementStepper,
   useToast,
 } from "@chakra-ui/react";
-import { t, Trans } from "@lingui/macro";
 import { burnNft, burnFt } from "@lib/burn";
-import { parseFtScript, parseNftScript } from "@lib/script";
 import { photonsToRXD } from "@lib/format";
 import { wallet, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -70,6 +68,7 @@ export default function BurnTokenModal({
       });
       return;
     }
+    const wif = wallet.value.wif.toString();
 
     setIsLoading(true);
 
@@ -80,11 +79,11 @@ export default function BurnTokenModal({
         .toArray();
 
       let result;
-      
+
       if (tokenType === "nft") {
         result = burnNft(
           wallet.value.address,
-          wallet.value.wif,
+          wif,
           tokenUtxo,
           rxdUtxos,
           reason || undefined,
@@ -104,7 +103,7 @@ export default function BurnTokenModal({
 
         result = burnFt(
           wallet.value.address,
-          wallet.value.wif,
+          wif,
           tokenUtxo,
           burnAmount,
           rxdUtxos,
@@ -127,9 +126,7 @@ export default function BurnTokenModal({
         title: "Token Burned Successfully",
         description: (
           <VStack align="start" spacing={1}>
-            <Text>
-              Transaction ID: {txid.substring(0, 16)}...
-            </Text>
+            <Text>Transaction ID: {txid.substring(0, 16)}...</Text>
             <Text>
               Photons returned: {photonsToRXD(result.photonsReturned)} RXD
             </Text>
@@ -155,47 +152,38 @@ export default function BurnTokenModal({
     }
   };
 
-  const photonsReturned = tokenType === "nft" 
-    ? tokenUtxo.value 
-    : (tokenUtxo.value - burnAmount);
+  const photonsReturned =
+    tokenType === "nft" ? tokenUtxo.value : tokenUtxo.value - burnAmount;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="lg">
       <ModalOverlay />
       <ModalContent bg="bg.500">
-        <ModalHeader>
-          Burn Token
-        </ModalHeader>
+        <ModalHeader>Burn Token</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
           <VStack spacing={4} align="stretch">
             <Alert status="warning" borderRadius="md">
               <AlertIcon />
               <VStack align="start" spacing={1}>
-                <AlertTitle>
-                  Warning: This action is irreversible!
-                </AlertTitle>
+                <AlertTitle>Warning: This action is irreversible!</AlertTitle>
                 <AlertDescription>
-                  Burning will permanently destroy this token. The photons
-                  will be returned to your wallet.
+                  Burning will permanently destroy this token. The photons will
+                  be returned to your wallet.
                 </AlertDescription>
               </VStack>
             </Alert>
 
             {tokenName && (
               <FormControl>
-                <FormLabel>
-                  Token Name
-                </FormLabel>
+                <FormLabel>Token Name</FormLabel>
                 <Text fontWeight="bold">{tokenName}</Text>
               </FormControl>
             )}
 
             {tokenType === "ft" && (
               <FormControl>
-                <FormLabel>
-                  Amount to Burn
-                </FormLabel>
+                <FormLabel>Amount to Burn</FormLabel>
                 <NumberInput
                   value={burnAmount}
                   onChange={(_, value) => setBurnAmount(value)}
@@ -215,9 +203,7 @@ export default function BurnTokenModal({
             )}
 
             <FormControl>
-              <FormLabel>
-                Reason (Optional)
-              </FormLabel>
+              <FormLabel>Reason (Optional)</FormLabel>
               <Textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
@@ -229,9 +215,7 @@ export default function BurnTokenModal({
             <Alert status="info" borderRadius="md">
               <AlertIcon />
               <VStack align="start" spacing={1}>
-                <Text fontWeight="bold">
-                  Photons to be returned:
-                </Text>
+                <Text fontWeight="bold">Photons to be returned:</Text>
                 <Text fontSize="lg" color="green.300">
                   {photonsToRXD(photonsReturned)} RXD
                 </Text>

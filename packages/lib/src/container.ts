@@ -3,7 +3,12 @@
  * Reference: Glyph v2 Token Standard Section 14
  */
 
-import { GlyphV2Container, GlyphV2Metadata, GlyphV2Relationships } from "./v2metadata";
+import {
+  GlyphV2Container,
+  GlyphV2Metadata,
+  GlyphV2Preview,
+  GlyphV2Relationships,
+} from "./v2metadata";
 import { GLYPH_NFT, GLYPH_CONTAINER } from "./protocols";
 import { hexToBytes } from "@noble/hashes/utils";
 import Outpoint from "./Outpoint";
@@ -17,7 +22,7 @@ export function createContainer(
     type?: "collection" | "bundle" | "album";
     max_items?: number;
     desc?: string;
-    preview?: any;
+    preview?: GlyphV2Preview;
   }
 ): GlyphV2Metadata {
   const container: GlyphV2Container = {
@@ -110,9 +115,10 @@ export function createChildRelationship(
 /**
  * Validate container metadata
  */
-export function validateContainer(
-  metadata: GlyphV2Metadata
-): { valid: boolean; errors: string[] } {
+export function validateContainer(metadata: GlyphV2Metadata): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   // Must have CONTAINER protocol
@@ -145,8 +151,14 @@ export function validateContainer(
       }
     }
 
-    if (container.max_items && container.items && container.items.length > container.max_items) {
-      errors.push(`Container has more items (${container.items.length}) than max_items (${container.max_items})`);
+    if (
+      container.max_items &&
+      container.items &&
+      container.items.length > container.max_items
+    ) {
+      errors.push(
+        `Container has more items (${container.items.length}) than max_items (${container.max_items})`
+      );
     }
   }
 
@@ -237,12 +249,14 @@ export function getContainerRef(metadata: GlyphV2Metadata): string | undefined {
   }
 
   // Fallback to legacy 'in' field
-  const inField = (metadata as Record<string, unknown>).in as Uint8Array[] | undefined;
+  const inField = (metadata as Record<string, unknown>).in as
+    | Uint8Array[]
+    | undefined;
   if (inField && inField.length > 0) {
     const refBytes = inField[0];
-    return Outpoint.fromString(
-      Buffer.from(refBytes).toString("hex")
-    ).reverse().toString();
+    return Outpoint.fromString(Buffer.from(refBytes).toString("hex"))
+      .reverse()
+      .toString();
   }
 
   return undefined;

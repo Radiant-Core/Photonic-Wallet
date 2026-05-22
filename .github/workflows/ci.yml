@@ -18,59 +18,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Install pnpm BEFORE setup-node so the latter can pick up the
+      # pnpm cache path automatically. Version pin matches the workspace's
+      # `packageManager` field in the root package.json (R19 / R30 — pin
+      # supply-chain entry points).
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build packages
         run: pnpm build
 
-      - name: Run linting
+      # R30: failures here must fail the job. The previous workflow ran
+      # lint and tsc with `continue-on-error: true`, which let
+      # regressions slip into main unnoticed.
+      - name: Type-check (workspace-wide)
+        run: pnpm check-types
+
+      - name: Lint (workspace-wide)
         run: pnpm lint
-        continue-on-error: true
 
-  type-check:
-    runs-on: ubuntu-latest
+      - name: Test (workspace-wide)
+        run: pnpm test
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Type check
-        run: pnpm exec tsc --noEmit
-        continue-on-error: true
+      - name: CSP parity (app only)
+        run: pnpm csp:check

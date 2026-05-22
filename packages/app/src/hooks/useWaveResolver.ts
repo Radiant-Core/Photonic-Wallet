@@ -36,61 +36,67 @@ export function useWaveResolver(): UseWaveResolverReturn {
   const [isDuplicate, setIsDuplicate] = useState(false);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const resolveName = useCallback(async (input: string): Promise<string | null> => {
-    // Clear any pending debounce
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
+  const resolveName = useCallback(
+    async (input: string): Promise<string | null> => {
+      // Clear any pending debounce
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
 
-    // Reset state
-    setError(null);
-    setResolvedAddress(null);
-    setWarning(null);
-    setIsDuplicate(false);
+      // Reset state
+      setError(null);
+      setResolvedAddress(null);
+      setWarning(null);
+      setIsDuplicate(false);
 
-    // Check if it looks like a WAVE name
-    const fullName = input.includes(".") ? input : `${input}.rxd`;
-    const validation = validateWaveName(fullName);
+      // Check if it looks like a WAVE name
+      const fullName = input.includes(".") ? input : `${input}.rxd`;
+      const validation = validateWaveName(fullName);
 
-    if (!validation.valid) {
-      setIsWaveName(false);
-      return null;
-    }
+      if (!validation.valid) {
+        setIsWaveName(false);
+        return null;
+      }
 
-    setIsWaveName(true);
+      setIsWaveName(true);
 
-    // Return a promise that resolves after debounce
-    return new Promise((resolve) => {
-      debounceTimer.current = setTimeout(async () => {
-        setIsResolving(true);
-        try {
-          const result = await electrumWorker.value.resolveWaveName(fullName) as WaveResolveResult | null;
-          if (result) {
-            setResolvedAddress(result.target);
-            setIsDuplicate(result.isDuplicate || false);
-            setWarning(result.warning || null);
-            setError(null);
-            resolve(result.target);
-          } else {
-            setError(`Name "${fullName}" not found`);
+      // Return a promise that resolves after debounce
+      return new Promise((resolve) => {
+        debounceTimer.current = setTimeout(async () => {
+          setIsResolving(true);
+          try {
+            const result = (await electrumWorker.value.resolveWaveName(
+              fullName
+            )) as WaveResolveResult | null;
+            if (result) {
+              setResolvedAddress(result.target);
+              setIsDuplicate(result.isDuplicate || false);
+              setWarning(result.warning || null);
+              setError(null);
+              resolve(result.target);
+            } else {
+              setError(`Name "${fullName}" not found`);
+              setResolvedAddress(null);
+              setIsDuplicate(false);
+              setWarning(null);
+              resolve(null);
+            }
+          } catch (err) {
+            const msg =
+              err instanceof Error ? err.message : "Resolution failed";
+            setError(msg);
             setResolvedAddress(null);
             setIsDuplicate(false);
             setWarning(null);
             resolve(null);
+          } finally {
+            setIsResolving(false);
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Resolution failed";
-          setError(msg);
-          setResolvedAddress(null);
-          setIsDuplicate(false);
-          setWarning(null);
-          resolve(null);
-        } finally {
-          setIsResolving(false);
-        }
-      }, 500); // 500ms debounce
-    });
-  }, []);
+        }, 500); // 500ms debounce
+      });
+    },
+    []
+  );
 
   const clear = useCallback(() => {
     setResolvedAddress(null);

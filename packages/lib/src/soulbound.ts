@@ -12,18 +12,13 @@ const { Script, Address } = rjs;
  * Create soulbound NFT script
  * Enforces that token can only be spent by original owner
  */
-export function soulboundNftScript(
-  ownerAddress: string,
-  ref: string
-): string {
+export function soulboundNftScript(ownerAddress: string, ref: string): string {
   // Script ensures:
   // 1. Token ref exists (singleton)
   // 2. Only original owner can spend (P2PKH locked to owner)
   // 3. Output must go back to same owner OR be burned (no ref in outputs)
 
-  const script = Script.fromASM(
-    `OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`
-  );
+  const script = Script.fromASM(`OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`);
 
   // Add owner verification
   const addr = Address.fromString(ownerAddress);
@@ -31,9 +26,7 @@ export function soulboundNftScript(
 
   // Standard P2PKH template: OP_DUP OP_HASH160 <pubkeyhash> OP_EQUALVERIFY OP_CHECKSIG
   script.add(
-    Script.fromASM(
-      `OP_DUP OP_HASH160 ${pubkeyhash} OP_EQUALVERIFY OP_CHECKSIG`
-    )
+    Script.fromASM(`OP_DUP OP_HASH160 ${pubkeyhash} OP_EQUALVERIFY OP_CHECKSIG`)
   );
 
   return script.toHex();
@@ -42,9 +35,10 @@ export function soulboundNftScript(
 /**
  * Validate soulbound policy
  */
-export function validateSoulboundPolicy(
-  policy?: GlyphV2Policy
-): { valid: boolean; error?: string } {
+export function validateSoulboundPolicy(policy?: GlyphV2Policy): {
+  valid: boolean;
+  error?: string;
+} {
   if (!policy) {
     return { valid: true }; // No policy means transferable
   }
@@ -78,11 +72,11 @@ export function validateSoulboundTransfer(
 
   for (const output of tx.outputs) {
     const script = output.script.toHex();
-    
+
     // Check if this output contains the token ref
     if (script.includes(tokenRef)) {
       tokenFoundInOutput = true;
-      
+
       // Extract output address
       try {
         outputOwner = output.script.toAddress()?.toString();
@@ -113,13 +107,11 @@ export function validateSoulboundTransfer(
 /**
  * Create soulbound policy
  */
-export function createSoulboundPolicy(
-  options?: {
-    renderable?: boolean;
-    executable?: boolean;
-    nsfw?: boolean;
-  }
-): GlyphV2Policy {
+export function createSoulboundPolicy(options?: {
+  renderable?: boolean;
+  executable?: boolean;
+  nsfw?: boolean;
+}): GlyphV2Policy {
   return {
     transferable: false,
     renderable: options?.renderable ?? true,

@@ -15,8 +15,11 @@
     "dev": "turbo run -F app dev",
     "lint": "turbo run lint",
     "check-types": "turbo run check-types",
+    "test": "turbo run test",
+    "csp:check": "pnpm -F @photonic/app run csp:check",
     "cli": "node packages/cli/dist/cli.js"
   },
+  "packageManager": "pnpm@11.1.3",
   "devDependencies": {
     "@photonic/cli": "workspace:*",
     "@types/node": "^18.19.56",

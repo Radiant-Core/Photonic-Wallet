@@ -10,7 +10,6 @@ import {
   Box,
   useClipboard,
 } from "@chakra-ui/react";
-import { t, Trans } from "@lingui/macro";
 import { CopyIcon } from "@chakra-ui/icons";
 import { QRCodeSVG } from "qrcode.react";
 import Identifier from "./Identifier";

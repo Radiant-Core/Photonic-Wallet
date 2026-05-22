@@ -6,7 +6,6 @@ import {
   Text,
   useBreakpointValue,
 } from "@chakra-ui/react";
-import { t, Trans } from "@lingui/macro";
 import PageHeader from "@app/components/PageHeader";
 import Card from "@app/components/Card";
 import ContentContainer from "@app/components/ContentContainer";

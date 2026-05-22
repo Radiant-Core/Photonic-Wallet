@@ -19,7 +19,6 @@ import {
   EditIcon,
 } from "@chakra-ui/icons";
 import { useLiveQuery } from "dexie-react-hooks";
-import { t } from "@lingui/macro";
 import db from "@app/db";
 import { PromiseExtended } from "dexie";
 import Card from "@app/components/Card";
@@ -42,12 +41,14 @@ function validateServerUrl(url: string): { valid: boolean; error?: string } {
     if (url.startsWith("ws://")) {
       return {
         valid: false,
-        error: "Insecure WebSocket (ws://) is not allowed. Use wss:// for secure connections.",
+        error:
+          "Insecure WebSocket (ws://) is not allowed. Use wss:// for secure connections.",
       };
     }
     return {
       valid: false,
-      error: "Server URL must use wss:// scheme (e.g., wss://electrumx.example.com:50002)",
+      error:
+        "Server URL must use wss:// scheme (e.g., wss://electrumx.example.com:50002)",
     };
   }
 

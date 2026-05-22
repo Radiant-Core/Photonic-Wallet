@@ -80,9 +80,7 @@ export const buildUpdateTXOs =
       outpoints.push(`${utxo.tx_hash}${utxo.tx_pos}`);
       const exist = emptyTxoTable
         ? false
-        : await db.txo
-            .where({ txid: utxo.tx_hash, vout: utxo.tx_pos })
-            .first();
+        : await db.txo.where({ txid: utxo.tx_hash, vout: utxo.tx_pos }).first();
       if (!exist) {
         newTxIds.add(utxo.tx_hash);
         newUtxos.push(utxo);

@@ -307,7 +307,9 @@ describe("On-Chain (Glyph) Storage Path", () => {
     // Hash of the encrypted bytes (what main.hash contains)
     const encHash = sha256(recovered);
     // Confirm deterministic
-    expect(bytesToHex(sha256(encrypted.encryptedContent))).toBe(bytesToHex(encHash));
+    expect(bytesToHex(sha256(encrypted.encryptedContent))).toBe(
+      bytesToHex(encHash)
+    );
 
     // Tampered data should produce different hash
     const tampered = new Uint8Array(recovered);
@@ -326,8 +328,14 @@ describe("deriveLocatorKeyFromPassphrase", () => {
       name: "test.txt",
     });
 
-    const key1 = deriveLocatorKeyFromPassphrase("locator-key-test-passphrase", encrypted.metadata);
-    const key2 = deriveLocatorKeyFromPassphrase("locator-key-test-passphrase", encrypted.metadata);
+    const key1 = deriveLocatorKeyFromPassphrase(
+      "locator-key-test-passphrase",
+      encrypted.metadata
+    );
+    const key2 = deriveLocatorKeyFromPassphrase(
+      "locator-key-test-passphrase",
+      encrypted.metadata
+    );
     expect(bytesToHex(key1)).toBe(bytesToHex(key2));
   });
 
@@ -340,8 +348,14 @@ describe("deriveLocatorKeyFromPassphrase", () => {
       name: "test.txt",
     });
 
-    const correctKey = deriveLocatorKeyFromPassphrase("correct-passphrase-xyz", encrypted.metadata);
-    const wrongKey = deriveLocatorKeyFromPassphrase("wrong-passphrase-abc", encrypted.metadata);
+    const correctKey = deriveLocatorKeyFromPassphrase(
+      "correct-passphrase-xyz",
+      encrypted.metadata
+    );
+    const wrongKey = deriveLocatorKeyFromPassphrase(
+      "wrong-passphrase-abc",
+      encrypted.metadata
+    );
     expect(bytesToHex(correctKey)).not.toBe(bytesToHex(wrongKey));
   });
 
@@ -356,7 +370,10 @@ describe("deriveLocatorKeyFromPassphrase", () => {
       name: "test.txt",
     });
 
-    const derived = deriveLocatorKeyFromPassphrase(passphrase, encrypted.metadata);
+    const derived = deriveLocatorKeyFromPassphrase(
+      passphrase,
+      encrypted.metadata
+    );
     expect(bytesToHex(derived)).toBe(bytesToHex(encrypted.locatorKey));
   });
 });
@@ -424,8 +441,18 @@ describe("EncryptionSection State Validation", () => {
 
 function makeKeypair(seed: string) {
   const raw = new TextEncoder().encode(seed);
-  const x25519PrivateKey = deriveKeyHKDF(raw, undefined, new TextEncoder().encode("test-x25519"), 32);
-  const mlkemSeed = deriveKeyHKDF(raw, undefined, new TextEncoder().encode("test-mlkem"), 64);
+  const x25519PrivateKey = deriveKeyHKDF(
+    raw,
+    undefined,
+    new TextEncoder().encode("test-x25519"),
+    32
+  );
+  const mlkemSeed = deriveKeyHKDF(
+    raw,
+    undefined,
+    new TextEncoder().encode("test-mlkem"),
+    64
+  );
   return buildHybridKeyPairFromPrivateKey(x25519PrivateKey, mlkemSeed);
 }
 
@@ -433,7 +460,9 @@ function makeKeypair(seed: string) {
 
 describe("Multi-Recipient Encrypt → Decrypt Roundtrip", () => {
   it("encrypts for two recipients and both can decrypt", async () => {
-    const plaintext = new TextEncoder().encode("multi-recipient secret payload");
+    const plaintext = new TextEncoder().encode(
+      "multi-recipient secret payload"
+    );
     const alice = makeKeypair("alice-seed-abc");
     const bob = makeKeypair("bob-seed-xyz");
 
@@ -453,14 +482,18 @@ describe("Multi-Recipient Encrypt → Decrypt Roundtrip", () => {
       metadata: encrypted.metadata,
       privateKey: alice.x25519PrivateKey,
     });
-    expect(new TextDecoder().decode(decryptedAlice)).toBe("multi-recipient secret payload");
+    expect(new TextDecoder().decode(decryptedAlice)).toBe(
+      "multi-recipient secret payload"
+    );
 
     // Bob decrypts independently
     const decryptedBob = await decryptContent(encrypted.encryptedContent, {
       metadata: encrypted.metadata,
       privateKey: bob.x25519PrivateKey,
     });
-    expect(new TextDecoder().decode(decryptedBob)).toBe("multi-recipient secret payload");
+    expect(new TextDecoder().decode(decryptedBob)).toBe(
+      "multi-recipient secret payload"
+    );
   });
 
   it("fails to decrypt with a key that is not a recipient", async () => {
@@ -492,7 +525,11 @@ describe("Multi-Recipient Encrypt → Decrypt Roundtrip", () => {
     const encrypted = await encryptContent(plaintext, {
       mode: "recipient",
       // third is last in the list — decryptContent must try all slots
-      recipientPublicKeys: [first.x25519PublicKey, second.x25519PublicKey, third.x25519PublicKey],
+      recipientPublicKeys: [
+        first.x25519PublicKey,
+        second.x25519PublicKey,
+        third.x25519PublicKey,
+      ],
       contentType: "text/plain",
       name: "slot.txt",
     });
@@ -530,14 +567,21 @@ describe("selfKeypair — Self-as-Recipient Backup", () => {
       metadata: encrypted.metadata,
       privateKey: minter,
     });
-    expect(new TextDecoder().decode(decryptedMinter)).toBe("minter backup content");
+    expect(new TextDecoder().decode(decryptedMinter)).toBe(
+      "minter backup content"
+    );
 
     // Original recipient can still decrypt
-    const decryptedRecipient = await decryptContent(encrypted.encryptedContent, {
-      metadata: encrypted.metadata,
-      privateKey: recipient,
-    });
-    expect(new TextDecoder().decode(decryptedRecipient)).toBe("minter backup content");
+    const decryptedRecipient = await decryptContent(
+      encrypted.encryptedContent,
+      {
+        metadata: encrypted.metadata,
+        privateKey: recipient,
+      }
+    );
+    expect(new TextDecoder().decode(decryptedRecipient)).toBe(
+      "minter backup content"
+    );
   });
 
   it("selfKeypair in passphrase mode also adds self-recipient slot", async () => {
@@ -553,21 +597,27 @@ describe("selfKeypair — Self-as-Recipient Backup", () => {
     });
 
     // Should have at least 2 recipients: passphrase sentinel + minter
-    expect(encrypted.metadata.crypto.recipients!.length).toBeGreaterThanOrEqual(2);
+    expect(encrypted.metadata.crypto.recipients!.length).toBeGreaterThanOrEqual(
+      2
+    );
 
     // Passphrase path still works
     const decryptedPass = await decryptContent(encrypted.encryptedContent, {
       metadata: encrypted.metadata,
       passphrase: "super-secret-passphrase",
     });
-    expect(new TextDecoder().decode(decryptedPass)).toBe("passphrase + self backup");
+    expect(new TextDecoder().decode(decryptedPass)).toBe(
+      "passphrase + self backup"
+    );
 
     // Minter key path also works — full keypair required for ML-KEM self-recipient slot
     const decryptedKey = await decryptContent(encrypted.encryptedContent, {
       metadata: encrypted.metadata,
       privateKey: minter,
     });
-    expect(new TextDecoder().decode(decryptedKey)).toBe("passphrase + self backup");
+    expect(new TextDecoder().decode(decryptedKey)).toBe(
+      "passphrase + self backup"
+    );
   });
 });
 
@@ -586,7 +636,9 @@ describe("CEK Share — Export → Import Roundtrip", () => {
     });
 
     // AAD = cek_hash string as UTF-8 (matches encryptionService behaviour)
-    const cekHashAad = new TextEncoder().encode(encrypted.metadata.crypto.cek_hash);
+    const cekHashAad = new TextEncoder().encode(
+      encrypted.metadata.crypto.cek_hash
+    );
 
     // Owner unwraps their own CEK
     const recipients = encrypted.metadata.crypto.recipients!;
@@ -598,7 +650,11 @@ describe("CEK Share — Export → Import Roundtrip", () => {
         const ephemeral = {
           x25519EphemeralPublicKey: ephemeralBytes,
           ...(r.mlkem_ct
-            ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
+            ? {
+                mlkemCiphertext: new Uint8Array(
+                  Buffer.from(r.mlkem_ct, "base64")
+                ),
+              }
             : {}),
         };
         recoveredCek = unwrapCEK(
@@ -608,7 +664,9 @@ describe("CEK Share — Export → Import Roundtrip", () => {
           cekHashAad
         );
         break;
-      } catch { /* try next */ }
+      } catch {
+        /* try next */
+      }
     }
     expect(recoveredCek).toBeDefined();
 
@@ -623,19 +681,23 @@ describe("CEK Share — Export → Import Roundtrip", () => {
     const shareToken = {
       v: 1,
       wrapped_cek: Buffer.from(wrappedCEK).toString("base64"),
-      epk: Buffer.from(shareEphemeral.x25519EphemeralPublicKey).toString("base64"),
+      epk: Buffer.from(shareEphemeral.x25519EphemeralPublicKey).toString(
+        "base64"
+      ),
       cek_hash: encrypted.metadata.crypto.cek_hash,
     };
 
     // newRecipient receives and unwraps (simulates handleImportCEK)
     const ephemeralFromToken = {
-      x25519EphemeralPublicKey: new Uint8Array(Buffer.from(shareToken.epk, "base64")),
+      x25519EphemeralPublicKey: new Uint8Array(
+        Buffer.from(shareToken.epk, "base64")
+      ),
     };
     const importedCek = unwrapCEK(
       new Uint8Array(Buffer.from(shareToken.wrapped_cek, "base64")),
       ephemeralFromToken,
       newRecipient,
-      cekHashAad  // same cek_hash AAD
+      cekHashAad // same cek_hash AAD
     );
 
     // Both CEKs must be identical
@@ -644,7 +706,10 @@ describe("CEK Share — Export → Import Roundtrip", () => {
     // newRecipient re-wraps for their own key and builds patched stub
     const { wrappedCEK: myWrapped, ephemeral: myEphemeral } = wrapCEK(
       importedCek,
-      { x25519: newRecipient.x25519PublicKey, mlkem: newRecipient.mlkemPublicKey },
+      {
+        x25519: newRecipient.x25519PublicKey,
+        mlkem: newRecipient.mlkemPublicKey,
+      },
       cekHashAad
     );
 
@@ -654,11 +719,16 @@ describe("CEK Share — Export → Import Roundtrip", () => {
       alg: (isHybrid
         ? "x25519mlkem768-hkdf-xchacha20poly1305"
         : "x25519-hkdf-xchacha20poly1305") as
-        "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305",
+        | "x25519-hkdf-xchacha20poly1305"
+        | "x25519mlkem768-hkdf-xchacha20poly1305",
       wrapped_cek: Buffer.from(myWrapped).toString("base64"),
       epk: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
       ...(myEphemeral.mlkemCiphertext
-        ? { mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+        ? {
+            mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString(
+              "base64"
+            ),
+          }
         : {}),
     };
 
@@ -679,15 +749,20 @@ describe("CEK Share — Export → Import Roundtrip", () => {
   });
 
   it("wrong private key cannot unwrap the share token", () => {
-    const owner = makeKeypair("owner-seed-wrong-test");
     const cek = new Uint8Array(32).fill(0xcc);
     const attacker = makeKeypair("attacker-seed");
     const target = makeKeypair("target-seed");
 
-    const { wrappedCEK, ephemeral } = wrapCEK(cek, { x25519: target.x25519PublicKey });
+    const { wrappedCEK, ephemeral } = wrapCEK(cek, {
+      x25519: target.x25519PublicKey,
+    });
 
     expect(() =>
-      unwrapCEK(wrappedCEK, { x25519EphemeralPublicKey: ephemeral.x25519EphemeralPublicKey }, attacker)
+      unwrapCEK(
+        wrappedCEK,
+        { x25519EphemeralPublicKey: ephemeral.x25519EphemeralPublicKey },
+        attacker
+      )
     ).toThrow();
 
     // But target succeeds
@@ -734,7 +809,8 @@ describe("CEK Share — Export → Import Roundtrip", () => {
     };
 
     // Simulate the guard in handleImportCEK
-    const hashMatches = shareToken.cek_hash === encrypted.metadata.crypto.cek_hash;
+    const hashMatches =
+      shareToken.cek_hash === encrypted.metadata.crypto.cek_hash;
     expect(hashMatches).toBe(false); // mismatch correctly detected
     void recipients;
   });

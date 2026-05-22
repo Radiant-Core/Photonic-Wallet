@@ -40,7 +40,12 @@ import { wallet, feeRate, openModal } from "@app/signals";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
-import { ContractType, SmartToken, SmartTokenType, VaultRecord } from "@app/types";
+import {
+  ContractType,
+  SmartToken,
+  SmartTokenType,
+  VaultRecord,
+} from "@app/types";
 import { reverseRef } from "@lib/Outpoint";
 import { parseFtScript, parseNftScript } from "@lib/script";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -78,7 +83,9 @@ function unixToDateInput(ts: number): string {
   if (!ts || ts <= 0) return "";
   const d = new Date(ts * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 
 /** Estimate duration in human-readable form from block count */
@@ -121,7 +128,12 @@ type Tranche = {
 
 type VestingInputMode = "manual" | "percentage";
 
-type PresetId = "linear-6" | "linear-12" | "cliff-linear" | "back-loaded" | "custom";
+type PresetId =
+  | "linear-6"
+  | "linear-12"
+  | "cliff-linear"
+  | "back-loaded"
+  | "custom";
 
 interface PresetDef {
   id: PresetId;
@@ -156,7 +168,8 @@ const PRESETS: PresetDef[] = [
       pcts.push(25); // cliff
       const remaining = 75;
       const monthlyCount = 9;
-      for (let i = 0; i < monthlyCount; i++) pcts.push(remaining / monthlyCount);
+      for (let i = 0; i < monthlyCount; i++)
+        pcts.push(remaining / monthlyCount);
       return pcts; // 10 tranches
     },
   },
@@ -202,7 +215,8 @@ export default function VaultPage() {
   const [loading, setLoading] = useState(false);
 
   // Vesting-specific state
-  const [vestingInputMode, setVestingInputMode] = useState<VestingInputMode>("manual");
+  const [vestingInputMode, setVestingInputMode] =
+    useState<VestingInputMode>("manual");
 
   // Default recipient to self when create tab is opened
   useEffect(() => {
@@ -246,7 +260,10 @@ export default function VaultPage() {
   const [showClaimed, setShowClaimed] = useState(false);
 
   // Scan tracking state
-  const [lastScan, setLastScan] = useState<{ timestamp: number; discovered: number } | null>(null);
+  const [lastScan, setLastScan] = useState<{
+    timestamp: number;
+    discovered: number;
+  } | null>(null);
 
   // Vault discovery state
   const [scanning, setScanning] = useState(false);
@@ -260,7 +277,13 @@ export default function VaultPage() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   // Sort state
-  type SortCol = "status" | "type" | "value" | "locktime" | "remaining" | "label";
+  type SortCol =
+    | "status"
+    | "type"
+    | "value"
+    | "locktime"
+    | "remaining"
+    | "label";
   const [sortCol, setSortCol] = useState<SortCol>("locktime");
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -292,13 +315,26 @@ export default function VaultPage() {
   // Vault list from DB (live query)
   // ────────────────────────────────────────────────────────
   const vaultsRaw = useLiveQuery(
-    () => db.vault.orderBy("date").reverse().toArray().then(vaults => {
-      console.log("[Vault List] Loaded from DB:", vaults?.length || 0, "vaults");
-      if (vaults?.length) {
-        console.log("[Vault List] First vault:", vaults[0].txid, vaults[0].recipientAddress);
-      }
-      return vaults;
-    }),
+    () =>
+      db.vault
+        .orderBy("date")
+        .reverse()
+        .toArray()
+        .then((vaults) => {
+          console.log(
+            "[Vault List] Loaded from DB:",
+            vaults?.length || 0,
+            "vaults"
+          );
+          if (vaults?.length) {
+            console.log(
+              "[Vault List] First vault:",
+              vaults[0].txid,
+              vaults[0].recipientAddress
+            );
+          }
+          return vaults;
+        }),
     []
   );
 
@@ -310,7 +346,9 @@ export default function VaultPage() {
       if (!wallet.value.address) return;
       try {
         const scanKey = `vaultLastScan_${wallet.value.address}`;
-        const scanData = await db.kvp.get(scanKey) as { timestamp: number; discovered: number } | undefined;
+        const scanData = (await db.kvp.get(scanKey)) as
+          | { timestamp: number; discovered: number }
+          | undefined;
         if (scanData) {
           setLastScan(scanData);
         }
@@ -346,7 +384,9 @@ export default function VaultPage() {
             try {
               const next = await electrumWorker.value.getBlockHeight();
               if (!cancelledRef.current && next > 0) setApiHeight(next);
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }, 60_000);
         } else if (!cancelledRef.current) {
           // Worker not ready yet — retry in 5s
@@ -374,7 +414,17 @@ export default function VaultPage() {
     return [...vaultsRaw].sort((a, b) => {
       switch (sortCol) {
         case "status": {
-          const rank = (v: typeof a) => (v.claimed ? 2 : isVaultClaimable(v.locktime, v.mode, currentHeight, currentTimestamp) ? 0 : 1);
+          const rank = (v: typeof a) =>
+            v.claimed
+              ? 2
+              : isVaultClaimable(
+                  v.locktime,
+                  v.mode,
+                  currentHeight,
+                  currentTimestamp
+                )
+              ? 0
+              : 1;
           return dir * (rank(a) - rank(b));
         }
         case "type":
@@ -384,8 +434,18 @@ export default function VaultPage() {
         case "locktime":
           return dir * (a.locktime - b.locktime);
         case "remaining": {
-          const ra = vaultClaimableIn(a.locktime, a.mode, currentHeight, currentTimestamp);
-          const rb = vaultClaimableIn(b.locktime, b.mode, currentHeight, currentTimestamp);
+          const ra = vaultClaimableIn(
+            a.locktime,
+            a.mode,
+            currentHeight,
+            currentTimestamp
+          );
+          const rb = vaultClaimableIn(
+            b.locktime,
+            b.mode,
+            currentHeight,
+            currentTimestamp
+          );
           return dir * (ra.value - rb.value);
         }
         case "label":
@@ -417,26 +477,34 @@ export default function VaultPage() {
       if (!currentHeight) return t`Waiting for block data…`;
       if (!lt) return t`Current block: ${currentHeight.toLocaleString()}`;
       const diff = lt - currentHeight;
-      if (diff <= 0) return t`⚠ Must be greater than current block (${currentHeight.toLocaleString()})`;
-      return t`Current block: ${currentHeight.toLocaleString()} — locks for ${blocksToDuration(diff)}`;
+      if (diff <= 0)
+        return t`⚠ Must be greater than current block (${currentHeight.toLocaleString()})`;
+      return t`Current block: ${currentHeight.toLocaleString()} — locks for ${blocksToDuration(
+        diff
+      )}`;
     }
     const lt = parseInt(locktime, 10);
     if (!lt) return t`Current time: ${new Date().toLocaleString()}`;
     const diff = lt - currentTimestamp;
     if (diff <= 0) return t`⚠ Must be in the future`;
-    return t`Current time: ${new Date().toLocaleString()} — locks for ${secsToDuration(diff)}`;
+    return t`Current time: ${new Date().toLocaleString()} — locks for ${secsToDuration(
+      diff
+    )}`;
   }, [mode, locktime, currentHeight, currentTimestamp]);
 
   // ────────────────────────────────────────────────────────
   // Date picker <-> UNIX timestamp sync
   // ────────────────────────────────────────────────────────
-  const handleLocktimeChange = useCallback((val: string) => {
-    setLocktime(val);
-    if (mode === "time") {
-      const ts = parseInt(val, 10);
-      setDatePickerValue(ts > 0 ? unixToDateInput(ts) : "");
-    }
-  }, [mode]);
+  const handleLocktimeChange = useCallback(
+    (val: string) => {
+      setLocktime(val);
+      if (mode === "time") {
+        const ts = parseInt(val, 10);
+        setDatePickerValue(ts > 0 ? unixToDateInput(ts) : "");
+      }
+    },
+    [mode]
+  );
 
   const handleDatePickerChange = useCallback((val: string) => {
     setDatePickerValue(val);
@@ -456,27 +524,29 @@ export default function VaultPage() {
   // ────────────────────────────────────────────────────────
   const addTranche = useCallback(() => {
     if (tranches.length < VAULT_MAX_TRANCHES) {
-      setTranches(prev => [...prev, { locktime: "", value: "", pct: "" }]);
+      setTranches((prev) => [...prev, { locktime: "", value: "", pct: "" }]);
     }
   }, [tranches.length]);
 
-  const removeTranche = useCallback((index: number) => {
-    if (tranches.length > 1) {
-      setTranches(prev => prev.filter((_, i) => i !== index));
-    }
-  }, [tranches.length]);
+  const removeTranche = useCallback(
+    (index: number) => {
+      if (tranches.length > 1) {
+        setTranches((prev) => prev.filter((_, i) => i !== index));
+      }
+    },
+    [tranches.length]
+  );
 
-  const updateTranche = useCallback((
-    index: number,
-    field: keyof Tranche,
-    val: string
-  ) => {
-    setTranches(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: val };
-      return updated;
-    });
-  }, []);
+  const updateTranche = useCallback(
+    (index: number, field: keyof Tranche, val: string) => {
+      setTranches((prev) => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], [field]: val };
+        return updated;
+      });
+    },
+    []
+  );
 
   // ────────────────────────────────────────────────────────
   // Percentage mode: compute amounts from total + pct
@@ -495,7 +565,7 @@ export default function VaultPage() {
 
   const autoFillLastPct = useCallback(() => {
     if (tranches.length === 0 || pctRemaining <= 0) return;
-    setTranches(prev => {
+    setTranches((prev) => {
       const updated = [...prev];
       const lastIdx = updated.length - 1;
       const currentPct = parseFloat(updated[lastIdx].pct || "0");
@@ -508,7 +578,10 @@ export default function VaultPage() {
   }, [tranches.length, pctRemaining]);
 
   // Resolve tranche amounts: in percentage mode, compute from total
-  const resolvedTranches = useMemo((): { locktime: number; value: number }[] => {
+  const resolvedTranches = useMemo((): {
+    locktime: number;
+    value: number;
+  }[] => {
     if (vestingInputMode === "percentage") {
       const total = Math.round(parseFloat(totalVestingAmount || "0") * 1e8);
       return tranches.map((tr) => ({
@@ -590,7 +663,11 @@ export default function VaultPage() {
     }
 
     if (!start || !step || step <= 0) {
-      toast({ title: t`Error`, description: t`Fill in start and interval`, status: "error" });
+      toast({
+        title: t`Error`,
+        description: t`Fill in start and interval`,
+        status: "error",
+      });
       return;
     }
 
@@ -612,7 +689,7 @@ export default function VaultPage() {
 
     setLoading(true);
     try {
-      const wif = wallet.value.wif;
+      const wif = wallet.value.wif.toString();
       const fromAddress = wallet.value.address;
 
       // Fetch RXD UTXOs for funding
@@ -628,10 +705,13 @@ export default function VaultPage() {
       }));
 
       // Fetch token UTXO for NFT/FT vaults
-      let tokenUtxos: { txid: string; vout: number; script: string; value: number }[] | undefined;
+      let tokenUtxos:
+        | { txid: string; vout: number; script: string; value: number }[]
+        | undefined;
       if (assetType !== "rxd" && ref) {
         const refLE = ref.trim().toLowerCase();
-        const contractType = assetType === "nft" ? ContractType.NFT : ContractType.FT;
+        const contractType =
+          assetType === "nft" ? ContractType.NFT : ContractType.FT;
         const tokenTxos = await db.txo
           .where({ contractType, spent: 0 })
           .filter((txo) => {
@@ -648,7 +728,9 @@ export default function VaultPage() {
           );
         }
         // For NFT take exactly 1; for FT take all UTXOs carrying this ref
-        tokenUtxos = (assetType === "nft" ? tokenTxos.slice(0, 1) : tokenTxos).map((t) => ({
+        tokenUtxos = (
+          assetType === "nft" ? tokenTxos.slice(0, 1) : tokenTxos
+        ).map((t) => ({
           txid: t.txid,
           vout: t.vout,
           script: t.script,
@@ -679,10 +761,14 @@ export default function VaultPage() {
           throw new Error("Fill in locktime and amount");
         }
         if (!recipient) {
-          throw new Error(t`Recipient address is required. Click 'Self' to use your own address.`);
+          throw new Error(
+            t`Recipient address is required. Click 'Self' to use your own address.`
+          );
         }
         if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
-          throw new Error(t`Block must be greater than current height (${currentHeight})`);
+          throw new Error(
+            t`Block must be greater than current height (${currentHeight})`
+          );
         }
         if (mode === "time" && lt <= currentTimestamp) {
           throw new Error(t`Timestamp must be in the future`);
@@ -727,19 +813,27 @@ export default function VaultPage() {
           p2shScriptHex: p2shOutputScript(result.redeemScriptHex),
           claimed: 0,
           date: now,
-          activityLog: [{
-            timestamp: now,
-            action: "created",
-            txid,
-            details: `Created ${assetType.toUpperCase()} vault with ${val / 1e8} ${assetType.toUpperCase()}`,
-          }],
+          activityLog: [
+            {
+              timestamp: now,
+              action: "created",
+              txid,
+              details: `Created ${assetType.toUpperCase()} vault with ${
+                val / 1e8
+              } ${assetType.toUpperCase()}`,
+            },
+          ],
         };
         console.log("[Vault Create] Storing record:", record);
         await db.vault.put(record);
         await electrumWorker.value.addVault(record);
         const verifyRecord = await db.vault.where({ txid }).first();
         console.log("[Vault Create] Verified stored record:", verifyRecord);
-        await db.broadcast.put({ txid, date: Date.now(), description: "vault_create" });
+        await db.broadcast.put({
+          txid,
+          date: Date.now(),
+          description: "vault_create",
+        });
 
         toast({
           title: t`Vault Created`,
@@ -758,28 +852,45 @@ export default function VaultPage() {
         setTab("list");
       } else {
         // Vesting schedule
-        if (vestingInputMode === "percentage" && Math.abs(pctAllocated - 100) > 0.01) {
-          throw new Error(t`Percentages must sum to 100% (currently ${pctAllocated.toFixed(2)}%)`);
+        if (
+          vestingInputMode === "percentage" &&
+          Math.abs(pctAllocated - 100) > 0.01
+        ) {
+          throw new Error(
+            t`Percentages must sum to 100% (currently ${pctAllocated.toFixed(
+              2
+            )}%)`
+          );
         }
 
         for (let i = 0; i < resolvedTranches.length; i++) {
           const lt = resolvedTranches[i].locktime;
           if (!lt || lt <= 0) {
-            const lockTypeLabel = mode === "block" ? "Block number" : "Timestamp";
+            const lockTypeLabel =
+              mode === "block" ? "Block number" : "Timestamp";
             throw new Error(t`Tranche ${i + 1}: ${lockTypeLabel} is required`);
           }
           if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
-            throw new Error(t`Tranche ${i + 1}: Block ${lt} must be greater than current height (${currentHeight})`);
+            throw new Error(
+              t`Tranche ${
+                i + 1
+              }: Block ${lt} must be greater than current height (${currentHeight})`
+            );
           }
           if (mode === "time" && lt <= currentTimestamp) {
-            throw new Error(t`Tranche ${i + 1}: Timestamp must be in the future`);
+            throw new Error(
+              t`Tranche ${i + 1}: Timestamp must be in the future`
+            );
           }
         }
 
         // FT vesting balance check
         if (assetType === "ft" && tokenUtxos) {
           const ftTotal = tokenUtxos.reduce((s, u) => s + u.value, 0);
-          const trancheTotal = resolvedTranches.reduce((s, rt) => s + rt.value, 0);
+          const trancheTotal = resolvedTranches.reduce(
+            (s, rt) => s + rt.value,
+            0
+          );
           if (trancheTotal > ftTotal) {
             throw new Error(
               `Insufficient FT balance: tranches total ${trancheTotal} units but only ${ftTotal} available`
@@ -787,15 +898,17 @@ export default function VaultPage() {
           }
         }
 
-        const vestingTranches: VestingTranche[] = resolvedTranches.map((rt) => ({
-          mode,
-          locktime: rt.locktime,
-          assetType,
-          recipientAddress: recipient,
-          ref: assetType !== "rxd" ? ref : undefined,
-          value: rt.value,
-          label: label || undefined,
-        }));
+        const vestingTranches: VestingTranche[] = resolvedTranches.map(
+          (rt) => ({
+            mode,
+            locktime: rt.locktime,
+            assetType,
+            recipientAddress: recipient,
+            ref: assetType !== "rxd" ? ref : undefined,
+            value: rt.value,
+            label: label || undefined,
+          })
+        );
 
         const result = buildVestingTx(
           coinInputs,
@@ -821,22 +934,34 @@ export default function VaultPage() {
             recipientAddress: recipient,
             senderAddress: fromAddress,
             ref: assetType !== "rxd" ? ref : undefined,
-            label: label ? `${label} (${i + 1}/${vestingTranches.length})` : undefined,
+            label: label
+              ? `${label} (${i + 1}/${vestingTranches.length})`
+              : undefined,
             redeemScriptHex: result.redeemScripts[i],
             p2shScriptHex: p2shOutputScript(result.redeemScripts[i]),
             claimed: 0,
             date: vestingDate,
-            activityLog: [{
-              timestamp: vestingDate,
-              action: "created",
-              txid,
-              details: `Created ${assetType.toUpperCase()} vesting tranche ${i + 1}/${vestingTranches.length} with ${vestingTranches[i].value / 1e8} ${assetType.toUpperCase()}`,
-            }],
+            activityLog: [
+              {
+                timestamp: vestingDate,
+                action: "created",
+                txid,
+                details: `Created ${assetType.toUpperCase()} vesting tranche ${
+                  i + 1
+                }/${vestingTranches.length} with ${
+                  vestingTranches[i].value / 1e8
+                } ${assetType.toUpperCase()}`,
+              },
+            ],
           };
           await db.vault.put(record);
           await electrumWorker.value.addVault(record);
         }
-        await db.broadcast.put({ txid, date: Date.now(), description: "vault_vesting" });
+        await db.broadcast.put({
+          txid,
+          date: Date.now(),
+          description: "vault_vesting",
+        });
 
         toast({
           title: t`Vesting Schedule Created`,
@@ -873,7 +998,7 @@ export default function VaultPage() {
     }
 
     try {
-      const wif = wallet.value.wif;
+      const wif = wallet.value.wif.toString();
       const toAddress = wallet.value.address;
 
       // For NFT/FT vaults the locked value is dust (546 photons) and the fee
@@ -900,9 +1025,7 @@ export default function VaultPage() {
         needed: number,
         alreadyHave: FundingUtxo[]
       ): FundingUtxo[] => {
-        const usedKeys = new Set(
-          alreadyHave.map((u) => `${u.txid}:${u.vout}`)
-        );
+        const usedKeys = new Set(alreadyHave.map((u) => `${u.txid}:${u.vout}`));
         const additional: FundingUtxo[] = [];
         let accumulated = 0;
         for (const utxo of fundingPool) {
@@ -944,22 +1067,28 @@ export default function VaultPage() {
       }
 
       // Update vault with claim information and activity log
-      await db.vault.where({ txid: vault.txid, vout: vault.vout }).modify((v) => {
-        v.claimed = 1;
-        v.claimTxid = claimTxid;
-        v.claimDate = claimDate;
-        // claimHeight will be set when we receive confirmation
-        if (!v.activityLog) {
-          v.activityLog = [];
-        }
-        v.activityLog.push({
-          timestamp: claimDate,
-          action: "claimed",
-          txid: claimTxid,
-          details: `Claimed ${v.value / 1e8} ${v.assetType.toUpperCase()}`,
+      await db.vault
+        .where({ txid: vault.txid, vout: vault.vout })
+        .modify((v) => {
+          v.claimed = 1;
+          v.claimTxid = claimTxid;
+          v.claimDate = claimDate;
+          // claimHeight will be set when we receive confirmation
+          if (!v.activityLog) {
+            v.activityLog = [];
+          }
+          v.activityLog.push({
+            timestamp: claimDate,
+            action: "claimed",
+            txid: claimTxid,
+            details: `Claimed ${v.value / 1e8} ${v.assetType.toUpperCase()}`,
+          });
         });
+      await db.broadcast.put({
+        txid: claimTxid,
+        date: claimDate,
+        description: "vault_claim",
       });
-      await db.broadcast.put({ txid: claimTxid, date: claimDate, description: "vault_claim" });
 
       toast({
         title: t`Vault Claimed`,
@@ -988,29 +1117,31 @@ export default function VaultPage() {
 
     setScanning(true);
     try {
+      const wif = wallet.value.wif.toString();
+      const swapWif = wallet.value.swapWif?.toString();
       // Scan main address - also try swapWif for decryption if main fails
       const mainCount = await electrumWorker.value.discoverVaults(
-        wallet.value.wif,
+        wif,
         wallet.value.address,
-        wallet.value.swapWif // Try swap WIF if main fails to decrypt
+        swapWif // Try swap WIF if main fails to decrypt
       );
 
       // Scan swap address if different
       let swapCount = 0;
-      if (wallet.value.swapWif && wallet.value.swapAddress) {
+      if (swapWif && wallet.value.swapAddress) {
         swapCount = await electrumWorker.value.discoverVaults(
-          wallet.value.swapWif,
+          swapWif,
           wallet.value.swapAddress,
-          wallet.value.wif // Try main WIF if swap fails to decrypt
+          wif // Try main WIF if swap fails to decrypt
         );
       }
 
       const totalCount = mainCount + swapCount;
-      
+
       // Update last scan state
       const now = Date.now();
       setLastScan({ timestamp: now, discovered: totalCount });
-      
+
       if (totalCount > 0) {
         toast({
           title: t`Vaults Discovered`,
@@ -1072,17 +1203,40 @@ export default function VaultPage() {
       console.log(`[Vault Check] Raw tx length: ${rawTx.length}`);
 
       // Try to recover vaults with main address first
-      console.log(`[Vault Check] Trying with main address: ${wallet.value.address}`);
-      let recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.wif, wallet.value.address, true);
+      console.log(
+        `[Vault Check] Trying with main address: ${wallet.value.address}`
+      );
+      const wif = wallet.value.wif.toString();
+      let recovered = recoverVaultsFromTx(
+        rawTx,
+        txid,
+        wif,
+        wallet.value.address
+      );
 
       // If no vaults found and we have a swap address, try that too
-      if (recovered.length === 0 && wallet.value.swapAddress && wallet.value.swapWif) {
-        console.log(`[Vault Check] Trying with swap address: ${wallet.value.swapAddress}`);
-        recovered = recoverVaultsFromTx(rawTx, txid, wallet.value.swapWif, wallet.value.swapAddress, true);
+      if (
+        recovered.length === 0 &&
+        wallet.value.swapAddress &&
+        wallet.value.swapWif
+      ) {
+        console.log(
+          `[Vault Check] Trying with swap address: ${wallet.value.swapAddress}`
+        );
+        const swapWif = wallet.value.swapWif.toString();
+        recovered = recoverVaultsFromTx(
+          rawTx,
+          txid,
+          swapWif,
+          wallet.value.swapAddress
+        );
       }
 
       if (recovered.length > 0) {
-        console.log(`[Vault Check] Found ${recovered.length} vault(s):`, recovered);
+        console.log(
+          `[Vault Check] Found ${recovered.length} vault(s):`,
+          recovered
+        );
         toast({
           title: t`Vault Found!`,
           description: t`Found ${recovered.length} vault(s) in this transaction. Check console for details.`,
@@ -1129,7 +1283,15 @@ export default function VaultPage() {
     } finally {
       setCheckingTx(false);
     }
-  }, [checkTxId, wallet.value.locked, wallet.value.wif, wallet.value.address, wallet.value.swapAddress, wallet.value.swapWif, toast]);
+  }, [
+    checkTxId,
+    wallet.value.locked,
+    wallet.value.wif,
+    wallet.value.address,
+    wallet.value.swapAddress,
+    wallet.value.swapWif,
+    toast,
+  ]);
 
   // ────────────────────────────────────────────────────────
   // Render
@@ -1137,476 +1299,564 @@ export default function VaultPage() {
   return (
     <ContentContainer>
       <Container maxW="container.md" px={4}>
-      <PageHeader>{t`Vault`}</PageHeader>
+        <PageHeader>{t`Vault`}</PageHeader>
 
-      {/* Tabs */}
-      <HStack mb={6} gap={2}>
-        <Button
-          size="sm"
-          variant={tab === "list" ? "primary" : "ghost"}
-          onClick={() => setTab("list")}
-        >
-          {t`My Vaults`}
-        </Button>
-        <Button
-          size="sm"
-          variant={tab === "create" ? "primary" : "ghost"}
-          onClick={() => setTab("create")}
-        >
-          {t`Create Vault`}
-        </Button>
-      </HStack>
+        {/* Tabs */}
+        <HStack mb={6} gap={2}>
+          <Button
+            size="sm"
+            variant={tab === "list" ? "primary" : "ghost"}
+            onClick={() => setTab("list")}
+          >
+            {t`My Vaults`}
+          </Button>
+          <Button
+            size="sm"
+            variant={tab === "create" ? "primary" : "ghost"}
+            onClick={() => setTab("create")}
+          >
+            {t`Create Vault`}
+          </Button>
+        </HStack>
 
-      {/* ───────── CREATE TAB ───────── */}
-      {tab === "create" && (
-        <VStack gap={4} align="stretch">
-          <FormControl>
-            <FormLabel>{t`Recipient Address`}</FormLabel>
-            <HStack>
-              <Input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder={t`Radiant address`}
-                fontFamily="mono"
-                size="sm"
-              />
-              <Button size="sm" onClick={fillSelf} variant="solid">
-                {t`Self`}
-              </Button>
-            </HStack>
-          </FormControl>
-
-          <SimpleGrid columns={2} gap={4}>
+        {/* ───────── CREATE TAB ───────── */}
+        {tab === "create" && (
+          <VStack gap={4} align="stretch">
             <FormControl>
-              <FormLabel>{t`Asset Type`}</FormLabel>
-              <Select
-                size="sm"
-                value={assetType}
-                title={t`Asset Type`}
-                aria-label={t`Asset Type`}
-                onChange={(e) =>
-                  setAssetType(e.target.value as VaultAssetType)
-                }
-              >
-                <option value="rxd">{t`RXD`}</option>
-                <option value="nft">{t`NFT`}</option>
-                <option value="ft">{t`FT`}</option>
-              </Select>
-            </FormControl>
-
-            <FormControl>
-              <FormLabel>{t`Lock Mode`}</FormLabel>
-              <Select
-                size="sm"
-                value={mode}
-                title={t`Lock Mode`}
-                aria-label={t`Lock Mode`}
-                onChange={(e) => setMode(e.target.value as VaultMode)}
-              >
-                <option value="block">{t`Block Height`}</option>
-                <option value="time">{t`Unix Timestamp`}</option>
-              </Select>
-            </FormControl>
-          </SimpleGrid>
-
-          {assetType !== "rxd" && (
-            <FormControl>
-              <FormLabel>
-                {assetType === "nft" ? t`NFT Token` : t`FT Token`}
-              </FormLabel>
-              {!refManual ? (
-                <>
-                  <Select
-                    size="sm"
-                    value={ref}
-                    title={assetType === "nft" ? t`NFT Token` : t`FT Token`}
-                    aria-label={assetType === "nft" ? t`NFT Token` : t`FT Token`}
-                    onChange={(e) => setRef(e.target.value)}
-                    placeholder={t`Select a token from your wallet…`}
-                    fontFamily="mono"
-                  >
-                    {(ownedTokens || []).map((g: SmartToken) => (
-                      <option key={g.ref} value={reverseRef(g.ref)}>
-                        {g.name || g.ticker || g.ref.slice(0, 16) + "…"}
-                        {assetType === "nft" ? " [NFT]" : ""}
-                      </option>
-                    ))}
-                  </Select>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    mt={1}
-                    onClick={() => setRefManual(true)}
-                  >
-                    {t`Enter ref manually`}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Input
-                    value={ref}
-                    onChange={(e) => setRef(e.target.value)}
-                    placeholder={t`72 character LE hex`}
-                    fontFamily="mono"
-                    size="sm"
-                  />
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    mt={1}
-                    onClick={() => setRefManual(false)}
-                  >
-                    {t`Pick from wallet`}
-                  </Button>
-                </>
-              )}
-            </FormControl>
-          )}
-
-          <FormControl display="flex" alignItems="center" gap={2}>
-            <Switch
-              isChecked={vesting}
-              onChange={(e) => setVesting(e.target.checked)}
-            />
-            <FormLabel mb={0}>{t`Vesting Schedule`}</FormLabel>
-          </FormControl>
-
-          {!vesting ? (
-            /* ───── Simple vault locktime + amount ───── */
-            <VStack gap={4} align="stretch">
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl isInvalid={locktimeInvalid}>
-                  <FormLabel>
-                    {mode === "block" ? t`Lock Until Block` : t`Lock Until (Unix)`}
-                  </FormLabel>
-                  <Input
-                    size="sm"
-                    value={locktime}
-                    onChange={(e) => handleLocktimeChange(e.target.value)}
-                    placeholder={
-                      mode === "block"
-                        ? (currentHeight ? `e.g. ${currentHeight + 8640}` : `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`)
-                        : "Unix timestamp"
-                    }
-                    type="number"
-                  />
-                  <FormHelperText fontSize="xs" color={locktimeInvalid ? "red.300" : "whiteAlpha.500"}>
-                    {locktimeHint}
-                  </FormHelperText>
-                </FormControl>
-                <FormControl>
-                  <FormLabel>
-                    {assetType === "ft"
-                      ? t`Amount (token units)`
-                      : assetType === "nft"
-                      ? t`Amount (RXD dust)`
-                      : t`Amount (RXD)`}
-                  </FormLabel>
-                  <Input
-                    size="sm"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder={assetType === "ft" ? "0" : "0.00"}
-                  />
-                </FormControl>
-              </SimpleGrid>
-
-              {/* Date picker for timestamp mode */}
-              {mode === "time" && (
-                <FormControl>
-                  <FormLabel>{t`Pick a Date`}</FormLabel>
-                  <Input
-                    type="datetime-local"
-                    size="sm"
-                    value={datePickerValue}
-                    onChange={(e) => handleDatePickerChange(e.target.value)}
-                  />
-                </FormControl>
-              )}
-            </VStack>
-          ) : (
-            /* ───── Vesting tranches ───── */
-            <VStack gap={3} align="stretch">
-              {/* Mode toggle + total amount (percentage mode) */}
-              <HStack justify="space-between" align="center">
-                <Heading size="xs">
-                  {t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})
-                </Heading>
-                <HStack gap={1}>
-                  <Button
-                    size="xs"
-                    variant={vestingInputMode === "manual" ? "solid" : "ghost"}
-                    onClick={() => setVestingInputMode("manual")}
-                  >
-                    {t`Manual`}
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant={vestingInputMode === "percentage" ? "solid" : "ghost"}
-                    onClick={() => setVestingInputMode("percentage")}
-                  >
-                    {t`Percentage`}
-                  </Button>
-                </HStack>
+              <FormLabel>{t`Recipient Address`}</FormLabel>
+              <HStack>
+                <Input
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
+                  placeholder={t`Radiant address`}
+                  fontFamily="mono"
+                  size="sm"
+                />
+                <Button size="sm" onClick={fillSelf} variant="solid">
+                  {t`Self`}
+                </Button>
               </HStack>
+            </FormControl>
 
-              {/* Preset templates */}
-              <Box
-                p={3}
-                borderWidth="1px"
-                borderColor="whiteAlpha.200"
-                borderRadius="md"
-              >
-                <Text fontSize="xs" fontWeight="bold" mb={2}>{t`Preset Templates`}</Text>
-                <SimpleGrid columns={2} gap={2}>
-                  {PRESETS.map((p) => (
-                    <Button
-                      key={p.id}
-                      size="xs"
-                      variant={selectedPreset === p.id ? "solid" : "outline"}
-                      onClick={() => applyPreset(p.id)}
-                      whiteSpace="normal"
-                      textAlign="left"
-                      h="auto"
-                      py={2}
+            <SimpleGrid columns={2} gap={4}>
+              <FormControl>
+                <FormLabel>{t`Asset Type`}</FormLabel>
+                <Select
+                  size="sm"
+                  value={assetType}
+                  title={t`Asset Type`}
+                  aria-label={t`Asset Type`}
+                  onChange={(e) =>
+                    setAssetType(e.target.value as VaultAssetType)
+                  }
+                >
+                  <option value="rxd">{t`RXD`}</option>
+                  <option value="nft">{t`NFT`}</option>
+                  <option value="ft">{t`FT`}</option>
+                </Select>
+              </FormControl>
+
+              <FormControl>
+                <FormLabel>{t`Lock Mode`}</FormLabel>
+                <Select
+                  size="sm"
+                  value={mode}
+                  title={t`Lock Mode`}
+                  aria-label={t`Lock Mode`}
+                  onChange={(e) => setMode(e.target.value as VaultMode)}
+                >
+                  <option value="block">{t`Block Height`}</option>
+                  <option value="time">{t`Unix Timestamp`}</option>
+                </Select>
+              </FormControl>
+            </SimpleGrid>
+
+            {assetType !== "rxd" && (
+              <FormControl>
+                <FormLabel>
+                  {assetType === "nft" ? t`NFT Token` : t`FT Token`}
+                </FormLabel>
+                {!refManual ? (
+                  <>
+                    <Select
+                      size="sm"
+                      value={ref}
+                      title={assetType === "nft" ? t`NFT Token` : t`FT Token`}
+                      aria-label={
+                        assetType === "nft" ? t`NFT Token` : t`FT Token`
+                      }
+                      onChange={(e) => setRef(e.target.value)}
+                      placeholder={t`Select a token from your wallet…`}
+                      fontFamily="mono"
                     >
-                      <VStack align="start" gap={0}>
-                        <Text fontSize="xs" fontWeight="bold">{p.label}</Text>
-                        <Text fontSize="2xs" opacity={0.7}>{p.description}</Text>
-                      </VStack>
-                    </Button>
-                  ))}
-                </SimpleGrid>
-              </Box>
-
-              {vestingInputMode === "percentage" && (
-                <FormControl>
-                  <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
-                  <Input
-                    size="sm"
-                    value={totalVestingAmount}
-                    onChange={(e) => setTotalVestingAmount(e.target.value)}
-                    placeholder={t`e.g. 10000`}
-                  />
-                </FormControl>
-              )}
-
-              {/* Interval auto-fill */}
-              <Box
-                p={3}
-                borderWidth="1px"
-                borderColor="whiteAlpha.200"
-                borderRadius="md"
-              >
-                <HStack mb={2}>
-                  <Icon as={TbWand} />
-                  <Text fontSize="xs" fontWeight="bold">{t`Auto-fill Schedule`}</Text>
-                </HStack>
-                <SimpleGrid columns={2} gap={2}>
-                  {mode === "block" ? (
-                    <Input
+                      {(ownedTokens || []).map((g: SmartToken) => (
+                        <option key={g.ref} value={reverseRef(g.ref)}>
+                          {g.name || g.ticker || g.ref.slice(0, 16) + "…"}
+                          {assetType === "nft" ? " [NFT]" : ""}
+                        </option>
+                      ))}
+                    </Select>
+                    <Button
                       size="xs"
-                      value={intervalStart}
-                      onChange={(e) => setIntervalStart(e.target.value)}
-                      placeholder={t`Start block` + (currentHeight ? ` (${t`now`}: ${currentHeight})` : "")}
+                      variant="ghost"
+                      mt={1}
+                      onClick={() => setRefManual(true)}
+                    >
+                      {t`Enter ref manually`}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      value={ref}
+                      onChange={(e) => setRef(e.target.value)}
+                      placeholder={t`72 character LE hex`}
+                      fontFamily="mono"
+                      size="sm"
                     />
-                  ) : (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      mt={1}
+                      onClick={() => setRefManual(false)}
+                    >
+                      {t`Pick from wallet`}
+                    </Button>
+                  </>
+                )}
+              </FormControl>
+            )}
+
+            <FormControl display="flex" alignItems="center" gap={2}>
+              <Switch
+                isChecked={vesting}
+                onChange={(e) => setVesting(e.target.checked)}
+              />
+              <FormLabel mb={0}>{t`Vesting Schedule`}</FormLabel>
+            </FormControl>
+
+            {!vesting ? (
+              /* ───── Simple vault locktime + amount ───── */
+              <VStack gap={4} align="stretch">
+                <SimpleGrid columns={2} gap={4}>
+                  <FormControl isInvalid={locktimeInvalid}>
+                    <FormLabel>
+                      {mode === "block"
+                        ? t`Lock Until Block`
+                        : t`Lock Until (Unix)`}
+                    </FormLabel>
+                    <Input
+                      size="sm"
+                      value={locktime}
+                      onChange={(e) => handleLocktimeChange(e.target.value)}
+                      placeholder={
+                        mode === "block"
+                          ? currentHeight
+                            ? `e.g. ${currentHeight + 8640}`
+                            : `Max ${VAULT_MAX_LOCKTIME_BLOCKS}`
+                          : "Unix timestamp"
+                      }
+                      type="number"
+                    />
+                    <FormHelperText
+                      fontSize="xs"
+                      color={locktimeInvalid ? "red.300" : "whiteAlpha.500"}
+                    >
+                      {locktimeHint}
+                    </FormHelperText>
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>
+                      {assetType === "ft"
+                        ? t`Amount (token units)`
+                        : assetType === "nft"
+                        ? t`Amount (RXD dust)`
+                        : t`Amount (RXD)`}
+                    </FormLabel>
+                    <Input
+                      size="sm"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      placeholder={assetType === "ft" ? "0" : "0.00"}
+                    />
+                  </FormControl>
+                </SimpleGrid>
+
+                {/* Date picker for timestamp mode */}
+                {mode === "time" && (
+                  <FormControl>
+                    <FormLabel>{t`Pick a Date`}</FormLabel>
                     <Input
                       type="datetime-local"
+                      size="sm"
+                      value={datePickerValue}
+                      onChange={(e) => handleDatePickerChange(e.target.value)}
+                    />
+                  </FormControl>
+                )}
+              </VStack>
+            ) : (
+              /* ───── Vesting tranches ───── */
+              <VStack gap={3} align="stretch">
+                {/* Mode toggle + total amount (percentage mode) */}
+                <HStack justify="space-between" align="center">
+                  <Heading size="xs">
+                    {t`Tranches`} ({tranches.length}/{VAULT_MAX_TRANCHES})
+                  </Heading>
+                  <HStack gap={1}>
+                    <Button
                       size="xs"
-                      value={intervalStartDate}
-                      onChange={(e) => setIntervalStartDate(e.target.value)}
-                    />
-                  )}
-                  <Input
-                    size="xs"
-                    value={intervalStep}
-                    onChange={(e) => setIntervalStep(e.target.value)}
-                    placeholder={
-                      mode === "block" ? t`Interval (blocks)` : t`Interval (seconds)`
-                    }
-                  />
-                </SimpleGrid>
-                {mode === "block" && intervalStep && (
-                  <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {t`Interval`}: {blocksToDuration(parseInt(intervalStep, 10) || 0)}
-                  </Text>
-                )}
-                {mode === "time" && intervalStep && (
-                  <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
-                    {t`Interval`}: {secsToDuration(parseInt(intervalStep, 10) || 0)}
-                  </Text>
-                )}
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  leftIcon={<TbWand />}
-                  onClick={generateIntervalTranches}
-                  mt={2}
-                >
-                  {t`Generate`}
-                </Button>
-              </Box>
-
-              <Divider borderColor="whiteAlpha.200" />
-
-              {/* Tranche rows */}
-              {tranches.map((tr, i) => {
-                const lt = parseInt(tr.locktime, 10);
-                const locktimeEmpty = !tr.locktime;
-                const locktimePast = mode === "block"
-                  ? (currentHeight > 0 && !!lt && lt <= currentHeight)
-                  : (!!lt && lt <= currentTimestamp);
-                const locktimeInvalidRow = locktimeEmpty || locktimePast;
-                return (
-                <HStack key={i} gap={2}>
-                  <Input
-                    flex={1}
-                    size="sm"
-                    value={tr.locktime}
-                    onChange={(e) =>
-                      updateTranche(i, "locktime", e.target.value)
-                    }
-                    placeholder={
-                      mode === "block" ? t`Block #${i + 1}` : t`Timestamp #${i + 1}`
-                    }
-                    isInvalid={locktimeInvalidRow}
-                    borderColor={locktimeInvalidRow ? "red.400" : undefined}
-                  />
-                  {vestingInputMode === "manual" ? (
-                    <Input
-                      flex={1}
-                      size="sm"
-                      value={tr.value}
-                      onChange={(e) =>
-                        updateTranche(i, "value", e.target.value)
+                      variant={
+                        vestingInputMode === "manual" ? "solid" : "ghost"
                       }
-                      placeholder={t`Amount (RXD)`}
-                    />
-                  ) : (
-                    <Input
-                      flex={1}
-                      size="sm"
-                      value={tr.pct}
-                      onChange={(e) =>
-                        updateTranche(i, "pct", e.target.value)
+                      onClick={() => setVestingInputMode("manual")}
+                    >
+                      {t`Manual`}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant={
+                        vestingInputMode === "percentage" ? "solid" : "ghost"
                       }
-                      placeholder={`% ${t`of total`}`}
-                    />
-                  )}
-                  {vestingInputMode === "percentage" && (
-                    <Text fontSize="xs" color="whiteAlpha.500" minW="60px" textAlign="right">
-                      {resolvedTranches[i]
-                        ? (resolvedTranches[i].value / 1e8).toFixed(2)
-                        : "0.00"}{" "}
-                      {t`RXD`}
-                    </Text>
-                  )}
-                  <IconButton
-                    aria-label={t`Remove`}
-                    icon={<TbTrash />}
-                    size="sm"
-                    variant="ghost"
-                    isDisabled={tranches.length <= 1}
-                    onClick={() => removeTranche(i)}
-                  />
-                </HStack>
-                );
-              })}
-
-              {/* Add tranche button */}
-              {tranches.length < VAULT_MAX_TRANCHES && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  leftIcon={<TbPlus />}
-                  onClick={addTranche}
-                  alignSelf="flex-start"
-                >
-                  {t`Add Tranche`}
-                </Button>
-              )}
-
-              {/* Percentage allocation bar */}
-              {vestingInputMode === "percentage" && (
-                <Box>
-                  <HStack justify="space-between" mb={1}>
-                    <Text fontSize="xs" color="whiteAlpha.600">
-                      {t`Allocated`}: {pctAllocated.toFixed(1)}%
-                    </Text>
-                    <HStack gap={2}>
-                      <Text fontSize="xs" color="whiteAlpha.600">
-                        {t`Remaining`}: {pctRemaining.toFixed(1)}%
-                      </Text>
-                      {pctRemaining > 0 && (
-                        <Button size="xs" variant="ghost" onClick={autoFillLastPct}>
-                          {t`Auto-fill`}
-                        </Button>
-                      )}
-                    </HStack>
+                      onClick={() => setVestingInputMode("percentage")}
+                    >
+                      {t`Percentage`}
+                    </Button>
                   </HStack>
-                  <Progress
-                    value={pctAllocated}
-                    size="xs"
-                    colorScheme={
-                      Math.abs(pctAllocated - 100) < 0.01
-                        ? "green"
-                        : pctAllocated > 100
-                        ? "red"
-                        : "blue"
-                    }
-                    borderRadius="full"
-                  />
+                </HStack>
+
+                {/* Preset templates */}
+                <Box
+                  p={3}
+                  borderWidth="1px"
+                  borderColor="whiteAlpha.200"
+                  borderRadius="md"
+                >
+                  <Text
+                    fontSize="xs"
+                    fontWeight="bold"
+                    mb={2}
+                  >{t`Preset Templates`}</Text>
+                  <SimpleGrid columns={2} gap={2}>
+                    {PRESETS.map((p) => (
+                      <Button
+                        key={p.id}
+                        size="xs"
+                        variant={selectedPreset === p.id ? "solid" : "outline"}
+                        onClick={() => applyPreset(p.id)}
+                        whiteSpace="normal"
+                        textAlign="left"
+                        h="auto"
+                        py={2}
+                      >
+                        <VStack align="start" gap={0}>
+                          <Text fontSize="xs" fontWeight="bold">
+                            {p.label}
+                          </Text>
+                          <Text fontSize="2xs" opacity={0.7}>
+                            {p.description}
+                          </Text>
+                        </VStack>
+                      </Button>
+                    ))}
+                  </SimpleGrid>
                 </Box>
-              )}
-            </VStack>
-          )}
 
-          <FormControl>
-            <FormLabel>{t`Label (optional)`}</FormLabel>
-            <Input
-              size="sm"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder={t`e.g. Savings, Vesting Q1`}
-            />
-          </FormControl>
+                {vestingInputMode === "percentage" && (
+                  <FormControl>
+                    <FormLabel>{t`Total Vesting Amount (RXD)`}</FormLabel>
+                    <Input
+                      size="sm"
+                      value={totalVestingAmount}
+                      onChange={(e) => setTotalVestingAmount(e.target.value)}
+                      placeholder={t`e.g. 10000`}
+                    />
+                  </FormControl>
+                )}
 
-          <Button
-            variant="primary"
-            isLoading={loading}
-            onClick={handleCreate}
-            mt={2}
-          >
-            {vesting ? t`Create Vesting Schedule` : t`Lock in Vault`}
-          </Button>
-        </VStack>
-      )}
+                {/* Interval auto-fill */}
+                <Box
+                  p={3}
+                  borderWidth="1px"
+                  borderColor="whiteAlpha.200"
+                  borderRadius="md"
+                >
+                  <HStack mb={2}>
+                    <Icon as={TbWand} />
+                    <Text
+                      fontSize="xs"
+                      fontWeight="bold"
+                    >{t`Auto-fill Schedule`}</Text>
+                  </HStack>
+                  <SimpleGrid columns={2} gap={2}>
+                    {mode === "block" ? (
+                      <Input
+                        size="xs"
+                        value={intervalStart}
+                        onChange={(e) => setIntervalStart(e.target.value)}
+                        placeholder={
+                          t`Start block` +
+                          (currentHeight
+                            ? ` (${t`now`}: ${currentHeight})`
+                            : "")
+                        }
+                      />
+                    ) : (
+                      <Input
+                        type="datetime-local"
+                        size="xs"
+                        value={intervalStartDate}
+                        onChange={(e) => setIntervalStartDate(e.target.value)}
+                      />
+                    )}
+                    <Input
+                      size="xs"
+                      value={intervalStep}
+                      onChange={(e) => setIntervalStep(e.target.value)}
+                      placeholder={
+                        mode === "block"
+                          ? t`Interval (blocks)`
+                          : t`Interval (seconds)`
+                      }
+                    />
+                  </SimpleGrid>
+                  {mode === "block" && intervalStep && (
+                    <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
+                      {t`Interval`}:{" "}
+                      {blocksToDuration(parseInt(intervalStep, 10) || 0)}
+                    </Text>
+                  )}
+                  {mode === "time" && intervalStep && (
+                    <Text fontSize="xs" color="whiteAlpha.500" mt={1}>
+                      {t`Interval`}:{" "}
+                      {secsToDuration(parseInt(intervalStep, 10) || 0)}
+                    </Text>
+                  )}
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    leftIcon={<TbWand />}
+                    onClick={generateIntervalTranches}
+                    mt={2}
+                  >
+                    {t`Generate`}
+                  </Button>
+                </Box>
 
-      {/* ───────── LIST TAB ───────── */}
-      {tab === "list" && (
-        <Box overflowX="auto">
-          {/* Filter controls */}
-          {vaults && vaults.length > 0 && (
-            <HStack mb={3} gap={3} justify="space-between">
-              <HStack gap={3}>
-                <FormControl display="flex" alignItems="center" gap={2} w="auto">
-                  <Switch
-                    size="sm"
-                    isChecked={showClaimed}
-                    onChange={(e) => setShowClaimed(e.target.checked)}
-                  />
-                  <FormLabel mb={0} fontSize="xs">{t`Show Claimed`}</FormLabel>
-                </FormControl>
-                <Text fontSize="xs" color="whiteAlpha.500">
-                  {vaults.filter((v) => !v.claimed).length} {t`active`}
-                  {showClaimed && ` / ${vaults.filter((v) => v.claimed).length} ${t`claimed`}`}
-                </Text>
+                <Divider borderColor="whiteAlpha.200" />
+
+                {/* Tranche rows */}
+                {tranches.map((tr, i) => {
+                  const lt = parseInt(tr.locktime, 10);
+                  const locktimeEmpty = !tr.locktime;
+                  const locktimePast =
+                    mode === "block"
+                      ? currentHeight > 0 && !!lt && lt <= currentHeight
+                      : !!lt && lt <= currentTimestamp;
+                  const locktimeInvalidRow = locktimeEmpty || locktimePast;
+                  return (
+                    <HStack key={i} gap={2}>
+                      <Input
+                        flex={1}
+                        size="sm"
+                        value={tr.locktime}
+                        onChange={(e) =>
+                          updateTranche(i, "locktime", e.target.value)
+                        }
+                        placeholder={
+                          mode === "block"
+                            ? t`Block #${i + 1}`
+                            : t`Timestamp #${i + 1}`
+                        }
+                        isInvalid={locktimeInvalidRow}
+                        borderColor={locktimeInvalidRow ? "red.400" : undefined}
+                      />
+                      {vestingInputMode === "manual" ? (
+                        <Input
+                          flex={1}
+                          size="sm"
+                          value={tr.value}
+                          onChange={(e) =>
+                            updateTranche(i, "value", e.target.value)
+                          }
+                          placeholder={t`Amount (RXD)`}
+                        />
+                      ) : (
+                        <Input
+                          flex={1}
+                          size="sm"
+                          value={tr.pct}
+                          onChange={(e) =>
+                            updateTranche(i, "pct", e.target.value)
+                          }
+                          placeholder={`% ${t`of total`}`}
+                        />
+                      )}
+                      {vestingInputMode === "percentage" && (
+                        <Text
+                          fontSize="xs"
+                          color="whiteAlpha.500"
+                          minW="60px"
+                          textAlign="right"
+                        >
+                          {resolvedTranches[i]
+                            ? (resolvedTranches[i].value / 1e8).toFixed(2)
+                            : "0.00"}{" "}
+                          {t`RXD`}
+                        </Text>
+                      )}
+                      <IconButton
+                        aria-label={t`Remove`}
+                        icon={<TbTrash />}
+                        size="sm"
+                        variant="ghost"
+                        isDisabled={tranches.length <= 1}
+                        onClick={() => removeTranche(i)}
+                      />
+                    </HStack>
+                  );
+                })}
+
+                {/* Add tranche button */}
+                {tranches.length < VAULT_MAX_TRANCHES && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    leftIcon={<TbPlus />}
+                    onClick={addTranche}
+                    alignSelf="flex-start"
+                  >
+                    {t`Add Tranche`}
+                  </Button>
+                )}
+
+                {/* Percentage allocation bar */}
+                {vestingInputMode === "percentage" && (
+                  <Box>
+                    <HStack justify="space-between" mb={1}>
+                      <Text fontSize="xs" color="whiteAlpha.600">
+                        {t`Allocated`}: {pctAllocated.toFixed(1)}%
+                      </Text>
+                      <HStack gap={2}>
+                        <Text fontSize="xs" color="whiteAlpha.600">
+                          {t`Remaining`}: {pctRemaining.toFixed(1)}%
+                        </Text>
+                        {pctRemaining > 0 && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={autoFillLastPct}
+                          >
+                            {t`Auto-fill`}
+                          </Button>
+                        )}
+                      </HStack>
+                    </HStack>
+                    <Progress
+                      value={pctAllocated}
+                      size="xs"
+                      colorScheme={
+                        Math.abs(pctAllocated - 100) < 0.01
+                          ? "green"
+                          : pctAllocated > 100
+                          ? "red"
+                          : "blue"
+                      }
+                      borderRadius="full"
+                    />
+                  </Box>
+                )}
+              </VStack>
+            )}
+
+            <FormControl>
+              <FormLabel>{t`Label (optional)`}</FormLabel>
+              <Input
+                size="sm"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder={t`e.g. Savings, Vesting Q1`}
+              />
+            </FormControl>
+
+            <Button
+              variant="primary"
+              isLoading={loading}
+              onClick={handleCreate}
+              mt={2}
+            >
+              {vesting ? t`Create Vesting Schedule` : t`Lock in Vault`}
+            </Button>
+          </VStack>
+        )}
+
+        {/* ───────── LIST TAB ───────── */}
+        {tab === "list" && (
+          <Box overflowX="auto">
+            {/* Filter controls */}
+            {vaults && vaults.length > 0 && (
+              <HStack mb={3} gap={3} justify="space-between">
+                <HStack gap={3}>
+                  <FormControl
+                    display="flex"
+                    alignItems="center"
+                    gap={2}
+                    w="auto"
+                  >
+                    <Switch
+                      size="sm"
+                      isChecked={showClaimed}
+                      onChange={(e) => setShowClaimed(e.target.checked)}
+                    />
+                    <FormLabel
+                      mb={0}
+                      fontSize="xs"
+                    >{t`Show Claimed`}</FormLabel>
+                  </FormControl>
+                  <Text fontSize="xs" color="whiteAlpha.500">
+                    {vaults.filter((v) => !v.claimed).length} {t`active`}
+                    {showClaimed &&
+                      ` / ${
+                        vaults.filter((v) => v.claimed).length
+                      } ${t`claimed`}`}
+                  </Text>
+                </HStack>
+                <VStack align="end" spacing={0}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    leftIcon={<Icon as={TbWand} />}
+                    onClick={handleScan}
+                    isLoading={scanning}
+                    loadingText={t`Scanning...`}
+                  >
+                    {t`Scan for Vaults`}
+                  </Button>
+                  {lastScan && (
+                    <Text fontSize="xs" color="whiteAlpha.500">
+                      {t`Last scan`}: {formatScanTime(lastScan.timestamp)}
+                      {lastScan.discovered > 0 && (
+                        <Text as="span" color="green.400" ml={1}>
+                          ({lastScan.discovered} {t`found`})
+                        </Text>
+                      )}
+                    </Text>
+                  )}
+                </VStack>
               </HStack>
-              <VStack align="end" spacing={0}>
+            )}
+
+            {!vaults || vaults.length === 0 ? (
+              <VStack gap={4} py={8} align="center">
+                <Text color="whiteAlpha.500" textAlign="center">
+                  {t`No vaults yet. Create one to get started.`}
+                </Text>
+                <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
+                  {t`Or scan your transaction history for existing timelocked coins.`}
+                </Text>
                 <Button
-                  size="xs"
-                  variant="ghost"
+                  size="sm"
+                  variant="outline"
                   leftIcon={<Icon as={TbWand} />}
                   onClick={handleScan}
                   isLoading={scanning}
@@ -1614,247 +1864,246 @@ export default function VaultPage() {
                 >
                   {t`Scan for Vaults`}
                 </Button>
-                {lastScan && (
-                  <Text fontSize="xs" color="whiteAlpha.500">
-                    {t`Last scan`}: {formatScanTime(lastScan.timestamp)}
-                    {lastScan.discovered > 0 && (
-                      <Text as="span" color="green.400" ml={1}>
-                        ({lastScan.discovered} {t`found`})
-                      </Text>
-                    )}
-                  </Text>
-                )}
+
+                <Divider my={4} />
+
+                <Text color="whiteAlpha.400" fontSize="xs" textAlign="center">
+                  {t`Know a specific vault transaction? Paste the TXID below:`}
+                </Text>
+                <HStack w="100%" maxW="md">
+                  <Input
+                    size="sm"
+                    placeholder={t`Paste transaction ID (txid)`}
+                    value={checkTxId}
+                    onChange={(e) => setCheckTxId(e.target.value)}
+                    fontFamily="mono"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleCheckTx}
+                    isLoading={checkingTx}
+                    loadingText={t`Checking...`}
+                  >
+                    {t`Check`}
+                  </Button>
+                </HStack>
               </VStack>
-            </HStack>
-          )}
-
-          {!vaults || vaults.length === 0 ? (
-            <VStack gap={4} py={8} align="center">
-              <Text color="whiteAlpha.500" textAlign="center">
-                {t`No vaults yet. Create one to get started.`}
+            ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
+              <Text color="whiteAlpha.500" py={8} textAlign="center">
+                {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
               </Text>
-              <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
-                {t`Or scan your transaction history for existing timelocked coins.`}
-              </Text>
-              <Button
-                size="sm"
-                variant="outline"
-                leftIcon={<Icon as={TbWand} />}
-                onClick={handleScan}
-                isLoading={scanning}
-                loadingText={t`Scanning...`}
-              >
-                {t`Scan for Vaults`}
-              </Button>
+            ) : (
+              <Table size="sm" variant="simple">
+                <Thead>
+                  <Tr>
+                    {(
+                      [
+                        ["status", t`Status`],
+                        ["type", t`Type`],
+                        ["value", t`Value`],
+                        ["locktime", t`Unlock At`],
+                        ["remaining", t`Remaining`],
+                        ["label", t`Label`],
+                      ] as [SortCol, string][]
+                    ).map(([col, label]) => (
+                      <Th
+                        key={col}
+                        cursor="pointer"
+                        userSelect="none"
+                        onClick={() => handleSort(col)}
+                        _hover={{ color: "whiteAlpha.800" }}
+                        whiteSpace="nowrap"
+                      >
+                        {label}
+                        {sortCol === col ? (sortAsc ? " ↑" : " ↓") : ""}
+                      </Th>
+                    ))}
+                    <Th />
+                  </Tr>
+                </Thead>
+                <Tbody fontFamily="mono">
+                  {vaults
+                    .filter((v) => showClaimed || !v.claimed)
+                    .map((v) => {
+                      // `claimable` reflects relay-readiness (includes MTP buffer for
+                      // time-mode), so the Claim button only enables when broadcast
+                      // is actually likely to succeed.
+                      const claimable = isVaultClaimable(
+                        v.locktime,
+                        v.mode,
+                        currentHeight,
+                        currentTimestamp
+                      );
+                      const remaining = vaultClaimableIn(
+                        v.locktime,
+                        v.mode,
+                        currentHeight,
+                        currentTimestamp
+                      );
+                      const isRecipient =
+                        v.recipientAddress === wallet.value.address;
 
-              <Divider my={4} />
-
-              <Text color="whiteAlpha.400" fontSize="xs" textAlign="center">
-                {t`Know a specific vault transaction? Paste the TXID below:`}
-              </Text>
-              <HStack w="100%" maxW="md">
-                <Input
-                  size="sm"
-                  placeholder={t`Paste transaction ID (txid)`}
-                  value={checkTxId}
-                  onChange={(e) => setCheckTxId(e.target.value)}
-                  fontFamily="mono"
-                />
-                <Button
-                  size="sm"
-                  onClick={handleCheckTx}
-                  isLoading={checkingTx}
-                  loadingText={t`Checking...`}
-                >
-                  {t`Check`}
-                </Button>
-              </HStack>
-            </VStack>
-          ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
-            <Text color="whiteAlpha.500" py={8} textAlign="center">
-              {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
-            </Text>
-          ) : (
-            <Table size="sm" variant="simple">
-              <Thead>
-                <Tr>
-                  {([
-                    ["status",    t`Status`],
-                    ["type",      t`Type`],
-                    ["value",     t`Value`],
-                    ["locktime",  t`Unlock At`],
-                    ["remaining", t`Remaining`],
-                    ["label",     t`Label`],
-                  ] as [SortCol, string][]).map(([col, label]) => (
-                    <Th
-                      key={col}
-                      cursor="pointer"
-                      userSelect="none"
-                      onClick={() => handleSort(col)}
-                      _hover={{ color: "whiteAlpha.800" }}
-                      whiteSpace="nowrap"
-                    >
-                      {label}
-                      {sortCol === col ? (sortAsc ? " ↑" : " ↓") : ""}
-                    </Th>
-                  ))}
-                  <Th />
-                </Tr>
-              </Thead>
-              <Tbody fontFamily="mono">
-                {vaults.filter((v) => showClaimed || !v.claimed).map((v) => {
-                  // `claimable` reflects relay-readiness (includes MTP buffer for
-                  // time-mode), so the Claim button only enables when broadcast
-                  // is actually likely to succeed.
-                  const claimable = isVaultClaimable(
-                    v.locktime,
-                    v.mode,
-                    currentHeight,
-                    currentTimestamp
-                  );
-                  const remaining = vaultClaimableIn(
-                    v.locktime,
-                    v.mode,
-                    currentHeight,
-                    currentTimestamp
-                  );
-                  const isRecipient =
-                    v.recipientAddress === wallet.value.address;
-
-                  return (
-                    <Tr
-                      key={`${v.txid}-${v.vout}`}
-                      opacity={v.claimed ? 0.4 : 1}
-                      onClick={() => handleVaultClick(v)}
-                      cursor="pointer"
-                      _hover={{ bg: "whiteAlpha.100" }}
-                    >
-                      <Td>
-                        {v.claimed ? (
-                          <Tag size="sm" colorScheme="gray">
-                            {t`Claimed`}
-                          </Tag>
-                        ) : claimable ? (
-                          <Tag size="sm" colorScheme="green">
-                            <Icon as={TbLockOpen} mr={1} />
-                            {t`Unlockable`}
-                          </Tag>
-                        ) : (
-                          <Tag size="sm" colorScheme="orange">
-                            <Icon as={TbLock} mr={1} />
-                            {t`Locked`}
-                          </Tag>
-                        )}
-                      </Td>
-                      <Td textTransform="uppercase">{v.assetType}</Td>
-                      <Td>
-                        <Photons value={v.value} />
-                      </Td>
-                      <Td>{formatLocktime(v.locktime, v.mode)}</Td>
-                      <Td>
-                        {v.claimed ? (
-                          "—"
-                        ) : remaining.value === 0 ? (
-                          t`Now`
-                        ) : remaining.unit === "blocks" ? (
-                          <Tooltip
-                            label={t`${remaining.value.toLocaleString()} blocks`}
-                            placement="top"
-                          >
-                            <Text as="span" cursor="default">
-                              {blocksToDuration(remaining.value)}
-                            </Text>
-                          </Tooltip>
-                        ) : (
-                          secsToDuration(remaining.value)
-                        )}
-                      </Td>
-                      <Td>
-                        <VStack align="start" spacing={0}>
-                          <Link
-                            href={createExplorerUrl(v.txid)}
-                            isExternal
-                            fontSize="xs"
-                            fontFamily="mono"
-                            color="whiteAlpha.400"
-                            _hover={{ color: "whiteAlpha.700" }}
-                            title={v.txid}
-                          >
-                            {v.txid.slice(0, 8)}...{v.txid.slice(-8)}
-                          </Link>
-                          {v.label && (
-                            <Text fontSize="xs" noOfLines={1} maxW="120px" color="whiteAlpha.500">
-                              {v.label}
-                            </Text>
-                          )}
-                          {v.claimed && v.claimTxid && (
-                            <Link
-                              href={createExplorerUrl(v.claimTxid)}
-                              isExternal
-                              fontSize="xs"
-                              fontFamily="mono"
-                              color="green.400"
-                              _hover={{ color: "green.300" }}
-                              title={`Claimed: ${v.claimTxid}`}
-                            >
-                              {t`Claimed`}: {v.claimTxid.slice(0, 6)}...{v.claimTxid.slice(-6)}
-                            </Link>
-                          )}
-                        </VStack>
-                      </Td>
-                      <Td>
-                        <HStack gap={2}>
-                          <Tooltip label={t`View on explorer`} placement="top">
-                            <Link
-                              href={createExplorerUrl(v.txid)}
-                              isExternal
-                              fontSize="xs"
-                              color="whiteAlpha.400"
-                              _hover={{ color: "whiteAlpha.700" }}
-                            >
-                              <ExternalLinkIcon />
-                            </Link>
-                          </Tooltip>
-                          {!v.claimed && claimable && (
-                            isRecipient ? (
-                              <Button
-                                size="xs"
-                                variant="primary"
-                                onClick={() => handleClaim(v)}
-                              >
-                                {t`Claim`}
-                              </Button>
+                      return (
+                        <Tr
+                          key={`${v.txid}-${v.vout}`}
+                          opacity={v.claimed ? 0.4 : 1}
+                          onClick={() => handleVaultClick(v)}
+                          cursor="pointer"
+                          _hover={{ bg: "whiteAlpha.100" }}
+                        >
+                          <Td>
+                            {v.claimed ? (
+                              <Tag size="sm" colorScheme="gray">
+                                {t`Claimed`}
+                              </Tag>
+                            ) : claimable ? (
+                              <Tag size="sm" colorScheme="green">
+                                <Icon as={TbLockOpen} mr={1} />
+                                {t`Unlockable`}
+                              </Tag>
                             ) : (
-                              <Tooltip label={t`You are not the recipient`} placement="top">
-                                <Button size="xs" variant="outline" isDisabled>
-                                  {t`Claim`}
-                                </Button>
+                              <Tag size="sm" colorScheme="orange">
+                                <Icon as={TbLock} mr={1} />
+                                {t`Locked`}
+                              </Tag>
+                            )}
+                          </Td>
+                          <Td textTransform="uppercase">{v.assetType}</Td>
+                          <Td>
+                            <Photons value={v.value} />
+                          </Td>
+                          <Td>{formatLocktime(v.locktime, v.mode)}</Td>
+                          <Td>
+                            {v.claimed ? (
+                              "—"
+                            ) : remaining.value === 0 ? (
+                              t`Now`
+                            ) : remaining.unit === "blocks" ? (
+                              <Tooltip
+                                label={t`${remaining.value.toLocaleString()} blocks`}
+                                placement="top"
+                              >
+                                <Text as="span" cursor="default">
+                                  {blocksToDuration(remaining.value)}
+                                </Text>
                               </Tooltip>
-                            )
-                          )}
-                          {!v.claimed && !claimable && currentHeight > 0 && (
-                            <Tooltip
-                              label={v.mode === "block"
-                                ? t`Unlocks at block ${v.locktime.toLocaleString()} — ${blocksToDuration(v.locktime - currentHeight)} remaining`
-                                : t`Unlocks ${new Date(v.locktime * 1000).toLocaleString()} (claimable ~1h later — network propagation)`
-                              }
-                              placement="top"
-                            >
-                              <Box cursor="default">
-                                <Icon as={TbLock} color="whiteAlpha.300" boxSize={3.5} />
-                              </Box>
-                            </Tooltip>
-                          )}
-                        </HStack>
-                      </Td>
-                    </Tr>
-                  );
-                })}
-              </Tbody>
-            </Table>
-          )}
-        </Box>
-      )}
+                            ) : (
+                              secsToDuration(remaining.value)
+                            )}
+                          </Td>
+                          <Td>
+                            <VStack align="start" spacing={0}>
+                              <Link
+                                href={createExplorerUrl(v.txid)}
+                                isExternal
+                                fontSize="xs"
+                                fontFamily="mono"
+                                color="whiteAlpha.400"
+                                _hover={{ color: "whiteAlpha.700" }}
+                                title={v.txid}
+                              >
+                                {v.txid.slice(0, 8)}...{v.txid.slice(-8)}
+                              </Link>
+                              {v.label && (
+                                <Text
+                                  fontSize="xs"
+                                  noOfLines={1}
+                                  maxW="120px"
+                                  color="whiteAlpha.500"
+                                >
+                                  {v.label}
+                                </Text>
+                              )}
+                              {v.claimed && v.claimTxid && (
+                                <Link
+                                  href={createExplorerUrl(v.claimTxid)}
+                                  isExternal
+                                  fontSize="xs"
+                                  fontFamily="mono"
+                                  color="green.400"
+                                  _hover={{ color: "green.300" }}
+                                  title={`Claimed: ${v.claimTxid}`}
+                                >
+                                  {t`Claimed`}: {v.claimTxid.slice(0, 6)}...
+                                  {v.claimTxid.slice(-6)}
+                                </Link>
+                              )}
+                            </VStack>
+                          </Td>
+                          <Td>
+                            <HStack gap={2}>
+                              <Tooltip
+                                label={t`View on explorer`}
+                                placement="top"
+                              >
+                                <Link
+                                  href={createExplorerUrl(v.txid)}
+                                  isExternal
+                                  fontSize="xs"
+                                  color="whiteAlpha.400"
+                                  _hover={{ color: "whiteAlpha.700" }}
+                                >
+                                  <ExternalLinkIcon />
+                                </Link>
+                              </Tooltip>
+                              {!v.claimed &&
+                                claimable &&
+                                (isRecipient ? (
+                                  <Button
+                                    size="xs"
+                                    variant="primary"
+                                    onClick={() => handleClaim(v)}
+                                  >
+                                    {t`Claim`}
+                                  </Button>
+                                ) : (
+                                  <Tooltip
+                                    label={t`You are not the recipient`}
+                                    placement="top"
+                                  >
+                                    <Button
+                                      size="xs"
+                                      variant="outline"
+                                      isDisabled
+                                    >
+                                      {t`Claim`}
+                                    </Button>
+                                  </Tooltip>
+                                ))}
+                              {!v.claimed &&
+                                !claimable &&
+                                currentHeight > 0 && (
+                                  <Tooltip
+                                    label={
+                                      v.mode === "block"
+                                        ? t`Unlocks at block ${v.locktime.toLocaleString()} — ${blocksToDuration(
+                                            v.locktime - currentHeight
+                                          )} remaining`
+                                        : t`Unlocks ${new Date(
+                                            v.locktime * 1000
+                                          ).toLocaleString()} (claimable ~1h later — network propagation)`
+                                    }
+                                    placement="top"
+                                  >
+                                    <Box cursor="default">
+                                      <Icon
+                                        as={TbLock}
+                                        color="whiteAlpha.300"
+                                        boxSize={3.5}
+                                      />
+                                    </Box>
+                                  </Tooltip>
+                                )}
+                            </HStack>
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                </Tbody>
+              </Table>
+            )}
+          </Box>
+        )}
       </Container>
 
       {/* Vault Detail Modal */}

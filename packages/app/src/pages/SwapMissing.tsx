@@ -21,7 +21,6 @@ import { electrumWorker } from "@app/electrum/Electrum";
 import { electrumStatus, openModal, wallet } from "@app/signals";
 import { useEffect, useState } from "react";
 import { ElectrumUtxo } from "@lib/types";
-import { t } from "@lingui/macro";
 import { CheckIcon, ExternalLinkIcon } from "@chakra-ui/icons";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import rxdIcon from "/rxd.png";

@@ -89,7 +89,9 @@ export function createRevealProof(
     throw new Error(`CEK must be 32 bytes, got ${cek.length}`);
   }
   if (!/^[0-9a-fA-F]{64}:[0-9]+$/.test(tokenRef)) {
-    throw new Error(`Invalid token_ref — expected "txid:vout", got "${tokenRef}"`);
+    throw new Error(
+      `Invalid token_ref — expected "txid:vout", got "${tokenRef}"`
+    );
   }
 
   const cekHex = bytesToHex(cek);
@@ -168,9 +170,7 @@ export function buildRevealTx(
 
   const p2pkh = p2pkhScript(address);
   const inputs: UnfinalizedInput[] = [];
-  const outputs: UnfinalizedOutput[] = [
-    { script: revealScript, value: 0 },
-  ];
+  const outputs: UnfinalizedOutput[] = [{ script: revealScript, value: 0 }];
 
   const { funding, change, fee } = fundTx(
     address,
@@ -207,7 +207,9 @@ export function buildRevealTx(
  * Parse a reveal proof from an OP_RETURN script.
  * Returns `undefined` if the script is not a valid Glyph reveal proof.
  */
-export function parseRevealProof(script: string | rjs.Script): RevealProof | undefined {
+export function parseRevealProof(
+  script: string | rjs.Script
+): RevealProof | undefined {
   try {
     const scriptObj = typeof script === "string" ? new Script(script) : script;
     const chunks = scriptObj.chunks;

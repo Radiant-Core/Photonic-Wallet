@@ -2,11 +2,19 @@
  * Activity Notifications - Real-time transaction notifications
  */
 import { useEffect, useState } from "react";
-import { useToast, Box, VStack, HStack, Text, Badge, Link, CloseButton } from "@chakra-ui/react";
+import {
+  useToast,
+  Box,
+  VStack,
+  HStack,
+  Text,
+  Badge,
+  Link,
+  CloseButton,
+} from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
-import { BroadcastResult } from "@app/types";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { ExternalLinkIcon } from "@chakra-ui/icons";
 
@@ -39,7 +47,10 @@ const notificationTitles: Record<string, string> = {
   wave_name_reveal: "Name Revealed",
 };
 
-const notificationTypes: Record<string, "success" | "info" | "warning" | "error"> = {
+const notificationTypes: Record<
+  string,
+  "success" | "info" | "warning" | "error"
+> = {
   vault_create: "success",
   vault_claim: "success",
   vault_vesting: "info",
@@ -107,7 +118,11 @@ export function useActivityNotifications() {
         description: (
           <HStack spacing={2}>
             <Text fontSize="xs">{t`View transaction`}</Text>
-            <Link href={createExplorerUrl(notification.txid)} isExternal color="blue.400">
+            <Link
+              href={createExplorerUrl(notification.txid)}
+              isExternal
+              color="blue.400"
+            >
               <ExternalLinkIcon />
             </Link>
           </HStack>
@@ -172,12 +187,20 @@ export default function ActivityNotifications() {
               <Text fontSize="sm" fontWeight="medium">
                 {notif.title}
               </Text>
-              <Badge size="sm" colorScheme={notificationTypes[notif.type] || "gray"}>
+              <Badge
+                size="sm"
+                colorScheme={notificationTypes[notif.type] || "gray"}
+              >
                 {notif.type.replace(/_/g, " ")}
               </Badge>
             </HStack>
             <HStack mt={1} spacing={2}>
-              <Link href={createExplorerUrl(notif.txid)} isExternal fontSize="xs" color="blue.400">
+              <Link
+                href={createExplorerUrl(notif.txid)}
+                isExternal
+                fontSize="xs"
+                color="blue.400"
+              >
                 {notif.txid.slice(0, 12)}...
               </Link>
               <Text fontSize="xs" color="whiteAlpha.600">

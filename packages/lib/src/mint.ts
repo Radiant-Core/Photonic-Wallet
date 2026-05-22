@@ -85,10 +85,17 @@ export function commitBundle(
             extraRefsRequired.push(p2pkhScriptSize);
           }
           if (deployMethod === "dmint") {
-            // TODO dmint batch minting isn't fully implemented yet. Schema currently doesn't allow dmint.
-            // Refs for:
-            // * dmint contract
-            // * NFT recording dmint contract info
+            // R17 decision (2026-05-21): dmint batch minting is NOT
+            // supported by the CLI. The bundle schema in
+            // `packages/cli/src/schemas.ts` rejects `reveal.method
+            // === "dmint"` so the batch-mint flow never reaches this
+            // branch from the CLI. The two `extraRefsRequired` pushes
+            // below are retained for future re-enablement (refs for
+            // the dmint contract output and the NFT output that
+            // records the dmint contract info). If batch dmint is
+            // ever wired up, the schema needs to grow a corresponding
+            // dmint case and the bundle/prepare pipeline needs to
+            // build the contracts — file as a follow-up at that time.
             extraRefsRequired.push(p2pkhScriptSize, p2pkhScriptSize);
           }
           return [commitScriptSize(token.contract, hasDelegate)].concat(
@@ -107,13 +114,18 @@ export function commitBundle(
   } = fundTx(address, utxos, [], target, p2pkh, defaultFeeRate);
 
   if (!funded) {
-    console.error("[mint] Coin selection failed. UTXOs:", utxos.length, "Target value:", target.reduce((a, t) => a + t.value, 0));
+    console.error(
+      "[mint] Coin selection failed. UTXOs:",
+      utxos.length,
+      "Target value:",
+      target.reduce((a, t) => a + t.value, 0)
+    );
     throw new Error("Couldn't fund transaction");
   }
 
   // TODO should delegate token creation be merged with funding UTXOs?
 
-  onProgress && onProgress("sign");
+  if (onProgress) onProgress("sign");
   const outputs = target.concat(change?.length ? change : []);
   const funding = buildTx(address, wif, inputs, outputs, false);
 
@@ -415,8 +427,8 @@ export function createRevealOutputs(
             dmintParams.maxHeight,
             dmintParams.reward,
             dMintDiffToTarget(dmintParams.difficulty),
-            dmintParams.algorithm || 'sha256d',
-            dmintParams.daaMode || 'fixed',
+            dmintParams.algorithm || "sha256d",
+            dmintParams.daaMode || "fixed",
             dmintParams.daaParams,
             Math.floor(Date.now() / 1000)
           ),
@@ -699,7 +711,7 @@ export function mintToken(
     ? createLinkCommit(0, deploy.params.address, payload) // Link to the first ref
     : undefined;
   // Link NFT is always the last output before any change
-  linkCommit && outputs.push(linkCommit.output);
+  if (linkCommit) outputs.push(linkCommit.output);
 
   const p2pkh = p2pkhScript(deploy.params.address);
   const commitFund = fundTx(

@@ -7,7 +7,6 @@ import {
   Button,
   useClipboard,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import RecoveryPhraseWords from "./RecoveryPhraseWords";
 import ActionIcon from "./ActionIcon";
 
@@ -19,7 +18,9 @@ export default function RecoveryPhrase({ phrase }: { phrase: string }) {
       <Alert status="warning" mb={8}>
         <AlertIcon />
         <AlertDescription>
-          {"Your recovery phrase is the only way to restore your wallet after logging out. Keep it in a safe place and never share it."}
+          {
+            "Your recovery phrase is the only way to restore your wallet after logging out. Keep it in a safe place and never share it."
+          }
         </AlertDescription>
       </Alert>
       <RecoveryPhraseWords words={phrase.split(" ")} />

@@ -1,4 +1,4 @@
-import { bytesToHex } from "@noble/hashes/utils";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 
 export function jsonHex(obj: unknown, byteLimit = 0) {
   const tooLarge = "<data too large>";
@@ -59,16 +59,52 @@ export async function batchRequests<ParamType, ValueType>(
   };
 }
 
-export function shuffle(array: unknown[]) {
-  let currentIndex = array.length;
+/**
+ * Draw a uniform random integer in [0, max) using a CSPRNG with rejection
+ * sampling to avoid modulo bias.
+ *
+ * `crypto.getRandomValues` produces uniform uint32s; taking `r % max`
+ * directly would over-represent the low bins whenever `max` does not
+ * divide 2^32. We reject any draw at or above the largest multiple of
+ * `max` that fits in uint32, then take the modulus of the survivor.
+ *
+ * Exported so callers can also share it (e.g. for sampling indices into
+ * other structures).
+ */
+export function unbiasedRandomInt(max: number): number {
+  if (!Number.isInteger(max) || max <= 0) {
+    throw new Error(
+      `unbiasedRandomInt: max must be a positive integer; got ${max}`
+    );
+  }
+  if (max === 1) return 0;
+  const RANGE = 0x1_0000_0000; // 2^32
+  const limit = RANGE - (RANGE % max);
+  // randomBytes returns CSPRNG bytes (window.crypto in browsers, crypto in Node).
+  // Loop is statistically bounded — expected iterations < 2.
+  for (;;) {
+    const buf = randomBytes(4);
+    const r =
+      (buf[0] * 0x1000000 + ((buf[1] << 16) | (buf[2] << 8) | buf[3])) >>> 0;
+    if (r < limit) return r % max;
+  }
+}
 
-  while (currentIndex != 0) {
-    const randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex--;
-    [array[currentIndex], array[randomIndex]] = [
-      array[randomIndex],
-      array[currentIndex],
-    ];
+/**
+ * In-place Fisher–Yates shuffle using a CSPRNG.
+ *
+ * Replaces a `Math.random()`-based implementation. The previous version was
+ * predictable enough that a network adversary observing timing could bias
+ * ElectrumX server selection toward a controlled endpoint.
+ *
+ * Generic so callers retain their element type without an explicit cast.
+ */
+export function shuffle<T>(array: T[]): T[] {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = unbiasedRandomInt(i + 1);
+    const tmp = array[i];
+    array[i] = array[j];
+    array[j] = tmp;
   }
   return array;
 }

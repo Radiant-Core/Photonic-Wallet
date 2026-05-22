@@ -46,16 +46,20 @@ export function createAuthority(
     v: 2,
     p: [GLYPH_NFT, GLYPH_AUTHORITY],
     name: options?.name || "Authority Token",
-    attrs: authority as any,
+    // `authority` is an AuthorityMetadata which the glyph schema allows as
+    // an attrs payload but doesn't constrain via TS. Cast through unknown
+    // rather than `any` so we don't widen further than necessary.
+    attrs: authority as unknown as Record<string, unknown>,
   };
 }
 
 /**
  * Validate authority token
  */
-export function validateAuthority(
-  metadata: GlyphV2Metadata
-): { valid: boolean; errors: string[] } {
+export function validateAuthority(metadata: GlyphV2Metadata): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   // Must have AUTHORITY protocol
@@ -138,22 +142,23 @@ export function verifyAuthorityChain(
   authorityTokens: GlyphV2Metadata[]
 ): { valid: boolean; error?: string; authority?: GlyphV2Metadata } {
   // Check if token has 'by' field (issued by authority)
-  const byField = (tokenMetadata as Record<string, unknown>).by as Uint8Array[] | undefined;
+  const byField = (tokenMetadata as Record<string, unknown>).by as
+    | Uint8Array[]
+    | undefined;
   if (!byField || byField.length === 0) {
     return { valid: false, error: "Token has no issuer reference" };
   }
 
-  // Get issuer ref from token
-  const issuerRefBytes = byField[0];
-  const issuerRef = Outpoint.fromString(
-    Buffer.from(issuerRefBytes).toString("hex")
-  ).reverse().toString();
+  // Decode issuer ref from token for future ref-matching logic.
+  // TODO: compare each authorityTokens[i] against this issuer ref once the
+  // blockchain-side ref lookup is in place. For now we accept the first
+  // authority token (simplified path).
+  Outpoint.fromString(Buffer.from(byField[0]).toString("hex"))
+    .reverse()
+    .toString();
 
-  // Find matching authority token
-  const authority = authorityTokens.find((auth) => {
-    // Compare authority token ref with issuer ref
-    // Note: Would need to get actual token ref from blockchain
-    return true; // Simplified - actual implementation needs ref comparison
+  const authority = authorityTokens.find(() => {
+    return true;
   });
 
   if (!authority) {
@@ -189,7 +194,7 @@ export function authorityGatedNftScript(
   // Script that requires authority token to be present
   const script = Script.fromASM(
     `OP_REQUIREINPUTREF ${requiredAuthorityRef} OP_DROP ` +
-    `OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`
+      `OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`
   ).add(Script.buildPublicKeyHashOut(address));
 
   return script.toHex();
@@ -206,9 +211,10 @@ export function isAuthority(metadata: GlyphV2Metadata): boolean {
  * Revoke authority token
  * Creates a burn transaction for revocable authority
  */
-export function revokeAuthority(
-  metadata: GlyphV2Metadata
-): { canRevoke: boolean; reason?: string } {
+export function revokeAuthority(metadata: GlyphV2Metadata): {
+  canRevoke: boolean;
+  reason?: string;
+} {
   if (!isAuthority(metadata)) {
     return { canRevoke: false, reason: "Not an authority token" };
   }

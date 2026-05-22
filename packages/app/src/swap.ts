@@ -40,8 +40,8 @@ export const cancelSwap = async (
     inputs.push(...fund.funding);
     const outputs = fund.change;
 
-    const privKey = wallet.value.wif as string;
-    const swapPrivKey = wallet.value.swapWif as string;
+    const privKey = wallet.value.wif!.toString();
+    const swapPrivKey = wallet.value.swapWif!.toString();
     const rawTx = buildTx(
       wallet.value.address,
       [swapPrivKey, ...fund.funding.map(() => privKey)],
@@ -89,8 +89,8 @@ export const cancelSwap = async (
     inputs.push(...fund.funding);
     outputs.push(...fund.change);
 
-    const privKey = wallet.value.wif as string;
-    const swapPrivKey = wallet.value.swapWif as string;
+    const privKey = wallet.value.wif!.toString();
+    const swapPrivKey = wallet.value.swapWif!.toString();
     const rawTx = buildTx(
       wallet.value.address,
       [swapPrivKey, ...fund.funding.map(() => privKey)],

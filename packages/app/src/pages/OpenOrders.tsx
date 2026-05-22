@@ -35,12 +35,16 @@ import {
   ButtonGroup,
   Tag,
   TagLabel,
-  Wrap,
-  WrapItem,
 } from "@chakra-ui/react";
-import { SearchIcon, CopyIcon, ViewIcon, TimeIcon } from "@chakra-ui/icons";
-import { MdOutlineSwapHoriz, MdRefresh, MdGridView, MdTableRows, MdFilterList } from "react-icons/md";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SearchIcon, CopyIcon, TimeIcon } from "@chakra-ui/icons";
+import {
+  MdOutlineSwapHoriz,
+  MdRefresh,
+  MdGridView,
+  MdTableRows,
+  MdFilterList,
+} from "react-icons/md";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
 import TokenContent from "@app/components/TokenContent";
 import { SmartToken, ContractType, SmartTokenType } from "@app/types";
@@ -71,7 +75,6 @@ import {
 import { accumulateInputs, fundTx, SelectableInput } from "@lib/coinSelect";
 import { buildTx } from "@lib/tx";
 import rxdIcon from "/rxd.png";
-import { t } from "@lingui/macro";
 import dayjs from "dayjs";
 import Outpoint from "@lib/Outpoint";
 import { decodeGlyph } from "@lib/token";
@@ -216,41 +219,49 @@ function getPriceRatio(order: ParsedOrder): string | null {
   if (order.offeredGlyph && !order.wantGlyph) {
     // Token for RXD
     const rxdPerToken = order.wantValue / 100000000;
-    return `1 ${order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"} = ${rxdPerToken.toFixed(4)} RXD`;
+    return `1 ${
+      order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
+    } = ${rxdPerToken.toFixed(4)} RXD`;
   }
   if (!order.offeredGlyph && order.wantGlyph) {
     // RXD for Token
     const tokensPerRxd = 100000000 / order.wantValue;
-    return `1 RXD = ${tokensPerRxd.toFixed(4)} ${order.wantGlyph.ticker || order.wantGlyph.name || "Token"}`;
+    return `1 RXD = ${tokensPerRxd.toFixed(4)} ${
+      order.wantGlyph.ticker || order.wantGlyph.name || "Token"
+    }`;
   }
   if (order.offeredGlyph && order.wantGlyph) {
-    // Token for Token
-    const ratio = 1; // Simplified, would need actual amounts for FT
-    return `1 ${order.offeredGlyph.ticker || "Token"} ↔ ${order.wantGlyph.ticker || "Token"}`;
+    // Token for Token — actual amounts not yet available for FT
+    return `1 ${order.offeredGlyph.ticker || "Token"} ↔ ${
+      order.wantGlyph.ticker || "Token"
+    }`;
   }
   return null;
 }
 
 function useCopyToClipboard() {
   const toast = useToast();
-  return useCallback(async (text: string, label?: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast({
-        status: "success",
-        title: "Copied",
-        description: `${label || "Text"} copied to clipboard`,
-        duration: 2000,
-      });
-    } catch {
-      toast({
-        status: "error",
-        title: "Copy failed",
-        description: "Could not copy to clipboard",
-        duration: 3000,
-      });
-    }
-  }, [toast]);
+  return useCallback(
+    async (text: string, label?: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast({
+          status: "success",
+          title: "Copied",
+          description: `${label || "Text"} copied to clipboard`,
+          duration: 2000,
+        });
+      } catch {
+        toast({
+          status: "error",
+          title: "Copy failed",
+          description: "Could not copy to clipboard",
+          duration: 3000,
+        });
+      }
+    },
+    [toast]
+  );
 }
 
 type TokenFunding = {
@@ -359,7 +370,8 @@ function OrderCard({
         {offeredGlyph && (
           <HStack spacing={2}>
             <Text fontSize="xs" color="gray.500" isTruncated maxW="200px">
-              Ref: {offeredGlyph.ref.slice(0, 16)}...{offeredGlyph.ref.slice(-8)}
+              Ref: {offeredGlyph.ref.slice(0, 16)}...
+              {offeredGlyph.ref.slice(-8)}
             </Text>
             <IconButton
               aria-label="Copy token ref"
@@ -455,7 +467,14 @@ function OrderRow({
           </Text>
           {offer.block_height > 0 && (
             <Text fontSize="10px" color="gray.600">
-              ~{Math.max(0, Math.floor((Date.now() / 1000 - offer.block_height * 600) / 3600))}h ago
+              ~
+              {Math.max(
+                0,
+                Math.floor(
+                  (Date.now() / 1000 - offer.block_height * 600) / 3600
+                )
+              )}
+              h ago
             </Text>
           )}
         </VStack>
@@ -490,13 +509,14 @@ export default function OpenOrders() {
 
   // Get all known glyphs for display
   const glyphs = useLiveQuery(() => db.glyph.toArray(), []);
-  const glyphMap = new Map(glyphs?.map((g) => [g.ref, g]) || []);
   const glyphByTokenId = useMemo(
     () =>
       new Map(
         glyphs?.map((g) => [
           assetToSwapTokenId(
-            g.tokenType === SmartTokenType.NFT ? ContractType.NFT : ContractType.FT,
+            g.tokenType === SmartTokenType.NFT
+              ? ContractType.NFT
+              : ContractType.FT,
             g.ref
           ),
           g,
@@ -555,6 +575,7 @@ export default function OpenOrders() {
               );
               allOrders.push(...wantOrders);
             } catch {
+              // Best-effort: skip wants we cannot enumerate.
             }
           }
           rawOrders = allOrders;
@@ -597,8 +618,7 @@ export default function OpenOrders() {
         toast({
           status: "error",
           title: "Failed to fetch open orders",
-          description:
-            error instanceof Error ? error.message : "Unknown error",
+          description: error instanceof Error ? error.message : "Unknown error",
         });
       } finally {
         setLoading(false);
@@ -636,15 +656,20 @@ export default function OpenOrders() {
     if (filterType !== "all") {
       result = result.filter((order) => {
         const offeredIsFt = order.offeredGlyph?.tokenType === SmartTokenType.FT;
-        const offeredIsNft = order.offeredGlyph?.tokenType === SmartTokenType.NFT;
+        const offeredIsNft =
+          order.offeredGlyph?.tokenType === SmartTokenType.NFT;
         const offeredIsRxd = !order.offeredGlyph;
         const wantIsRxd = !order.wantGlyph;
 
         switch (filterType) {
           case "ft":
-            return offeredIsFt || order.wantGlyph?.tokenType === SmartTokenType.FT;
+            return (
+              offeredIsFt || order.wantGlyph?.tokenType === SmartTokenType.FT
+            );
           case "nft":
-            return offeredIsNft || order.wantGlyph?.tokenType === SmartTokenType.NFT;
+            return (
+              offeredIsNft || order.wantGlyph?.tokenType === SmartTokenType.NFT
+            );
           case "rxd-in":
             return offeredIsRxd; // Offering RXD
           case "rxd-out":
@@ -663,22 +688,25 @@ export default function OpenOrders() {
         case "block":
           comparison = a.offer.block_height - b.offer.block_height;
           break;
-        case "name":
+        case "name": {
           const nameA = a.offeredGlyph?.name || "RXD";
           const nameB = b.offeredGlyph?.name || "RXD";
           comparison = nameA.localeCompare(nameB);
           break;
-        case "value":
+        }
+        case "value": {
           const valueA = a.wantValue || 0;
           const valueB = b.wantValue || 0;
           comparison = valueA - valueB;
           break;
+        }
         case "price": {
           // Sort by implied price ratio
           const getPrice = (o: ParsedOrder) => {
             if (o.wantValue && o.wantValue > 0) {
               if (o.offeredGlyph && !o.wantGlyph) return o.wantValue; // RXD per token
-              if (!o.offeredGlyph && o.wantGlyph) return 100000000 / o.wantValue; // Tokens per RXD
+              if (!o.offeredGlyph && o.wantGlyph)
+                return 100000000 / o.wantValue; // Tokens per RXD
             }
             return 0;
           };
@@ -751,7 +779,9 @@ export default function OpenOrders() {
       // SECURITY: Reject multi-output offers until UI can properly display all outputs
       // See: Security Audit C3 - Open-orders swap take silently funds attacker-controlled extra outputs
       if (makerTerms.outputs.length > 1) {
-        throw new Error("Multi-output swap offers are not supported. The offer may be malicious.");
+        throw new Error(
+          "Multi-output swap offers are not supported. The offer may be malicious."
+        );
       }
 
       const coins: SelectableInput[] = await db.txo
@@ -761,7 +791,9 @@ export default function OpenOrders() {
       const fromRefLE = order.offeredGlyph?.ref
         ? reverseRef(order.offeredGlyph.ref)
         : "";
-      const wantRefLE = order.wantGlyph?.ref ? reverseRef(order.wantGlyph.ref) : undefined;
+      const wantRefLE = order.wantGlyph?.ref
+        ? reverseRef(order.wantGlyph.ref)
+        : undefined;
 
       if (
         !scriptMatchesContract(
@@ -788,7 +820,9 @@ export default function OpenOrders() {
           wantRefLE
         )
       ) {
-        throw new Error("Offer payment output does not match advertised wanted asset");
+        throw new Error(
+          "Offer payment output does not match advertised wanted asset"
+        );
       }
 
       try {
@@ -797,12 +831,11 @@ export default function OpenOrders() {
         throw new Error("Offer signature is not valid scriptSig hex");
       }
 
-      const receiveScript =
-        !order.offeredGlyph
-          ? p2pkhScript(wallet.value.address)
-          : order.offeredGlyph.tokenType === SmartTokenType.FT
-          ? ftScript(wallet.value.address, fromRefLE)
-          : nftScript(wallet.value.address, fromRefLE);
+      const receiveScript = !order.offeredGlyph
+        ? p2pkhScript(wallet.value.address)
+        : order.offeredGlyph.tokenType === SmartTokenType.FT
+        ? ftScript(wallet.value.address, fromRefLE)
+        : nftScript(wallet.value.address, fromRefLE);
 
       const inputs: Utxo[] = [
         {
@@ -914,7 +947,7 @@ export default function OpenOrders() {
 
       const tx = buildTx(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         allInputs,
         allOutputs,
         false,
@@ -942,8 +975,7 @@ export default function OpenOrders() {
       toast({
         status: "error",
         title: "Failed to accept swap",
-        description:
-          error instanceof Error ? error.message : "Unknown error",
+        description: error instanceof Error ? error.message : "Unknown error",
       });
     }
   };
@@ -988,19 +1020,22 @@ export default function OpenOrders() {
     if (!glyphs || glyphs.length === 0) {
       return {
         title: "No tokens in wallet",
-        description: "You don't own any tokens yet. Acquire tokens to see swap offers for them here.",
+        description:
+          "You don't own any tokens yet. Acquire tokens to see swap offers for them here.",
       };
     }
     if (orders.length === 0) {
       return {
         title: "No open orders found",
-        description: "There are currently no open swap orders for tokens you own. Check back later or create your own swap offer.",
+        description:
+          "There are currently no open swap orders for tokens you own. Check back later or create your own swap offer.",
       };
     }
     if (filteredAndSortedOrders.length === 0) {
       return {
         title: "No matching orders",
-        description: "Try adjusting your filters or search criteria to see more results.",
+        description:
+          "Try adjusting your filters or search criteria to see more results.",
       };
     }
     return null;
@@ -1016,12 +1051,21 @@ export default function OpenOrders() {
           <Heading size="lg">{"Open Orders"}</Heading>
           <HStack spacing={2}>
             {lastUpdated && (
-              <HStack spacing={1} color="gray.500" fontSize="xs" display={{ base: "none", md: "flex" }}>
+              <HStack
+                spacing={1}
+                color="gray.500"
+                fontSize="xs"
+                display={{ base: "none", md: "flex" }}
+              >
                 <Icon as={TimeIcon} boxSize={3} />
                 <Text>Updated {dayjs(lastUpdated).format("HH:mm:ss")}</Text>
               </HStack>
             )}
-            <Tooltip label={autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"}>
+            <Tooltip
+              label={
+                autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"
+              }
+            >
               <IconButton
                 aria-label="Toggle auto-refresh"
                 icon={<Icon as={MdRefresh} />}
@@ -1122,10 +1166,17 @@ export default function OpenOrders() {
 
             {/* Stats */}
             {orders.length > 0 && (
-              <Flex justify="space-between" align="center" fontSize="sm" color="gray.500">
+              <Flex
+                justify="space-between"
+                align="center"
+                fontSize="sm"
+                color="gray.500"
+              >
                 <Text>
-                  Showing {displayedOrders.length} of {filteredAndSortedOrders.length} orders
-                  {filteredAndSortedOrders.length !== orders.length && ` (filtered from ${orders.length})`}
+                  Showing {displayedOrders.length} of{" "}
+                  {filteredAndSortedOrders.length} orders
+                  {filteredAndSortedOrders.length !== orders.length &&
+                    ` (filtered from ${orders.length})`}
                 </Text>
               </Flex>
             )}
@@ -1142,7 +1193,9 @@ export default function OpenOrders() {
             </VStack>
           ) : emptyState ? (
             <Box p={8} textAlign="center">
-              <Text color="gray.500" fontWeight="medium">{emptyState.title}</Text>
+              <Text color="gray.500" fontWeight="medium">
+                {emptyState.title}
+              </Text>
               <Text fontSize="sm" color="gray.400" mt={2}>
                 {emptyState.description}
               </Text>
@@ -1158,14 +1211,18 @@ export default function OpenOrders() {
                       onClick={() => handleSort("name")}
                       _hover={{ color: "blue.400" }}
                     >
-                      {"Offering"} {sortField === "name" && (sortDirection === "asc" ? "↑" : "↓")}
+                      {"Offering"}{" "}
+                      {sortField === "name" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
                     </Th>
                     <Th
                       cursor="pointer"
                       onClick={() => handleSort("value")}
                       _hover={{ color: "blue.400" }}
                     >
-                      {"Wants"} {sortField === "value" && (sortDirection === "asc" ? "↑" : "↓")}
+                      {"Wants"}{" "}
+                      {sortField === "value" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
                     </Th>
                     <Th
                       display={{ base: "none", md: "table-cell" }}
@@ -1173,7 +1230,9 @@ export default function OpenOrders() {
                       onClick={() => handleSort("block")}
                       _hover={{ color: "blue.400" }}
                     >
-                      {"Block"} {sortField === "block" && (sortDirection === "asc" ? "↑" : "↓")}
+                      {"Block"}{" "}
+                      {sortField === "block" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
                     </Th>
                     <Th></Th>
                   </Tr>
@@ -1192,12 +1251,18 @@ export default function OpenOrders() {
             </Box>
           ) : (
             <Grid
-              templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }}
+              templateColumns={{
+                base: "1fr",
+                md: "repeat(2, 1fr)",
+                lg: "repeat(3, 1fr)",
+              }}
               gap={4}
               p={4}
             >
               {displayedOrders.map((order, idx) => (
-                <GridItem key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}>
+                <GridItem
+                  key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
+                >
                   <OrderCard
                     order={order}
                     onAccept={handleAcceptOrder}
@@ -1217,7 +1282,8 @@ export default function OpenOrders() {
                 onClick={handleLoadMore}
                 isLoading={loading}
               >
-                Load More ({filteredAndSortedOrders.length - displayCount} remaining)
+                Load More ({filteredAndSortedOrders.length - displayCount}{" "}
+                remaining)
               </Button>
             </Box>
           )}
@@ -1229,7 +1295,9 @@ export default function OpenOrders() {
           <Box>
             <Text fontWeight="medium">{"How it works"}</Text>
             <Text fontSize="sm">
-              {"Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction."}
+              {
+                "Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction."
+              }
             </Text>
           </Box>
         </Alert>

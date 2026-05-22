@@ -3,10 +3,7 @@ import ElectrumManager from "../ElectrumManager";
 import { ElectrumUtxo } from "@lib/types";
 import { ContractType } from "@app/types";
 
-export async function findSwaps(
-  electrum: ElectrumManager,
-  address: string
-) {
+export async function findSwaps(electrum: ElectrumManager, address: string) {
   const utxos = (
     await Promise.all(
       [

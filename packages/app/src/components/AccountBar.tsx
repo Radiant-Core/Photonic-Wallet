@@ -1,5 +1,11 @@
-import { Button, Flex, FlexProps, Grid, Badge, Text, Tooltip } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
+import {
+  Button,
+  Flex,
+  FlexProps,
+  Grid,
+  Badge,
+  Tooltip,
+} from "@chakra-ui/react";
 import { openModal } from "@app/signals";
 import ValueTag from "./ValueTag";
 import ActionIcon from "./ActionIcon";
@@ -15,7 +21,9 @@ export default function AccountBar(props: FlexProps) {
   // Fetch primary WAVE name (user preference or alphabetically first active)
   const primaryWaveName = useLiveQuery(async () => {
     // First check user preference
-    const preference = await db.kvp.get("primaryWaveName") as string | undefined;
+    const preference = (await db.kvp.get("primaryWaveName")) as
+      | string
+      | undefined;
 
     const tokens = await db.glyph
       .where("tokenType")
@@ -61,7 +69,7 @@ export default function AccountBar(props: FlexProps) {
             alignItems="center"
             gap={1}
             cursor="pointer"
-            onClick={() => window.location.href = "#/wave-names"}
+            onClick={() => (window.location.href = "#/wave-names")}
             _hover={{ bg: "brand.600" }}
           >
             <HiOutlineAtSymbol />

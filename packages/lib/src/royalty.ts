@@ -12,8 +12,8 @@ import { pushMinimal } from "./script";
 const { Script, Opcode } = rjs;
 
 // Radiant introspection opcodes (hex values)
-const OP_OUTPUTVALUE_HEX = "cc";      // 0xcc - pushes output value by index
-const OP_OUTPUTBYTECODE_HEX = "cd";   // 0xcd - pushes output script by index
+const OP_OUTPUTVALUE_HEX = "cc"; // 0xcc - pushes output value by index
+const OP_OUTPUTBYTECODE_HEX = "cd"; // 0xcd - pushes output script by index
 
 /**
  * Build P2PKH script hex for a given address
@@ -42,7 +42,10 @@ export function nftRoyaltyScript(
   newOwner: string,
   ref: string,
   royalty: GlyphV2Royalty,
-  currentOwner?: string
+  // Retained for ABI compatibility with callers that still pass the seller
+  // address. Per H4 security fix the script is built against `newOwner` only;
+  // the seller is intentionally ignored here.
+  _currentOwner?: string
 ): string {
   if (!royalty.enforced) {
     // Non-enforced royalties use standard NFT script
@@ -51,9 +54,7 @@ export function nftRoyaltyScript(
   }
 
   // Build base script with singleton ref
-  const script = Script.fromASM(
-    `OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`
-  );
+  const script = Script.fromASM(`OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`);
 
   // Add state separator for script validation section
   script.add(Opcode.OP_STATESEPARATOR);
@@ -74,23 +75,34 @@ export function nftRoyaltyScript(
       // Royalty validation for this split:
       // 1. Verify output pays to correct address (script matches)
       // 2. Verify output value >= (sale_price * split.bps / 10000)
-      
+
       // Push output index and get its bytecode: <idx> OP_OUTPUTBYTECODE
-      script.add(Script.fromHex(pushMinimal(outputIndex) + OP_OUTPUTBYTECODE_HEX));
+      script.add(
+        Script.fromHex(pushMinimal(outputIndex) + OP_OUTPUTBYTECODE_HEX)
+      );
       // Push expected script as data for comparison
       script.add(Buffer.from(expectedScriptHex, "hex"));
       // Verify they match
       script.add(Opcode.OP_EQUAL);
       script.add(Opcode.OP_VERIFY);
-      
+
       // Verify output value >= calculated share
       // Stack: calculate share from output 1 value, compare with output N value
-      script.add(Script.fromHex(
-        pushMinimal(outputIndex) + OP_OUTPUTVALUE_HEX +      // Get royalty output value
-        "51" + OP_OUTPUTVALUE_HEX +                           // OP_1 OP_OUTPUTVALUE (get sale price)
-        splitBpsPush + "95" + "03" + "1027" + "96" +           // OP_MUL 10000 OP_DIV
-        "a2" + "69"                                            // OP_GREATERTHANOREQUAL OP_VERIFY
-      ));
+      script.add(
+        Script.fromHex(
+          pushMinimal(outputIndex) +
+            OP_OUTPUTVALUE_HEX + // Get royalty output value
+            "51" +
+            OP_OUTPUTVALUE_HEX + // OP_1 OP_OUTPUTVALUE (get sale price)
+            splitBpsPush +
+            "95" +
+            "03" +
+            "1027" +
+            "96" + // OP_MUL 10000 OP_DIV
+            "a2" +
+            "69" // OP_GREATERTHANOREQUAL OP_VERIFY
+        )
+      );
     });
   } else {
     // Single royalty recipient
@@ -100,20 +112,35 @@ export function nftRoyaltyScript(
     if (minimumPush) {
       // With minimum: max(raw_royalty, minimum)
       // Calculate royalty: sale_price * bps / 10000
-      script.add(Script.fromHex(
-        "51" + OP_OUTPUTVALUE_HEX +      // OP_1 OP_OUTPUTVALUE (get sale price)
-        bpsPush + "95" +                 // OP_MUL
-        "03" + "1027" + "96" +          // 10000 OP_DIV
-        "76" + minimumPush + "9f" +     // OP_DUP <min> OP_LESSTHAN
-        "63" + "75" + minimumPush + "68" // OP_IF OP_DROP <min> OP_ENDIF
-      ));
-      
+      script.add(
+        Script.fromHex(
+          "51" +
+            OP_OUTPUTVALUE_HEX + // OP_1 OP_OUTPUTVALUE (get sale price)
+            bpsPush +
+            "95" + // OP_MUL
+            "03" +
+            "1027" +
+            "96" + // 10000 OP_DIV
+            "76" +
+            minimumPush +
+            "9f" + // OP_DUP <min> OP_LESSTHAN
+            "63" +
+            "75" +
+            minimumPush +
+            "68" // OP_IF OP_DROP <min> OP_ENDIF
+        )
+      );
+
       // Verify royalty output value >= calculated amount
-      script.add(Script.fromHex(
-        "52" + OP_OUTPUTVALUE_HEX +      // OP_2 OP_OUTPUTVALUE
-        "a2" + "69"                      // OP_GREATERTHANOREQUAL OP_VERIFY
-      ));
-      
+      script.add(
+        Script.fromHex(
+          "52" +
+            OP_OUTPUTVALUE_HEX + // OP_2 OP_OUTPUTVALUE
+            "a2" +
+            "69" // OP_GREATERTHANOREQUAL OP_VERIFY
+        )
+      );
+
       // Verify recipient script matches: OP_2 OP_OUTPUTBYTECODE <script> OP_EQUAL OP_VERIFY
       script.add(Script.fromHex("52" + OP_OUTPUTBYTECODE_HEX));
       script.add(Buffer.from(expectedScriptHex, "hex"));
@@ -126,15 +153,23 @@ export function nftRoyaltyScript(
       script.add(Buffer.from(expectedScriptHex, "hex"));
       script.add(Opcode.OP_EQUAL);
       script.add(Opcode.OP_VERIFY);
-      
+
       // Then verify amount
-      script.add(Script.fromHex(
-        "52" + OP_OUTPUTVALUE_HEX +      // OP_2 OP_OUTPUTVALUE (get royalty value)
-        "51" + OP_OUTPUTVALUE_HEX +      // OP_1 OP_OUTPUTVALUE (get sale price)
-        bpsPush + "95" +                 // OP_MUL
-        "03" + "1027" + "96" +          // 10000 OP_DIV
-        "a2" + "69"                      // OP_GREATERTHANOREQUAL OP_VERIFY
-      ));
+      script.add(
+        Script.fromHex(
+          "52" +
+            OP_OUTPUTVALUE_HEX + // OP_2 OP_OUTPUTVALUE (get royalty value)
+            "51" +
+            OP_OUTPUTVALUE_HEX + // OP_1 OP_OUTPUTVALUE (get sale price)
+            bpsPush +
+            "95" + // OP_MUL
+            "03" +
+            "1027" +
+            "96" + // 10000 OP_DIV
+            "a2" +
+            "69" // OP_GREATERTHANOREQUAL OP_VERIFY
+        )
+      );
     }
   }
 
@@ -152,7 +187,7 @@ export function nftRoyaltyScript(
 export function buildRoyaltyOutputs(
   salePrice: number,
   royalty: GlyphV2Royalty,
-  recipientScripts: string[]  // Pre-built P2PKH scripts for each recipient
+  recipientScripts: string[] // Pre-built P2PKH scripts for each recipient
 ): Array<{ script: string; satoshis: number }> {
   if (!royalty.enforced) {
     return []; // No required outputs for advisory royalties
@@ -166,7 +201,7 @@ export function buildRoyaltyOutputs(
       const shareAmount = Math.floor((salePrice * split.bps) / 10000);
       outputs.push({
         script: recipientScripts[index],
-        satoshis: shareAmount
+        satoshis: shareAmount,
       });
     });
   } else {
@@ -174,7 +209,7 @@ export function buildRoyaltyOutputs(
     const royaltyAmount = calculateRoyalty(salePrice, royalty);
     outputs.push({
       script: recipientScripts[0],
-      satoshis: royaltyAmount
+      satoshis: royaltyAmount,
     });
   }
 
@@ -189,7 +224,7 @@ export function calculateRoyalty(
   royalty: GlyphV2Royalty
 ): number {
   const royaltyAmount = Math.floor((salePrice * royalty.bps) / 10000);
-  
+
   if (royalty.minimum && royaltyAmount < royalty.minimum) {
     return royalty.minimum;
   }
@@ -276,7 +311,11 @@ export function checkRoyaltyCompliance(
   outputs: Array<{ script: string; satoshis: number }>,
   royalty: GlyphV2Royalty,
   salePrice: number
-): { compliant: boolean; missingOutputs?: string[]; insufficientPayments?: string[] } {
+): {
+  compliant: boolean;
+  missingOutputs?: string[];
+  insufficientPayments?: string[];
+} {
   if (!royalty.enforced) {
     return { compliant: true };
   }
@@ -299,7 +338,7 @@ export function checkRoyaltyCompliance(
     });
   } else {
     const requiredAmount = calculateRoyalty(salePrice, royalty);
-    
+
     if (outputs.length < 3) {
       missing.push(`Royalty output at index 2 for ${royalty.address}`);
     } else if (outputs[2].satoshis < requiredAmount) {
@@ -346,7 +385,9 @@ export function createRoyalty(
     // Validate splits sum to total bps
     const totalSplitBps = options.splits.reduce((sum, s) => sum + s.bps, 0);
     if (totalSplitBps !== basisPoints) {
-      throw new Error(`Split basis points (${totalSplitBps}) must equal total (${basisPoints})`);
+      throw new Error(
+        `Split basis points (${totalSplitBps}) must equal total (${basisPoints})`
+      );
     }
     royalty.splits = options.splits;
   }

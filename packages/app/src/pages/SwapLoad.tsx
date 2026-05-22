@@ -31,7 +31,6 @@ import {
   parseP2pkhScript,
 } from "@lib/script";
 import { bytesToHex } from "@noble/hashes/utils";
-// @ts-ignore
 import {
   Address,
   Networks,
@@ -133,7 +132,9 @@ function computeRoyaltyAmount(
   return clamped;
 }
 
-async function getTokenRoyalty(glyph: SmartToken): Promise<ReturnType<typeof parseRoyalty> | null> {
+async function getTokenRoyalty(
+  glyph: SmartToken
+): Promise<ReturnType<typeof parseRoyalty> | null> {
   if (!glyph.revealOutpoint) return null;
   try {
     const reveal = Outpoint.fromString(glyph.revealOutpoint);
@@ -250,7 +251,6 @@ async function loadSwap(psrt: Transaction): Promise<SwapParams | null> {
   const toScript = Script.fromHex(`76a914${toParams.address}88ac`);
   const network =
     wallet.value.net === "mainnet" ? Networks.mainnet : Networks.testnet;
-  // @ts-ignore
   const address = Address.fromScript(toScript, network).toString();
 
   return {
@@ -500,7 +500,7 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
 
       const tx = buildTx(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         inputs,
         outputs,
         false,

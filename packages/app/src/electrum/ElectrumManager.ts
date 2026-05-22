@@ -1,7 +1,6 @@
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@lib/electrumWsClient";
 
 // ElectrumWS doesn't support changing endpoint so this class is used to reconnect and resubscribe
-// TODO Refactor so ws-electrumx-client can be removed and not need the manager class
 export default class ElectrumManager {
   public endpoint?: string;
   public client?: ElectrumWS;
@@ -30,7 +29,10 @@ export default class ElectrumManager {
       this.client = new ElectrumWS(endpoint);
       console.debug("[ElectrumManager] ElectrumWS client created successfully");
     } catch (error) {
-      console.error("[ElectrumManager] Failed to create ElectrumWS client:", error);
+      console.error(
+        "[ElectrumManager] Failed to create ElectrumWS client:",
+        error
+      );
       return false;
     }
 

@@ -5,7 +5,7 @@
 
 import { randomBytes } from "@noble/hashes/utils";
 import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bytesToHex } from "@noble/hashes/utils";
 
 // Re-export for convenience
 export { bytesToHex, hexToBytes } from "@noble/hashes/utils";
@@ -100,7 +100,9 @@ export async function decryptContentAES(
   );
 
   // Combine ciphertext and tag
-  const combined = new Uint8Array(encrypted.ciphertext.length + encrypted.tag.length);
+  const combined = new Uint8Array(
+    encrypted.ciphertext.length + encrypted.tag.length
+  );
   combined.set(encrypted.ciphertext);
   combined.set(encrypted.tag, encrypted.ciphertext.length);
 
@@ -165,98 +167,6 @@ export function verifyTransactionHash(
   const computedHash = dsha256(rawTx);
   const computedTxid = bytesToHex(computedHash.reverse()); // txid is little-endian hex
   return computedTxid === claimedTxid.toLowerCase();
-}
-
-/**
- * Encrypt content for public key (ECIES-like)
- * Simplified version using shared secret
- */
-export async function encryptForPublicKey(
-  content: Uint8Array,
-  recipientPublicKey: string
-): Promise<{ encrypted: EncryptedContent; ephemeralPublicKey: string }> {
-  // Generate ephemeral key pair
-  const ephemeralKeyPair = await crypto.subtle.generateKey(
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
-    true,
-    ["deriveBits"]
-  );
-
-  // Export ephemeral public key
-  const ephemeralPublicKeyRaw = await crypto.subtle.exportKey(
-    "raw",
-    ephemeralKeyPair.publicKey
-  );
-  const ephemeralPublicKey = bytesToHex(new Uint8Array(ephemeralPublicKeyRaw));
-
-  // Import recipient public key
-  const recipientKey = await crypto.subtle.importKey(
-    "raw",
-    toAB(hexToBytes(recipientPublicKey)),
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
-    false,
-    []
-  );
-
-  // Derive shared secret
-  const sharedSecret = await crypto.subtle.deriveBits(
-    {
-      name: "ECDH",
-      public: recipientKey,
-    },
-    ephemeralKeyPair.privateKey,
-    256
-  );
-
-  // Use shared secret as encryption key
-  const encryptionKey = new Uint8Array(sha256(new Uint8Array(sharedSecret)));
-  const encrypted = await encryptContentAES(content, encryptionKey);
-
-  return {
-    encrypted,
-    ephemeralPublicKey,
-  };
-}
-
-/**
- * Decrypt content with private key
- */
-export async function decryptWithPrivateKey(
-  encrypted: EncryptedContent,
-  ephemeralPublicKey: string,
-  privateKey: CryptoKey
-): Promise<Uint8Array> {
-  // Import ephemeral public key
-  const ephemeralKey = await crypto.subtle.importKey(
-    "raw",
-    toAB(hexToBytes(ephemeralPublicKey)),
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
-    false,
-    []
-  );
-
-  // Derive shared secret
-  const sharedSecret = await crypto.subtle.deriveBits(
-    {
-      name: "ECDH",
-      public: ephemeralKey,
-    },
-    privateKey,
-    256
-  );
-
-  // Use shared secret as decryption key
-  const decryptionKey = new Uint8Array(sha256(new Uint8Array(sharedSecret)));
-  return decryptContentAES(encrypted, decryptionKey);
 }
 
 /**

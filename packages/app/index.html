@@ -13,10 +13,13 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module">
-      import { Buffer } from "buffer";
-      window.Buffer = Buffer;
-    </script>
+    <!--
+      Buffer and process shims for @radiant-core/radiantjs were previously
+      installed via an inline <script type="module"> block here. That
+      violated the production CSP (script-src 'self', no inline). The
+      shims now live in src/processShim.ts and are loaded as the first
+      import in src/main.tsx — see R28 in REMEDIATION_PLAN.md.
+    -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

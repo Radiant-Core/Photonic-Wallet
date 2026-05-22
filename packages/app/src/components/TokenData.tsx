@@ -7,7 +7,6 @@ import { DecodedGlyph, decodeGlyph } from "@lib/token";
 import { jsonHex } from "@lib/util";
 import DownloadLink from "./DownloadLink";
 import { PropertyCard } from "./ViewDigitalObject";
-import { t } from "@lingui/macro";
 import { SmartToken } from "@app/types";
 import { DownloadIcon } from "@chakra-ui/icons";
 import ActionIcon from "./ActionIcon";

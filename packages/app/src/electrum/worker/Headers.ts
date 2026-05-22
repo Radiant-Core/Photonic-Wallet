@@ -3,7 +3,12 @@ import { BlockHeader as RadJSBlockHeader } from "@radiant-core/radiantjs";
 import { Subscription } from "@app/types";
 import { ElectrumHeaderResponse, ElectrumHeadersResponse } from "@lib/types";
 import ElectrumManager from "@app/electrum/ElectrumManager";
-import { nextBitsAserti32D, bitsToTarget, ASERT_HALF_LIFE_UPGRADE_HEIGHT, HALF_LIFE_V2 } from "@lib/difficulty";
+import {
+  nextBitsAserti32D,
+  bitsToTarget,
+  ASERT_HALF_LIFE_UPGRADE_HEIGHT,
+  HALF_LIFE_V2,
+} from "@lib/difficulty";
 import db from "@app/db";
 import { network } from "@app/signals";
 // import { workerInstance } from "@app/verifier";

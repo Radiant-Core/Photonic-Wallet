@@ -13,6 +13,10 @@ msgstr ""
 "Language-Team: \n"
 "Plural-Forms: \n"
 
+#: src/components/DecryptionDialog.tsx:94
+msgid "- Your key never leaves this device"
+msgstr ""
+
 #: src/pages/Mint.tsx:1526
 #: src/pages/Mint.tsx:1725
 #~ msgid "(Large file - consider compressing)"
@@ -40,7 +44,7 @@ msgstr ""
 #~ msgid "{0} BALANCE"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1576
+#: src/pages/Vault.tsx:1983
 msgid "{0} blocks"
 msgstr ""
 
@@ -60,11 +64,11 @@ msgstr ""
 #~ msgid "{children}"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:544
+#: src/pages/Vault.tsx:643
 msgid "{count} tranches generated"
 msgstr ""
 
-#: src/pages/Vault.tsx:760
+#: src/pages/Vault.tsx:968
 msgid "{txid} — {0} tranches"
 msgstr ""
 
@@ -76,11 +80,11 @@ msgstr ""
 #~ msgid "~{mins} min (~{blocksLeft} blocks)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:394
+#: src/pages/Vault.tsx:481
 msgid "⚠ Must be greater than current block ({0})"
 msgstr ""
 
-#: src/pages/Vault.tsx:400
+#: src/pages/Vault.tsx:489
 msgid "⚠ Must be in the future"
 msgstr ""
 
@@ -96,8 +100,16 @@ msgstr ""
 #~ msgid "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 #~ msgstr ""
 
+#: src/components/EncryptedContentUnlock.tsx:1012
+msgid "64-character key from their wallet Settings"
+msgstr ""
+
 #: src/pages/Vault.tsx:1083
-msgid "72 character hex"
+#~ msgid "72 character hex"
+#~ msgstr ""
+
+#: src/pages/Vault.tsx:1413
+msgid "72 character LE hex"
 msgstr ""
 
 #: src/pages/Mint.tsx:1574
@@ -125,20 +137,24 @@ msgstr ""
 #~ msgid "Accept"
 #~ msgstr ""
 
+#: src/components/EncryptedContentUnlock.tsx:468
+msgid "Access link ready"
+msgstr ""
+
 #: src/pages/SwapMissing.tsx:169
 #~ msgid "Actions"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1420
+#: src/pages/Vault.tsx:1817
 msgid "active"
 msgstr ""
 
-#: src/pages/History.tsx:60
-#: src/pages/History.tsx:68
+#: src/pages/History.tsx:86
+#: src/pages/History.tsx:96
 msgid "Activity History"
 msgstr ""
 
-#: src/components/VaultDetailModal.tsx:75
+#: src/components/VaultDetailModal.tsx:141
 msgid "Activity Log"
 msgstr ""
 
@@ -154,6 +170,10 @@ msgstr ""
 #~ msgid "Add attribute"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:213
+msgid "Add by WAVE name (e.g. alice.rxd) or X25519 public key. Only listed recipients can decrypt."
+msgstr ""
+
 #: src/components/TimelockSection.tsx:211
 #~ msgid "Add hint (optional)"
 #~ msgstr ""
@@ -162,11 +182,15 @@ msgstr ""
 #~ msgid "Add permission"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:208
+msgid "Add Recipient"
+msgstr ""
+
 #: src/components/RoyaltyConfig.tsx:185
 #~ msgid "Add Split"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1344
+#: src/pages/Vault.tsx:1729
 msgid "Add Tranche"
 msgstr ""
 
@@ -199,11 +223,11 @@ msgstr ""
 #~ msgid "alice"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1493
+#: src/pages/Vault.tsx:1893
 msgid "All vaults claimed. Toggle \"Show Claimed\" to view history."
 msgstr ""
 
-#: src/pages/Vault.tsx:1353
+#: src/pages/Vault.tsx:1738
 msgid "Allocated"
 msgstr ""
 
@@ -212,13 +236,21 @@ msgstr ""
 #~ msgid "already unlockable"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:45
+#: src/components/VaultDetailModal.tsx:85
 msgid "Amount"
 msgstr ""
 
-#: src/pages/Vault.tsx:1122
-#: src/pages/Vault.tsx:1302
+#: src/pages/Vault.tsx:1473
+msgid "Amount (RXD dust)"
+msgstr ""
+
+#: src/pages/Vault.tsx:1474
+#: src/pages/Vault.tsx:1682
 msgid "Amount (RXD)"
+msgstr ""
+
+#: src/pages/Vault.tsx:1471
+msgid "Amount (token units)"
 msgstr ""
 
 #: src/components/AirdropFungible.tsx:227
@@ -245,10 +277,10 @@ msgstr ""
 #~ msgid "ASERT Half Life (blocks)"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:44
-#: src/pages/Vault.tsx:1046
-#: src/pages/Vault.tsx:1050
-#: src/pages/Vault.tsx:1051
+#: src/components/VaultDetailModal.tsx:81
+#: src/pages/Vault.tsx:1343
+#: src/pages/Vault.tsx:1347
+#: src/pages/Vault.tsx:1348
 msgid "Asset Type"
 msgstr ""
 
@@ -293,11 +325,11 @@ msgstr ""
 #~ msgid "Authority: {name}"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1361
+#: src/pages/Vault.tsx:1750
 msgid "Auto-fill"
 msgstr ""
 
-#: src/pages/Vault.tsx:1221
+#: src/pages/Vault.tsx:1589
 msgid "Auto-fill Schedule"
 msgstr ""
 
@@ -315,7 +347,7 @@ msgstr ""
 #~ msgid "Balance"
 #~ msgstr ""
 
-#: src/components/BalanceHistoryChart.tsx:96
+#: src/components/BalanceHistoryChart.tsx:103
 msgid "Balance History (Last 30 Days)"
 msgstr ""
 
@@ -324,15 +356,15 @@ msgstr ""
 #~ msgid "Block"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1289
+#: src/pages/Vault.tsx:1668
 msgid "Block #{0}"
 msgstr ""
 
-#: src/pages/Vault.tsx:1071
+#: src/pages/Vault.tsx:1368
 msgid "Block Height"
 msgstr ""
 
-#: src/pages/Vault.tsx:615
+#: src/pages/Vault.tsx:770
 msgid "Block must be greater than current height ({currentHeight})"
 msgstr ""
 
@@ -373,15 +405,9 @@ msgstr ""
 #~ msgid "Can this authority be revoked later?"
 #~ msgstr ""
 
-#: src/components/AirdropFungible.tsx:252
-#: src/components/BurnTokenModal.tsx:252
-#: src/components/MeltDigitalObject.tsx:138
-#: src/components/MeltFungible.tsx:152
-#: src/components/SendDigitalObject.tsx:217
-#: src/components/SendFungible.tsx:227
-#: src/components/SendRXD.tsx:231
-#~ msgid "Cancel"
-#~ msgstr ""
+#: src/components/DecryptionDialog.tsx:180
+msgid "Cancel"
+msgstr ""
 
 #: src/components/EncryptedContentUnlock.tsx:101
 #~ msgid "Cannot retrieve encrypted blob — locator not found in token metadata"
@@ -395,11 +421,11 @@ msgstr ""
 #~ msgid "CEK is now on-chain — anyone can decrypt this content. Tx: {0}…"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1487
+#: src/pages/Vault.tsx:1887
 msgid "Check"
 msgstr ""
 
-#: src/pages/Vault.tsx:990
+#: src/pages/Vault.tsx:1279
 msgid "Check Failed"
 msgstr ""
 
@@ -407,28 +433,28 @@ msgstr ""
 #~ msgid "Checking availability..."
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1485
+#: src/pages/Vault.tsx:1885
 msgid "Checking..."
 msgstr ""
 
-#: src/pages/Vault.tsx:1640
-#: src/pages/Vault.tsx:1645
+#: src/pages/Vault.tsx:2057
+#: src/pages/Vault.tsx:2069
 msgid "Claim"
 msgstr ""
 
-#: src/pages/Vault.tsx:838
+#: src/pages/Vault.tsx:1102
 msgid "Claim Failed"
 msgstr ""
 
-#: src/pages/Vault.tsx:1421
+#: src/pages/Vault.tsx:1821
 msgid "claimed"
 msgstr ""
 
-#: src/components/VaultDetailModal.tsx:33
-#: src/components/VaultDetailModal.tsx:48
-#: src/components/VaultDetailModal.tsx:64
-#: src/pages/Vault.tsx:1550
-#: src/pages/Vault.tsx:1615
+#: src/components/VaultDetailModal.tsx:66
+#: src/components/VaultDetailModal.tsx:98
+#: src/components/VaultDetailModal.tsx:124
+#: src/pages/Vault.tsx:1957
+#: src/pages/Vault.tsx:2027
 msgid "Claimed"
 msgstr ""
 
@@ -448,8 +474,12 @@ msgstr ""
 #~ msgid "Click to unlock"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:91
+#: src/components/VaultDetailModal.tsx:165
 msgid "Close"
+msgstr ""
+
+#: src/components/DecryptionDialog.tsx:83
+msgid "Close dialog"
 msgstr ""
 
 #: src/components/SideBar.tsx:100
@@ -529,9 +559,11 @@ msgstr ""
 #~ msgid "Contains executable code (use with caution)"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:128
-#~ msgid "Content Decrypted!"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:325
+#: src/components/EncryptedContentUnlock.tsx:365
+#: src/components/EncryptedContentUnlock.tsx:599
+msgid "Content Decrypted!"
+msgstr ""
 
 #: src/pages/Mint.tsx:1667
 #~ msgid "Content File"
@@ -571,6 +603,10 @@ msgstr ""
 #~ msgid "Copy full address"
 #~ msgstr ""
 
+#: src/components/EncryptedContentUnlock.tsx:469
+msgid "Copy the link and send it to the recipient"
+msgstr ""
+
 #: src/components/ReceiveRXD.tsx:53
 #: src/components/RecoveryPhrase.tsx:32
 #~ msgid "Copy to clipboard"
@@ -581,7 +617,7 @@ msgstr ""
 #~ msgid "Copy URL"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:931
+#: src/pages/Vault.tsx:1197
 msgid "Could not fetch tx {txid}"
 msgstr ""
 
@@ -619,11 +655,11 @@ msgstr ""
 #~ msgid "Create Authority Token"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1021
+#: src/pages/Vault.tsx:1318
 msgid "Create Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:1399
+#: src/pages/Vault.tsx:1788
 msgid "Create Vesting Schedule"
 msgstr ""
 
@@ -631,7 +667,7 @@ msgstr ""
 #~ msgid "create_listing, approve_trades, etc."
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:57
+#: src/components/VaultDetailModal.tsx:111
 msgid "Created"
 msgstr ""
 
@@ -664,11 +700,11 @@ msgstr ""
 #~ msgid "Current block"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:392
+#: src/pages/Vault.tsx:478
 msgid "Current block: {0}"
 msgstr ""
 
-#: src/pages/Vault.tsx:395
+#: src/pages/Vault.tsx:482
 msgid "Current block: {0} — locks for {1}"
 msgstr ""
 
@@ -681,11 +717,11 @@ msgstr ""
 #~ msgid "Current time"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:398
+#: src/pages/Vault.tsx:487
 msgid "Current time: {0}"
 msgstr ""
 
-#: src/pages/Vault.tsx:401
+#: src/pages/Vault.tsx:490
 msgid "Current time: {0} — locks for {1}"
 msgstr ""
 
@@ -713,9 +749,13 @@ msgstr ""
 #~ msgid "Decentralized mint"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:165
-#~ msgid "Decrypt Content"
-#~ msgstr ""
+#: src/components/DecryptionDialog.tsx:193
+msgid "Decrypt"
+msgstr ""
+
+#: src/components/DecryptionDialog.tsx:77
+msgid "Decrypt Content"
+msgstr ""
 
 #: src/components/EncryptedContentUnlock.tsx:368
 #~ msgid "Decrypt with Password"
@@ -725,15 +765,18 @@ msgstr ""
 #~ msgid "Decrypt with Wallet Key"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:365
-#: src/components/EncryptedContentUnlock.tsx:395
-#~ msgid "Decrypting..."
-#~ msgstr ""
+#: src/components/DecryptionDialog.tsx:190
+msgid "Decrypting..."
+msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:155
-#: src/components/EncryptedContentUnlock.tsx:196
-#~ msgid "Decryption Failed"
-#~ msgstr ""
+#: src/components/DecryptionDialog.tsx:57
+msgid "Decryption failed"
+msgstr ""
+
+#: src/components/EncryptedContentUnlock.tsx:647
+#: src/components/EncryptedContentUnlock.tsx:694
+msgid "Decryption Failed"
+msgstr ""
 
 #: src/components/EncryptedContentUnlock.tsx:343
 #~ msgid "Decryption Password"
@@ -810,11 +853,11 @@ msgstr ""
 #~ msgid "e.g. \"Reveal on New Year's Day\""
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1207
+#: src/pages/Vault.tsx:1572
 msgid "e.g. 10000"
 msgstr ""
 
-#: src/pages/Vault.tsx:1389
+#: src/pages/Vault.tsx:1778
 msgid "e.g. Savings, Vesting Q1"
 msgstr ""
 
@@ -847,6 +890,10 @@ msgstr ""
 #~ msgid "Encrypted Content"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:119
+msgid "Encryption Passphrase"
+msgstr ""
+
 #: src/components/RoyaltyConfig.tsx:103
 #~ msgid "Enforce On-Chain"
 #~ msgstr ""
@@ -859,6 +906,10 @@ msgstr ""
 #~ msgid "Enter a name (3-63 characters, lowercase alphanumeric and hyphens)"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:126
+msgid "Enter a strong passphrase…"
+msgstr ""
+
 #: src/pages/Mint.tsx:1755
 #~ msgid "Enter a URL (max {0} KB)"
 #~ msgstr ""
@@ -867,20 +918,31 @@ msgstr ""
 #~ msgid "Enter block height"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:349
-#: src/pages/WalletSettings.tsx:114
-#~ msgid "Enter password"
-#~ msgstr ""
+#: src/components/DecryptionDialog.tsx:101
+msgid "Enter Passphrase"
+msgstr ""
+
+#: src/components/EncryptedContentUnlock.tsx:849
+msgid "Enter password"
+msgstr ""
 
 #: src/components/RoyaltyConfig.tsx:148
 #~ msgid "Enter Radiant address"
 #~ msgstr ""
 
+#: src/pages/Vault.tsx:1405
+msgid "Enter ref manually"
+msgstr ""
+
 #: src/pages/Mint.tsx:1739
 #~ msgid "Enter text content (max {0} KB)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:914
+#: src/components/DecryptionDialog.tsx:109
+msgid "Enter the encryption passphrase..."
+msgstr ""
+
+#: src/pages/Vault.tsx:1180
 msgid "Enter Transaction ID"
 msgstr ""
 
@@ -888,12 +950,16 @@ msgstr ""
 #~ msgid "Enter your 12 word recovery phrase"
 #~ msgstr ""
 
+#: src/components/DecryptionDialog.tsx:144
+msgid "Enter your private key..."
+msgstr ""
+
 #: src/pages/Mint.tsx:2025
 #~ msgid "Epoch Length (blocks)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:567
-#: src/pages/Vault.tsx:774
+#: src/pages/Vault.tsx:667
+#: src/pages/Vault.tsx:982
 msgid "Error"
 msgstr ""
 
@@ -910,6 +976,10 @@ msgstr ""
 #: src/pages/WaveRegister.tsx:283
 #~ msgid "Expiration Date (Optional)"
 #~ msgstr ""
+
+#: src/components/EncryptedContentUnlock.tsx:475
+msgid "Export Failed"
+msgstr ""
 
 #: src/pages/Mint.tsx:2194
 #~ msgid "Fee"
@@ -937,7 +1007,7 @@ msgstr ""
 #~ msgid "Files may be unsafe and result in loss of funds"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:567
+#: src/pages/Vault.tsx:668
 msgid "Fill in start and interval"
 msgstr ""
 
@@ -946,25 +1016,31 @@ msgstr ""
 #~ msgid "Filter"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1440
+#: src/pages/Vault.tsx:1840
 msgid "found"
 msgstr ""
 
-#: src/pages/Vault.tsx:953
+#: src/pages/Vault.tsx:1242
 msgid "Found {0} vault(s) in this transaction. Check console for details."
 msgstr ""
 
-#: src/pages/Vault.tsx:882
+#: src/pages/Vault.tsx:1148
 msgid "Found {totalCount} vault(s) in transaction history"
 msgstr ""
 
-#: src/pages/Vault.tsx:1058
+#: src/pages/Vault.tsx:1355
 msgid "FT"
 msgstr ""
 
 #: src/pages/Mint.tsx:2201
 #~ msgid "FT supply funding"
 #~ msgstr ""
+
+#: src/pages/Vault.tsx:1377
+#: src/pages/Vault.tsx:1384
+#: src/pages/Vault.tsx:1386
+msgid "FT Token"
+msgstr ""
 
 #: src/components/MintMenu.tsx:43
 #~ msgid "Fungible Token"
@@ -979,7 +1055,7 @@ msgstr ""
 #~ msgid "Gateway"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1265
+#: src/pages/Vault.tsx:1642
 msgid "Generate"
 msgstr ""
 
@@ -995,6 +1071,11 @@ msgstr ""
 #: src/components/TimelockSection.tsx:211
 #~ msgid "Hide hint"
 #~ msgstr ""
+
+#: src/components/DecryptionDialog.tsx:121
+#: src/components/EncryptionModeSelector.tsx:133
+msgid "Hide passphrase"
+msgstr ""
 
 #: src/components/TimelockSection.tsx:217
 #~ msgid "Hint for viewers"
@@ -1028,6 +1109,10 @@ msgstr ""
 #~ msgid "Immutable"
 #~ msgstr ""
 
+#: src/components/EncryptedContentUnlock.tsx:612
+msgid "Import Failed"
+msgstr ""
+
 #: src/components/PasswordModal.tsx:94
 #~ msgid "Incorrect password"
 #~ msgstr ""
@@ -1049,16 +1134,16 @@ msgstr ""
 #~ msgid "Insufficient token balance"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1250
-#: src/pages/Vault.tsx:1255
+#: src/pages/Vault.tsx:1625
+#: src/pages/Vault.tsx:1631
 msgid "Interval"
 msgstr ""
 
-#: src/pages/Vault.tsx:1244
+#: src/pages/Vault.tsx:1618
 msgid "Interval (blocks)"
 msgstr ""
 
-#: src/pages/Vault.tsx:1244
+#: src/pages/Vault.tsx:1619
 msgid "Interval (seconds)"
 msgstr ""
 
@@ -1097,9 +1182,13 @@ msgstr ""
 #~ msgid "Invalid Name"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:156
-#~ msgid "Invalid password or corrupted content"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:648
+msgid "Invalid password or corrupted content"
+msgstr ""
+
+#: src/components/EncryptedContentUnlock.tsx:395
+msgid "Invalid Public Key"
+msgstr ""
 
 #: src/pages/RecoverWallet.tsx:75
 #~ msgid "Invalid recovery phrase"
@@ -1126,15 +1215,15 @@ msgstr ""
 #~ msgid "IPFS Gateway URL"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1471
+#: src/pages/Vault.tsx:1871
 msgid "Know a specific vault transaction? Paste the TXID below:"
 msgstr ""
 
-#: src/pages/Vault.tsx:1505
+#: src/pages/Vault.tsx:1906
 msgid "Label"
 msgstr ""
 
-#: src/pages/Vault.tsx:1384
+#: src/pages/Vault.tsx:1773
 msgid "Label (optional)"
 msgstr ""
 
@@ -1142,7 +1231,7 @@ msgstr ""
 #~ msgid "Language"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1437
+#: src/pages/Vault.tsx:1837
 msgid "Last scan"
 msgstr ""
 
@@ -1179,8 +1268,12 @@ msgstr ""
 msgid "Load Swap"
 msgstr ""
 
-#: src/components/BalanceHistoryChart.tsx:77
+#: src/components/BalanceHistoryChart.tsx:84
 msgid "Loading balance history..."
+msgstr ""
+
+#: src/components/DecryptionDialog.tsx:93
+msgid "Local Decryption"
 msgstr ""
 
 #: src/components/ViewDigitalObject.tsx:315
@@ -1191,13 +1284,13 @@ msgstr ""
 #~ msgid "Lock content until a block height or date"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1399
+#: src/pages/Vault.tsx:1788
 msgid "Lock in Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:1063
-#: src/pages/Vault.tsx:1067
-#: src/pages/Vault.tsx:1068
+#: src/pages/Vault.tsx:1360
+#: src/pages/Vault.tsx:1364
+#: src/pages/Vault.tsx:1365
 msgid "Lock Mode"
 msgstr ""
 
@@ -1205,16 +1298,16 @@ msgstr ""
 #~ msgid "Lock until"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1104
+#: src/pages/Vault.tsx:1446
 msgid "Lock Until (Unix)"
 msgstr ""
 
-#: src/pages/Vault.tsx:1104
+#: src/pages/Vault.tsx:1445
 msgid "Lock Until Block"
 msgstr ""
 
-#: src/components/VaultDetailModal.tsx:33
-#: src/pages/Vault.tsx:1560
+#: src/components/VaultDetailModal.tsx:69
+#: src/pages/Vault.tsx:1967
 msgid "Locked"
 msgstr ""
 
@@ -1235,7 +1328,7 @@ msgstr ""
 #~ msgid "LWMA Window Size (blocks)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1159
+#: src/pages/Vault.tsx:1514
 msgid "Manual"
 msgstr ""
 
@@ -1247,7 +1340,7 @@ msgstr ""
 #~ msgid "marketplace, governance, etc."
 #~ msgstr ""
 
-#: src/components/BalanceHistoryChart.tsx:133
+#: src/components/BalanceHistoryChart.tsx:156
 msgid "Max"
 msgstr ""
 
@@ -1278,6 +1371,10 @@ msgstr ""
 #~ msgid "Maximum size is {0} KB"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:70
+msgid "Medium"
+msgstr ""
+
 #: src/components/MeltDigitalObject.tsx:136
 #: src/components/MeltFungible.tsx:150
 #: src/components/ViewDigitalObject.tsx:292
@@ -1296,7 +1393,7 @@ msgstr ""
 #~ msgid "Method to resolve IPFS token content"
 #~ msgstr ""
 
-#: src/components/BalanceHistoryChart.tsx:132
+#: src/components/BalanceHistoryChart.tsx:153
 msgid "Min"
 msgstr ""
 
@@ -1375,7 +1472,7 @@ msgstr ""
 #~ msgid "My primary Radiant address"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1014
+#: src/pages/Vault.tsx:1311
 msgid "My Vaults"
 msgstr ""
 
@@ -1402,7 +1499,7 @@ msgstr ""
 msgid "New"
 msgstr ""
 
-#: src/components/ActivityNotifications.tsx:165
+#: src/components/ActivityNotifications.tsx:180
 msgid "New Activity"
 msgstr ""
 
@@ -1414,7 +1511,7 @@ msgstr ""
 #~ msgid "Next"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1057
+#: src/pages/Vault.tsx:1354
 msgid "NFT"
 msgstr ""
 
@@ -1422,11 +1519,17 @@ msgstr ""
 msgid "NFT {0} received"
 msgstr ""
 
+#: src/pages/Vault.tsx:1377
+#: src/pages/Vault.tsx:1384
+#: src/pages/Vault.tsx:1386
+msgid "NFT Token"
+msgstr ""
+
 #: src/pages/IpfsSettings.tsx:58
 #~ msgid "NFT.Storage API Key"
 #~ msgstr ""
 
-#: src/pages/History.tsx:72
+#: src/pages/History.tsx:105
 msgid "No activity recorded yet"
 msgstr ""
 
@@ -1435,7 +1538,7 @@ msgstr ""
 #~ msgid "No assets"
 #~ msgstr ""
 
-#: src/components/BalanceHistoryChart.tsx:86
+#: src/components/BalanceHistoryChart.tsx:93
 msgid "No balance history available yet. Transactions will appear here as they occur."
 msgstr ""
 
@@ -1463,31 +1566,31 @@ msgstr ""
 #~ msgid "No recipients"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:214
-#~ msgid "No Reveal Available"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:712
+msgid "No Reveal Available"
+msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:215
-#~ msgid "No saved CEK was found for this token."
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:713
+msgid "No saved CEK was found for this token."
+msgstr ""
 
 #: src/components/StatusBar.tsx:76
 #~ msgid "No servers defined"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:889
+#: src/pages/Vault.tsx:1155
 msgid "No timelocked coins found in transaction history"
 msgstr ""
 
-#: src/pages/Vault.tsx:981
+#: src/pages/Vault.tsx:1270
 msgid "No Vault Found"
 msgstr ""
 
-#: src/pages/Vault.tsx:888
+#: src/pages/Vault.tsx:1154
 msgid "No Vaults Found"
 msgstr ""
 
-#: src/pages/Vault.tsx:1452
+#: src/pages/Vault.tsx:1852
 msgid "No vaults yet. Create one to get started."
 msgstr ""
 
@@ -1517,11 +1620,11 @@ msgstr ""
 #~ msgid "Not connected to server. Check your network connection."
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1229
+#: src/pages/Vault.tsx:1600
 msgid "now"
 msgstr ""
 
-#: src/pages/Vault.tsx:1573
+#: src/pages/Vault.tsx:1980
 msgid "Now"
 msgstr ""
 
@@ -1546,7 +1649,7 @@ msgstr ""
 #~ msgid "Object"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1312
+#: src/pages/Vault.tsx:1692
 msgid "of total"
 msgstr ""
 
@@ -1573,7 +1676,7 @@ msgstr ""
 #~ msgid "Optional minimum royalty amount"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1455
+#: src/pages/Vault.tsx:1855
 msgid "Or scan your transaction history for existing timelocked coins."
 msgstr ""
 
@@ -1585,9 +1688,9 @@ msgstr ""
 #~ msgid "Output value"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:330
-#~ msgid "Passphrase"
-#~ msgstr ""
+#: src/components/EncryptionModeSelector.tsx:102
+msgid "Passphrase"
+msgstr ""
 
 #: src/pages/Mint.tsx:458
 #~ msgid "Passphrase must be at least 8 characters"
@@ -1601,16 +1704,20 @@ msgstr ""
 #~ msgid "Password"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:140
-#~ msgid "Password Required"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:626
+msgid "Password Required"
+msgstr ""
 
 #: src/pages/CreateWallet.tsx:68
 #: src/pages/RecoverWallet.tsx:45
 #~ msgid "Passwords do not match"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1476
+#: src/components/EncryptedContentUnlock.tsx:955
+msgid "Paste the link you received here…"
+msgstr ""
+
+#: src/pages/Vault.tsx:1876
 msgid "Paste transaction ID (txid)"
 msgstr ""
 
@@ -1619,11 +1726,11 @@ msgstr ""
 msgid "Pending"
 msgstr ""
 
-#: src/pages/Vault.tsx:1166
+#: src/pages/Vault.tsx:1523
 msgid "Percentage"
 msgstr ""
 
-#: src/pages/Vault.tsx:691
+#: src/pages/Vault.tsx:860
 msgid "Percentages must sum to 100% (currently {0}%)"
 msgstr ""
 
@@ -1643,8 +1750,12 @@ msgstr ""
 #~ msgid "Photons to be returned:"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1135
+#: src/pages/Vault.tsx:1488
 msgid "Pick a Date"
+msgstr ""
+
+#: src/pages/Vault.tsx:1423
+msgid "Pick from wallet"
 msgstr ""
 
 #: src/pages/Exit.tsx:7
@@ -1659,11 +1770,15 @@ msgstr ""
 #~ msgid "Please enter an authority name"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:141
-#~ msgid "Please enter the decryption password"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:627
+msgid "Please enter the decryption password"
+msgstr ""
 
-#: src/pages/Vault.tsx:915
+#: src/components/DecryptionDialog.tsx:45
+msgid "Please enter the required key"
+msgstr ""
+
+#: src/pages/Vault.tsx:1181
 msgid "Please paste a transaction ID to check"
 msgstr ""
 
@@ -1671,7 +1786,7 @@ msgstr ""
 #~ msgid "Please reconnect to mint your token"
 #~ msgstr ""
 
-#: src/pages/History.tsx:70
+#: src/pages/History.tsx:100
 msgid "Please unlock your wallet to view activity history"
 msgstr ""
 
@@ -1691,7 +1806,7 @@ msgstr ""
 #~ msgid "Premine supply funding"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1178
+#: src/pages/Vault.tsx:1539
 msgid "Preset Templates"
 msgstr ""
 
@@ -1715,6 +1830,10 @@ msgstr ""
 #~ msgid "Preview must be an image file"
 #~ msgstr ""
 
+#: src/components/DecryptionDialog.tsx:136
+msgid "Private Key"
+msgstr ""
+
 #: src/pages/Mint.tsx:1837
 #~ msgid "Properties that describe your asset"
 #~ msgstr ""
@@ -1727,7 +1846,7 @@ msgstr ""
 #~ msgid "Publish Reveal Transaction"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1034
+#: src/pages/Vault.tsx:1331
 msgid "Radiant address"
 msgstr ""
 
@@ -1736,7 +1855,7 @@ msgstr ""
 #~ msgid "Radiant ID"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:48
+#: src/components/VaultDetailModal.tsx:101
 msgid "Ready"
 msgstr ""
 
@@ -1750,12 +1869,17 @@ msgstr ""
 #~ msgid "Receive"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1029
+#: src/pages/Vault.tsx:1326
 msgid "Recipient Address"
 msgstr ""
 
-#: src/pages/Vault.tsx:612
+#: src/pages/Vault.tsx:765
 msgid "Recipient address is required. Click 'Self' to use your own address."
+msgstr ""
+
+#: src/components/EncryptionModeSelector.tsx:111
+#: src/components/EncryptionModeSelector.tsx:176
+msgid "Recipients"
 msgstr ""
 
 #: src/pages/CreateWallet.tsx:176
@@ -1800,13 +1924,13 @@ msgstr ""
 #~ msgid "remaining"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:47
-#: src/pages/Vault.tsx:1357
-#: src/pages/Vault.tsx:1504
+#: src/components/VaultDetailModal.tsx:95
+#: src/pages/Vault.tsx:1742
+#: src/pages/Vault.tsx:1905
 msgid "Remaining"
 msgstr ""
 
-#: src/pages/Vault.tsx:1324
+#: src/pages/Vault.tsx:1709
 msgid "Remove"
 msgstr ""
 
@@ -1822,17 +1946,21 @@ msgstr ""
 #~ msgid "Renderable, transferable, NSFW flags"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:164
+msgid "Required to decrypt content. Store it securely — it cannot be recovered."
+msgstr ""
+
 #: src/pages/WalletSettings.tsx:128
 #~ msgid "Resync Wallet"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:275
-#~ msgid "Reveal Failed"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:778
+msgid "Reveal Failed"
+msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:267
-#~ msgid "Reveal Published"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:767
+msgid "Reveal Published"
+msgstr ""
 
 #: src/pages/AuthorityManager.tsx:272
 #~ msgid "Revocable"
@@ -1862,8 +1990,8 @@ msgstr ""
 #~ msgid "Royalty Splits (Optional)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1056
-#: src/pages/Vault.tsx:1320
+#: src/pages/Vault.tsx:1353
+#: src/pages/Vault.tsx:1705
 msgid "RXD"
 msgstr ""
 
@@ -1881,17 +2009,17 @@ msgstr ""
 #~ msgid "Saved"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:896
+#: src/pages/Vault.tsx:1162
 msgid "Scan Failed"
 msgstr ""
 
-#: src/pages/Vault.tsx:1433
-#: src/pages/Vault.tsx:1465
+#: src/pages/Vault.tsx:1833
+#: src/pages/Vault.tsx:1865
 msgid "Scan for Vaults"
 msgstr ""
 
-#: src/pages/Vault.tsx:1431
-#: src/pages/Vault.tsx:1463
+#: src/pages/Vault.tsx:1831
+#: src/pages/Vault.tsx:1863
 msgid "Scanning..."
 msgstr ""
 
@@ -1907,12 +2035,16 @@ msgstr ""
 #~ msgid "Search by token ref..."
 #~ msgstr ""
 
+#: src/pages/Vault.tsx:1389
+msgid "Select a token from your wallet…"
+msgstr ""
+
 #: src/pages/CreateWallet.tsx:73
 #: src/pages/RecoverWallet.tsx:50
 #~ msgid "Select a valid network"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1039
+#: src/pages/Vault.tsx:1336
 msgid "Self"
 msgstr ""
 
@@ -1966,8 +2098,13 @@ msgstr ""
 #~ msgid "Shorter names cost more. This is a one-time fee."
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1417
+#: src/pages/Vault.tsx:1814
 msgid "Show Claimed"
+msgstr ""
+
+#: src/components/DecryptionDialog.tsx:121
+#: src/components/EncryptionModeSelector.tsx:133
+msgid "Show passphrase"
 msgstr ""
 
 #: src/pages/WalletSettings.tsx:109
@@ -1994,7 +2131,7 @@ msgstr ""
 #~ msgid "Split percentages must sum to {0}% (currently {1}%)"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1229
+#: src/pages/Vault.tsx:1598
 msgid "Start block"
 msgstr ""
 
@@ -2002,25 +2139,30 @@ msgstr ""
 #~ msgid "Start consolidation process"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1500
+#: src/pages/Vault.tsx:1901
 msgid "Status"
 msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:100
-#~ msgid "Storage Locator Missing"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:283
+msgid "Storage Locator Missing"
+msgstr ""
 
 #: src/pages/Mint.tsx:1568
 #~ msgid "Store HashStamp on-chain"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:71
+msgid "Strong"
+msgstr ""
+
 #: src/pages/RecoverWallet.tsx:141
 #~ msgid "Submit"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:129
-#~ msgid "Successfully unlocked encrypted content"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:326
+#: src/components/EncryptedContentUnlock.tsx:366
+msgid "Successfully unlocked encrypted content"
+msgstr ""
 
 #: src/pages/Mint.tsx:2185
 #~ msgid "Summary"
@@ -2074,7 +2216,11 @@ msgstr ""
 #~ msgid "This feature is coming soon"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:982
+#: src/components/DecryptionDialog.tsx:127
+msgid "This is the same passphrase used when the content was encrypted."
+msgstr ""
+
+#: src/pages/Vault.tsx:1271
 msgid "This transaction does not contain a recoverable vault. Check console for debug info."
 msgstr ""
 
@@ -2118,11 +2264,11 @@ msgstr ""
 #~ msgid "Timelocked reveal"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1289
+#: src/pages/Vault.tsx:1669
 msgid "Timestamp #{0}"
 msgstr ""
 
-#: src/pages/Vault.tsx:618
+#: src/pages/Vault.tsx:774
 msgid "Timestamp must be in the future"
 msgstr ""
 
@@ -2139,8 +2285,8 @@ msgstr ""
 #~ msgstr ""
 
 #: src/pages/Vault.tsx:1079
-msgid "Token Ref (LE hex)"
-msgstr ""
+#~ msgid "Token Ref (LE hex)"
+#~ msgstr ""
 
 #: src/pages/Mint.tsx:581
 #~ msgid "Token supply is too high"
@@ -2166,23 +2312,23 @@ msgstr ""
 #~ msgid "Total number of mints"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1202
+#: src/pages/Vault.tsx:1567
 msgid "Total Vesting Amount (RXD)"
 msgstr ""
 
-#: src/pages/Vault.tsx:698
+#: src/pages/Vault.tsx:871
 msgid "Tranche {0}: {lockTypeLabel} is required"
 msgstr ""
 
-#: src/pages/Vault.tsx:701
+#: src/pages/Vault.tsx:875
 msgid "Tranche {0}: Block {lt} must be greater than current height ({currentHeight})"
 msgstr ""
 
-#: src/pages/Vault.tsx:704
+#: src/pages/Vault.tsx:882
 msgid "Tranche {0}: Timestamp must be in the future"
 msgstr ""
 
-#: src/pages/Vault.tsx:1151
+#: src/pages/Vault.tsx:1504
 msgid "Tranches"
 msgstr ""
 
@@ -2190,7 +2336,7 @@ msgstr ""
 #~ msgid "tranches generated"
 #~ msgstr ""
 
-#: src/components/ActivityNotifications.tsx:94
+#: src/components/ActivityNotifications.tsx:105
 msgid "Transaction"
 msgstr ""
 
@@ -2203,7 +2349,7 @@ msgstr ""
 #~ msgid "Transaction ID: {0}..."
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:930
+#: src/pages/Vault.tsx:1196
 msgid "Transaction Not Found"
 msgstr ""
 
@@ -2226,7 +2372,7 @@ msgstr ""
 #~ msgid "Transaction: {0}..."
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:55
+#: src/components/VaultDetailModal.tsx:109
 msgid "Transactions"
 msgstr ""
 
@@ -2240,7 +2386,7 @@ msgstr ""
 #~ msgid "TX ID"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1501
+#: src/pages/Vault.tsx:1902
 msgid "Type"
 msgstr ""
 
@@ -2256,7 +2402,7 @@ msgstr ""
 #~ msgid "Universal Names"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1072
+#: src/pages/Vault.tsx:1369
 msgid "Unix Timestamp"
 msgstr ""
 
@@ -2272,8 +2418,8 @@ msgstr ""
 #~ msgid "Unlock"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:46
-#: src/pages/Vault.tsx:1503
+#: src/components/VaultDetailModal.tsx:91
+#: src/pages/Vault.tsx:1904
 msgid "Unlock At"
 msgstr ""
 
@@ -2281,20 +2427,24 @@ msgstr ""
 #~ msgid "Unlock to enable spending"
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:171
-#~ msgid "Unlock your wallet first to use your encryption key"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:663
+msgid "Unlock your wallet first to use your encryption key"
+msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:223
-#~ msgid "Unlock your wallet to publish a reveal transaction."
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:494
+msgid "Unlock your wallet first, then try again"
+msgstr ""
+
+#: src/components/EncryptedContentUnlock.tsx:721
+msgid "Unlock your wallet to publish a reveal transaction."
+msgstr ""
 
 #: src/components/EncryptedContentUnlock.tsx:386
 #~ msgid "Unlock your wallet to use your encryption key"
 #~ msgstr ""
 
-#: src/components/VaultDetailModal.tsx:33
-#: src/pages/Vault.tsx:1555
+#: src/components/VaultDetailModal.tsx:68
+#: src/pages/Vault.tsx:1962
 msgid "Unlockable"
 msgstr ""
 
@@ -2307,14 +2457,18 @@ msgstr ""
 #~ msgstr ""
 
 #: src/pages/Vault.tsx:1654
-msgid "Unlocks {0}"
+#~ msgid "Unlocks {0}"
+#~ msgstr ""
+
+#: src/pages/Vault.tsx:2082
+msgid "Unlocks {0} (claimable ~1h later — network propagation)"
 msgstr ""
 
 #: src/pages/Vault.tsx:1190
 #~ msgid "Unlocks at block"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1653
+#: src/pages/Vault.tsx:2079
 msgid "Unlocks at block {0} — {1} remaining"
 msgstr ""
 
@@ -2384,35 +2538,35 @@ msgstr ""
 #~ msgid "v2"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1502
+#: src/pages/Vault.tsx:1903
 msgid "Value"
 msgstr ""
 
-#: src/pages/Vault.tsx:1005
+#: src/pages/Vault.tsx:1302
 msgid "Vault"
 msgstr ""
 
-#: src/pages/Vault.tsx:830
+#: src/pages/Vault.tsx:1094
 msgid "Vault Claimed"
 msgstr ""
 
-#: src/pages/Vault.tsx:674
+#: src/pages/Vault.tsx:839
 msgid "Vault Created"
 msgstr ""
 
-#: src/components/VaultDetailModal.tsx:31
+#: src/components/VaultDetailModal.tsx:59
 msgid "Vault Details"
 msgstr ""
 
-#: src/pages/Vault.tsx:952
+#: src/pages/Vault.tsx:1241
 msgid "Vault Found!"
 msgstr ""
 
-#: src/components/VaultDetailModal.tsx:41
+#: src/components/VaultDetailModal.tsx:77
 msgid "Vault Information"
 msgstr ""
 
-#: src/pages/Vault.tsx:881
+#: src/pages/Vault.tsx:1147
 msgid "Vaults Discovered"
 msgstr ""
 
@@ -2424,11 +2578,11 @@ msgstr ""
 #~ msgid "Version:"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1095
+#: src/pages/Vault.tsx:1435
 msgid "Vesting Schedule"
 msgstr ""
 
-#: src/pages/Vault.tsx:759
+#: src/pages/Vault.tsx:967
 msgid "Vesting Schedule Created"
 msgstr ""
 
@@ -2441,15 +2595,15 @@ msgstr ""
 #~ msgid "View on block explorer"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1622
+#: src/pages/Vault.tsx:2036
 msgid "View on explorer"
 msgstr ""
 
-#: src/components/ActivityNotifications.tsx:109
+#: src/components/ActivityNotifications.tsx:120
 msgid "View transaction"
 msgstr ""
 
-#: src/pages/Vault.tsx:391
+#: src/pages/Vault.tsx:477
 msgid "Waiting for block data…"
 msgstr ""
 
@@ -2466,14 +2620,23 @@ msgstr ""
 #~ msgid "Wallet Key"
 #~ msgstr ""
 
+#: src/components/EncryptedContentUnlock.tsx:493
 #: src/hooks/useActivityDetector.ts:35
 msgid "Wallet locked"
 msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:170
-#: src/components/EncryptedContentUnlock.tsx:222
-#~ msgid "Wallet Locked"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:662
+#: src/components/EncryptedContentUnlock.tsx:720
+msgid "Wallet Locked"
+msgstr ""
+
+#: src/hooks/useActivityDetector.ts:77
+msgid "Wallet locked (inactive tab)"
+msgstr ""
+
+#: src/hooks/useActivityDetector.ts:113
+msgid "Wallet locked (other tab)"
+msgstr ""
 
 #: src/components/BurnTokenModal.tsx:68
 #~ msgid "Wallet not unlocked"
@@ -2513,6 +2676,10 @@ msgstr ""
 #~ msgid "Wave Names"
 #~ msgstr ""
 
+#: src/components/EncryptionModeSelector.tsx:69
+msgid "Weak"
+msgstr ""
+
 #: src/pages/Mint.tsx:1424
 #~ msgid "What data do you want to store?"
 #~ msgstr ""
@@ -2525,7 +2692,7 @@ msgstr ""
 #~ msgid "Yes"
 #~ msgstr ""
 
-#: src/pages/Vault.tsx:1643
+#: src/pages/Vault.tsx:2061
 msgid "You are not the recipient"
 msgstr ""
 
@@ -2545,6 +2712,10 @@ msgstr ""
 #~ msgid "Your file will be stored on-chain."
 #~ msgstr ""
 
+#: src/components/DecryptionDialog.tsx:150
+msgid "Your private key is required to unwrap the content encryption key."
+msgstr ""
+
 #: src/components/RecoveryPhrase.tsx:22
 #~ msgid "Your recovery phrase is the only way to restore your wallet after logging out. Keep it in a safe place and never share it."
 #~ msgstr ""
@@ -2561,9 +2732,9 @@ msgstr ""
 #~ msgid "Your wallet has been created. Please record your recovery phrase below."
 #~ msgstr ""
 
-#: src/components/EncryptedContentUnlock.tsx:197
-#~ msgid "Your wallet key is not a recipient for this content"
-#~ msgstr ""
+#: src/components/EncryptedContentUnlock.tsx:695
+msgid "Your wallet key is not a recipient for this content"
+msgstr ""
 
 #: src/components/TimelockSection.tsx:244
 #~ msgid "Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost."

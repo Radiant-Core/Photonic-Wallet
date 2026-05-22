@@ -19,20 +19,17 @@ import {
   TabPanel,
   Badge,
   IconButton,
-  Textarea,
 } from "@chakra-ui/react";
 import { AddIcon, DeleteIcon } from "@chakra-ui/icons";
-import { t, Trans } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import { wallet, feeRate } from "@app/signals";
 import { mintToken } from "@lib/mint";
-import { createAuthority, isAuthorityExpired } from "@lib/authority";
+import { createAuthority } from "@lib/authority";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import { ContractType } from "@app/types";
-import { useNavigate } from "react-router-dom";
 
 export default function AuthorityManager() {
   const [name, setName] = useState("");
@@ -44,7 +41,6 @@ export default function AuthorityManager() {
   const [isLoading, setIsLoading] = useState(false);
 
   const toast = useToast();
-  const navigate = useNavigate();
 
   const utxos = useLiveQuery(
     () => db.txo.where({ contractType: ContractType.RXD, spent: 0 }).toArray(),
@@ -96,8 +92,12 @@ export default function AuthorityManager() {
       // Mint authority token
       const { commitTx, revealTx } = mintToken(
         "nft",
-        { method: "direct", params: { address: wallet.value.address }, value: 1 },
-        wallet.value.wif,
+        {
+          method: "direct",
+          params: { address: wallet.value.address },
+          value: 1,
+        },
+        wallet.value.wif.toString(),
         utxos,
         metadata,
         [],
@@ -105,14 +105,18 @@ export default function AuthorityManager() {
       );
 
       // Broadcast transactions
-      const commitTxId = await electrumWorker.value.broadcast(commitTx.toString());
+      const commitTxId = await electrumWorker.value.broadcast(
+        commitTx.toString()
+      );
       await db.broadcast.put({
         txid: commitTxId,
         date: Date.now(),
         description: "authority_commit",
       });
 
-      const revealTxId = await electrumWorker.value.broadcast(revealTx.toString());
+      const revealTxId = await electrumWorker.value.broadcast(
+        revealTx.toString()
+      );
       await db.broadcast.put({
         txid: revealTxId,
         date: Date.now(),
@@ -123,9 +127,7 @@ export default function AuthorityManager() {
         title: "Authority Token Created!",
         description: (
           <VStack align="start" spacing={1}>
-            <Text>
-              Authority: {name}
-            </Text>
+            <Text>Authority: {name}</Text>
             <Text fontSize="sm">
               Transaction: {revealTxId.substring(0, 16)}...
             </Text>
@@ -157,28 +159,20 @@ export default function AuthorityManager() {
 
   return (
     <Container maxW="container.md" py={8}>
-      <PageHeader>
-        {"Authority Token Manager"}
-      </PageHeader>
+      <PageHeader>{"Authority Token Manager"}</PageHeader>
 
       <ContentContainer>
         <Tabs colorScheme="blue">
           <TabList>
-            <Tab>
-              Create Authority
-            </Tab>
-            <Tab>
-              My Authorities
-            </Tab>
+            <Tab>Create Authority</Tab>
+            <Tab>My Authorities</Tab>
           </TabList>
 
           <TabPanels>
             <TabPanel>
               <VStack spacing={6} align="stretch">
                 <FormControl isRequired>
-                  <FormLabel>
-                    Authority Name
-                  </FormLabel>
+                  <FormLabel>Authority Name</FormLabel>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -190,23 +184,17 @@ export default function AuthorityManager() {
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>
-                    Scope
-                  </FormLabel>
+                  <FormLabel>Scope</FormLabel>
                   <Input
                     value={scope}
                     onChange={(e) => setScope(e.target.value)}
                     placeholder={"marketplace, governance, etc."}
                   />
-                  <FormHelperText>
-                    What this authority governs
-                  </FormHelperText>
+                  <FormHelperText>What this authority governs</FormHelperText>
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>
-                    Permissions
-                  </FormLabel>
+                  <FormLabel>Permissions</FormLabel>
                   <HStack>
                     <Input
                       value={newPermission}
@@ -224,7 +212,7 @@ export default function AuthorityManager() {
                   <FormHelperText>
                     List of permissions granted by this authority
                   </FormHelperText>
-                  
+
                   {permissions.length > 0 && (
                     <Box mt={3}>
                       <HStack spacing={2} flexWrap="wrap">
@@ -254,23 +242,17 @@ export default function AuthorityManager() {
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>
-                    Expiration Date (Optional)
-                  </FormLabel>
+                  <FormLabel>Expiration Date (Optional)</FormLabel>
                   <Input
                     type="datetime-local"
                     value={expires}
                     onChange={(e) => setExpires(e.target.value)}
                   />
-                  <FormHelperText>
-                    Leave empty for no expiration
-                  </FormHelperText>
+                  <FormHelperText>Leave empty for no expiration</FormHelperText>
                 </FormControl>
 
                 <FormControl display="flex" alignItems="center">
-                  <FormLabel mb={0}>
-                    Revocable
-                  </FormLabel>
+                  <FormLabel mb={0}>Revocable</FormLabel>
                   <input
                     type="checkbox"
                     checked={revocable}

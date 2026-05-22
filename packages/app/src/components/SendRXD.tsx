@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import Big from "big.js";
 import { SelectableInput } from "@lib/coinSelect";
 import {
@@ -37,15 +36,17 @@ import { photonsToRXD } from "@lib/format";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { ContractType } from "@app/types";
-import { p2pkhScript, payToScript } from "@lib/script";
+import { payToScript } from "@lib/script";
 import { feeRate, network, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import Balance from "./Balance";
-import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
 import AddressInput from "./AddressInput";
 import { BsQrCodeScan } from "react-icons/bs";
 import { transferRadiant } from "@lib/transfer";
-import { useWaveResolver, isPotentialWaveName } from "@app/hooks/useWaveResolver";
+import {
+  useWaveResolver,
+  isPotentialWaveName,
+} from "@app/hooks/useWaveResolver";
 import { HiOutlineAtSymbol } from "react-icons/hi";
 
 interface Props {
@@ -152,15 +153,21 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
         p2script,
         value,
         feeRate.value,
-        wallet.value.wif as string
+        wallet.value.wif!.toString()
       );
 
       const rawTx = tx.toString();
       const txid = tx.hash;
 
       // Calculate fee from selected inputs and outputs
-      const inputTotal = selected.inputs.reduce((sum, input) => sum + input.value, 0);
-      const outputTotal = selected.outputs.reduce((sum, output) => sum + output.value, 0);
+      const inputTotal = selected.inputs.reduce(
+        (sum, input) => sum + input.value,
+        0
+      );
+      const outputTotal = selected.outputs.reduce(
+        (sum, output) => sum + output.value,
+        0
+      );
       const fee = inputTotal - outputTotal;
 
       // SECURITY FIX (C4): Show confirmation modal before broadcasting
@@ -217,7 +224,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       setConfirmModalOpen(false);
       setPendingTx(null);
 
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
     } catch (error) {
       console.error("Broadcast error:", error);
       toast({
@@ -370,11 +377,12 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
               </Text>
               <Text>
                 <strong>Amount:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.amount)} {network.value.ticker}
+                {pendingTx && photonsToRXD(pendingTx.amount)}{" "}
+                {network.value.ticker}
               </Text>
               <Text>
-                <strong>Fee:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+                <strong>Fee:</strong> {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                {network.value.ticker}
               </Text>
               <Text>
                 <strong>Total:</strong>{" "}
@@ -386,7 +394,8 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
               </Text>
               <Divider my={2} />
               <Text fontSize="sm" color="orange.500">
-                Please verify the recipient address and amount before confirming.
+                Please verify the recipient address and amount before
+                confirming.
               </Text>
             </VStack>
           </ModalBody>

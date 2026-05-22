@@ -7,7 +7,6 @@ import {
   MenuItem,
   Icon,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import {
   TbTriangleSquareCircle,
   TbBox,

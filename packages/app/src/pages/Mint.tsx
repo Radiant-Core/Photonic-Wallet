@@ -1,8 +1,14 @@
 import React, { useCallback, useReducer, useRef, useState } from "react";
 import mime from "mime";
-import { t, Trans } from "@lingui/macro";
 import { Link } from "react-router-dom";
-import { GLYPH_DMINT, GLYPH_ENCRYPTED, GLYPH_FT, GLYPH_MUT, GLYPH_NFT, GLYPH_TIMELOCK } from "@lib/protocols";
+import {
+  GLYPH_DMINT,
+  GLYPH_ENCRYPTED,
+  GLYPH_FT,
+  GLYPH_MUT,
+  GLYPH_NFT,
+  GLYPH_TIMELOCK,
+} from "@lib/protocols";
 import {
   Alert,
   AlertIcon,
@@ -45,6 +51,7 @@ import db from "@app/db";
 import { ContractType, ElectrumStatus } from "@app/types";
 import Outpoint from "@lib/Outpoint";
 import { mintToken } from "@lib/mint";
+import { sanitizeSvgBytes, looksLikeSvg } from "@app/svgSanitize";
 //import { encodeCid, upload } from "@lib/ipfs";
 import { photonsToRXD } from "@lib/format";
 import TokenType from "@app/components/TokenType";
@@ -127,7 +134,11 @@ function cleanError(message: string) {
 
 function isMissingInputsError(error: unknown): boolean {
   const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+      ? error
+      : "";
   return message.toLowerCase().includes("missing inputs");
 }
 
@@ -143,7 +154,10 @@ function formatNumber(num: number) {
 
 // Estimate minting fee based on file size (rough approximation)
 // Fee = (baseSize + fileSize) * feeRate * 2 (commit + reveal txs)
-function estimateMintFee(fileSizeBytes: number, currentFeeRate: number): number {
+function estimateMintFee(
+  fileSizeBytes: number,
+  currentFeeRate: number
+): number {
   const baseTxSize = 500; // Base transaction overhead
   const feeRate = currentFeeRate || 10000; // Default 10000 sat/byte
   // Rough estimate: file size + overhead for both commit and reveal transactions
@@ -203,7 +217,8 @@ function TargetBox({
               {"Upload file"}
             </Text>
             <Text color="gray.300" fontSize="md">
-              Maximum {formatNumber(mintEmbedMaxBytes / 1000)}KB - Images, Files, URLs, or Text
+              Maximum {formatNumber(mintEmbedMaxBytes / 1000)}KB - Images,
+              Files, URLs, or Text
             </Text>
           </>
         )}
@@ -228,7 +243,8 @@ const formReducer = (
   return { ...state, [event.name]: event.value };
 };
 
-const isAdaptiveDaaMode = (daaMode?: string) => Boolean(daaMode && daaMode !== "fixed");
+const isAdaptiveDaaMode = (daaMode?: string) =>
+  Boolean(daaMode && daaMode !== "fixed");
 
 const MAX_DMIN_CONTRACTS = 32;
 
@@ -260,21 +276,21 @@ const encodeContent = (
 
   if (mode === "dual") {
     const files: { [key: string]: SmartTokenFile } = {};
-    
+
     if (dualFileState.previewImage) {
-      files["preview"] = { 
-        t: dualFileState.previewImage.type || "", 
-        b: new Uint8Array(dualFileState.previewImage.data) 
+      files["preview"] = {
+        t: dualFileState.previewImage.type || "",
+        b: new Uint8Array(dualFileState.previewImage.data),
       };
     }
-    
+
     if (dualFileState.contentFile) {
-      files["content"] = { 
-        t: dualFileState.contentFile.type || "", 
-        b: new Uint8Array(dualFileState.contentFile.data) 
+      files["content"] = {
+        t: dualFileState.contentFile.type || "",
+        b: new Uint8Array(dualFileState.contentFile.data),
       };
     }
-    
+
     return Object.keys(files).length > 0 ? ["", files] : ["", undefined];
   }
 
@@ -338,7 +354,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   const [attrs, setAttrs] = reset(useState<[string, string][]>([]));
   const [mode, setMode] = reset(useState<ContentMode>("file"));
   const [fileState, setFileState] = reset(useState<FileState>({ ...noFile }));
-  const [dualFileState, setDualFileState] = reset(useState<DualFileState>({ ...noDualFile }));
+  const [dualFileState, setDualFileState] = reset(
+    useState<DualFileState>({ ...noDualFile })
+  );
   const [enableHashstamp, setEnableHashstamp] = reset(useState(true));
   const [hashStamp, setHashstamp] = reset(useState<Uint8Array | undefined>());
   const [encState, setEncState] = reset(
@@ -359,7 +377,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       premine: "0",
       immutable: ["user", "container"].includes(tokenType) ? "0" : "1",
       algorithm: "blake3", // Default to Blake3 for new contracts
-      daaMode: "asert",    // Default to ASERT for dynamic difficulty
+      daaMode: "asert", // Default to ASERT for dynamic difficulty
       targetBlockTime: "60", // Default 60 seconds
       // DAA-specific parameters
       asertHalfLife: "1000",
@@ -457,7 +475,10 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         });
         return;
       }
-      if (encState.mode === "recipient" && encState.recipientKeys.length === 0) {
+      if (
+        encState.mode === "recipient" &&
+        encState.recipientKeys.length === 0
+      ) {
         toast({
           status: "error",
           title: "No recipients",
@@ -533,7 +554,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         toast({
           status: "error",
           title: "Text content is too large",
-          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+          description:
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -545,7 +567,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         toast({
           status: "error",
           title: "URL content is too large",
-          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+          description:
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -561,12 +584,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         });
         return;
       }
-      
+
       if (dualFileState.totalSize > mintEmbedMaxBytes) {
         toast({
           status: "error",
           title: "Combined file size is too large",
-          description: "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+          description:
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
         });
         return;
       }
@@ -592,8 +616,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     const coins = await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
       .toArray();
-    
-    console.debug("[Mint] Available coins:", coins.length, "Total value:", coins.reduce((a, c) => a + c.value, 0));
+
+    console.debug(
+      "[Mint] Available coins:",
+      coins.length,
+      "Total value:",
+      coins.reduce((a, c) => a + c.value, 0)
+    );
 
     const [payloadFilename, content] = encodeContent(
       mode,
@@ -612,7 +641,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     // ----------------------------------------------------------------
     // Phase 6: Encrypt file/text content before building payload
     // ----------------------------------------------------------------
-    let encryptionResult: Awaited<ReturnType<typeof encryptContent>> | null = null;
+    let encryptionResult: Awaited<ReturnType<typeof encryptContent>> | null =
+      null;
     const encryptableBytes: Uint8Array | null =
       encState.enabled && mode === "file" && fileState.file?.data
         ? new Uint8Array(fileState.file.data)
@@ -627,28 +657,36 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
       // Derive self keypair for backup recipient slot — ensures the minter can
       // always decrypt their own NFT even after transferring it to someone else.
+      // R26: thread coinType so legacy (coinType 0) wallets derive the same
+      // recipient key they'd derive on decrypt.
       const selfKeypair = wallet.value.mnemonic
-        ? deriveEncryptionKeypair(wallet.value.mnemonic)
+        ? deriveEncryptionKeypair(
+            wallet.value.mnemonic.toString(),
+            wallet.value.coinType
+          )
         : undefined;
 
       const contentType =
-        mode === "text" ? "text/plain" : fileState.file?.type || "application/octet-stream";
+        mode === "text"
+          ? "text/plain"
+          : fileState.file?.type || "application/octet-stream";
 
-      encryptionResult = await encryptContent(
-        encryptableBytes,
-        {
-          mode: encState.mode,
-          passphrase: encState.mode === "passphrase" ? encState.passphrase : undefined,
-          recipientPublicKeys:
-            encState.mode === "recipient"
-              ? encState.recipientKeys.map((k) => new Uint8Array(Buffer.from(k, "hex")))
-              : undefined,
-          contentType,
-          name: fields.name || payloadFilename || (mode === "text" ? "text" : "file"),
-          protocolIds: [GLYPH_NFT, GLYPH_ENCRYPTED],
-          selfKeypair,
-        }
-      );
+      encryptionResult = await encryptContent(encryptableBytes, {
+        mode: encState.mode,
+        passphrase:
+          encState.mode === "passphrase" ? encState.passphrase : undefined,
+        recipientPublicKeys:
+          encState.mode === "recipient"
+            ? encState.recipientKeys.map(
+                (k) => new Uint8Array(Buffer.from(k, "hex"))
+              )
+            : undefined,
+        contentType,
+        name:
+          fields.name || payloadFilename || (mode === "text" ? "text" : "file"),
+        protocolIds: [GLYPH_NFT, GLYPH_ENCRYPTED],
+        selfKeypair,
+      });
 
       // Inject timelock commitment into crypto metadata if needed
       if (tlParams) {
@@ -661,7 +699,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               timelock: {
                 mode: tlParams.mode,
                 unlock_at: tlParams.unlockAt,
-                cek_hash: `sha256:${Buffer.from(sha256(encryptionResult.cek)).toString("hex")}`,
+                cek_hash: `sha256:${Buffer.from(
+                  sha256(encryptionResult.cek)
+                ).toString("hex")}`,
                 ...(tlParams.hint ? { hint: tlParams.hint } : {}),
               },
             },
@@ -769,62 +809,74 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     // Build dmint object for v2 compliance per Glyph v2 spec Section 11.7
     let dmintPayload: { [key: string]: unknown } | undefined;
     if (deployMethod === "dmint") {
-      const { 
-        difficulty, 
-        maxHeight, 
-        reward, 
-        premine, 
+      const {
+        difficulty,
+        maxHeight,
+        reward,
+        premine,
         numContracts,
-        algorithm, 
-        daaMode, 
+        algorithm,
+        daaMode,
         targetBlockTime,
         asertHalfLife,
         asertAsymptote,
         lwmaWindowSize,
         epochLength,
         maxAdjustment,
-        schedule
+        schedule,
       } = fields;
       const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
         ? 1
         : clampNumContracts(numContracts);
-      
+
       dmintPayload = {
-        algo: algorithm === 'sha256d' ? 0x00 : 
-              algorithm === 'blake3' ? 0x01 : 
-              algorithm === 'k12' ? 0x02 : 0x00,
+        algo:
+          algorithm === "sha256d"
+            ? 0x00
+            : algorithm === "blake3"
+            ? 0x01
+            : algorithm === "k12"
+            ? 0x02
+            : 0x00,
         numContracts: resolvedNumContracts,
         maxHeight: parseInt(maxHeight, 10),
         reward: parseInt(reward, 10),
         premine: parseInt(premine, 10),
         diff: parseInt(difficulty, 10),
       };
-      
+
       // Add DAA configuration if not fixed
-      if (daaMode && daaMode !== 'fixed') {
+      if (daaMode && daaMode !== "fixed") {
         const daaConfig: { [key: string]: unknown } = {
-          mode: daaMode === 'epoch' ? 0x01 : 
-                daaMode === 'asert' ? 0x02 : 
-                daaMode === 'lwma' ? 0x03 : 
-                daaMode === 'schedule' ? 0x04 : 0x00,
+          mode:
+            daaMode === "epoch"
+              ? 0x01
+              : daaMode === "asert"
+              ? 0x02
+              : daaMode === "lwma"
+              ? 0x03
+              : daaMode === "schedule"
+              ? 0x04
+              : 0x00,
           targetBlockTime: parseInt(targetBlockTime, 10) || 60,
         };
-        
-        if (daaMode === 'asert') {
+
+        if (daaMode === "asert") {
           daaConfig.halfLife = parseInt(asertHalfLife, 10) || 1000;
-          if (asertAsymptote) daaConfig.asymptote = parseInt(asertAsymptote, 10);
-        } else if (daaMode === 'lwma') {
+          if (asertAsymptote)
+            daaConfig.asymptote = parseInt(asertAsymptote, 10);
+        } else if (daaMode === "lwma") {
           daaConfig.windowSize = parseInt(lwmaWindowSize, 10) || 144;
-        } else if (daaMode === 'epoch') {
+        } else if (daaMode === "epoch") {
           daaConfig.epochLength = parseInt(epochLength, 10) || 2016;
           daaConfig.maxAdjustment = parseFloat(maxAdjustment) || 4;
-        } else if (daaMode === 'schedule' && schedule) {
-          daaConfig.schedule = schedule.split(',').map((pair: string) => {
-            const [h, d] = pair.split(':').map(Number);
+        } else if (daaMode === "schedule" && schedule) {
+          daaConfig.schedule = schedule.split(",").map((pair: string) => {
+            const [h, d] = pair.split(":").map(Number);
             return { height: h, difficulty: d };
           });
         }
-        
+
         dmintPayload.daa = daaConfig;
       }
     }
@@ -907,15 +959,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     };
 
     try {
-      /*if (fileState.ipfs && fileState.file?.data) {
-        // FIXME does this throw an error when unsuccessful?
-        await upload(
-          fileState.file?.data,
-          fileState.cid,
-          dryRun,
-          apiKey as string
-        );
-      }*/
+      // R17: removed dead IPFS-upload block here (commented out for an
+      // unknown period; the `fileState.ipfs` code path is disabled in
+      // onDrop). When IPFS upload is re-introduced — likely as part of
+      // R21 (migrate off nft.storage) — wrap the upload call in an
+      // explicit try/catch and surface failures to the UI rather than
+      // letting them propagate as opaque exceptions.
 
       const relInputs: Utxo[] = [];
       if (userInput) relInputs.push(userInput);
@@ -925,21 +974,21 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         const address = wallet.value.address;
         if (tokenType === "fungible") {
           if (deployMethod === "dmint") {
-            const { 
-              difficulty, 
-              maxHeight, 
-              reward, 
-              premine, 
-              numContracts, 
-              algorithm, 
-              daaMode, 
+            const {
+              difficulty,
+              maxHeight,
+              reward,
+              premine,
+              numContracts,
+              algorithm,
+              daaMode,
               targetBlockTime,
               asertHalfLife,
               asertAsymptote,
               lwmaWindowSize,
               epochLength,
               maxAdjustment,
-              schedule
+              schedule,
             } = fields;
             const resolvedNumContracts = isAdaptiveDaaMode(daaMode)
               ? 1
@@ -957,27 +1006,32 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 address,
                 algorithm,
                 daaMode,
-                daaParams: daaMode !== 'fixed' ? {
-                  targetBlockTime: parseInt(targetBlockTime, 10),
-                  // Add DAA-specific parameters
-                  ...(daaMode === 'asert' && {
-                    halfLife: parseInt(asertHalfLife, 10),
-                    asymptote: parseInt(asertAsymptote, 10) || undefined,
-                  }),
-                  ...(daaMode === 'lwma' && {
-                    windowSize: parseInt(lwmaWindowSize, 10),
-                  }),
-                  ...(daaMode === 'epoch' && {
-                    epochLength: parseInt(epochLength, 10),
-                    maxAdjustment: parseFloat(maxAdjustment),
-                  }),
-                  ...(daaMode === 'schedule' && {
-                    schedule: schedule.split(',').map(pair => {
-                      const [height, difficulty] = pair.split(':').map(Number);
-                      return { height, difficulty };
-                    }),
-                  }),
-                } : null,
+                daaParams:
+                  daaMode !== "fixed"
+                    ? {
+                        targetBlockTime: parseInt(targetBlockTime, 10),
+                        // Add DAA-specific parameters
+                        ...(daaMode === "asert" && {
+                          halfLife: parseInt(asertHalfLife, 10),
+                          asymptote: parseInt(asertAsymptote, 10) || undefined,
+                        }),
+                        ...(daaMode === "lwma" && {
+                          windowSize: parseInt(lwmaWindowSize, 10),
+                        }),
+                        ...(daaMode === "epoch" && {
+                          epochLength: parseInt(epochLength, 10),
+                          maxAdjustment: parseFloat(maxAdjustment),
+                        }),
+                        ...(daaMode === "schedule" && {
+                          schedule: schedule.split(",").map((pair) => {
+                            const [height, difficulty] = pair
+                              .split(":")
+                              .map(Number);
+                            return { height, difficulty };
+                          }),
+                        }),
+                      }
+                    : null,
               } as RevealDmintParams,
             };
           } else {
@@ -1002,7 +1056,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       const { commitTx, revealTx, fees, size } = mintToken(
         shortTokenType,
         deploy,
-        wallet.value.wif as string,
+        wallet.value.wif!.toString(),
         coins,
         payload,
         relInputs,
@@ -1065,7 +1119,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           // Token ref convention used elsewhere in the wallet: <txid>:<vout>
           // Glyph v2 NFT output is at vout 0 of the reveal tx.
           const tokenRef = `${revealTxId}:0`;
-          saveReveal({
+          await saveReveal({
             tokenRef,
             cek: bytesToHex(encryptionResult.cek),
             cekHash: cekHashHex,
@@ -1126,11 +1180,39 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         return;
       }
 
+      // R13: sanitise SVG payloads before they enter the mint pipeline.
+      // The render path is already <img>-only (safe), but we still strip
+      // <script>, on* handlers, foreignObject, and external refs so the
+      // on-chain bytes are safe for any future third-party renderer
+      // (marketplaces, block explorers) that may not sandbox SVG.
+      // Widen the variable type so DOMPurify output (Uint8Array<ArrayBufferLike>)
+      // and the FileReader result (Uint8Array<ArrayBuffer>) are both assignable.
+      let rawBytes: Uint8Array<ArrayBufferLike> = new Uint8Array(
+        reader.result as ArrayBuffer
+      );
+      let finalSize = size;
+      if (type === "image/svg+xml" || looksLikeSvg(rawBytes)) {
+        const sanitised = sanitizeSvgBytes(rawBytes);
+        // Sanitisation can only shrink (or leave alone) the byte length.
+        if (sanitised.byteLength !== rawBytes.byteLength) {
+          console.debug(
+            `[mint] sanitised SVG: ${rawBytes.byteLength} → ${sanitised.byteLength} bytes`
+          );
+        }
+        rawBytes = sanitised;
+        finalSize = sanitised.byteLength;
+      }
+
+      // Copy into a fresh ArrayBuffer so `file.data` is an `ArrayBuffer`
+      // (the FileState type's declared shape), independent of which
+      // backing buffer DOMPurify happened to allocate.
+      const dataBuffer = new ArrayBuffer(rawBytes.byteLength);
+      new Uint8Array(dataBuffer).set(rawBytes);
       newState.file = {
         name: `main${name.substring(name.lastIndexOf("."))}`,
         type,
-        size,
-        data: reader.result as ArrayBuffer,
+        size: finalSize,
+        data: dataBuffer,
       };
 
       // SVG not working yet
@@ -1142,7 +1224,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         "image/avif",
       ].includes(type);
 
-      const typedArray = new Uint8Array(reader.result as ArrayBuffer);
+      const typedArray = rawBytes;
 
       if (
         [
@@ -1177,105 +1259,125 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   });
   const { onClick, ...rootProps } = getRootProps();
 
-  const onPreviewDrop = useCallback(async (files: File[]) => {
-    const reader = new FileReader();
+  const onPreviewDrop = useCallback(
+    async (files: File[]) => {
+      const reader = new FileReader();
 
-    reader.onload = async () => {
-      const newState = { ...dualFileState };
+      reader.onload = async () => {
+        const newState = { ...dualFileState };
 
-      if (files[0].size > mintEmbedMaxBytes) {
-        toast({ title: "Preview image is too large", status: "error" });
-        return;
-      }
+        if (files[0].size > mintEmbedMaxBytes) {
+          toast({ title: "Preview image is too large", status: "error" });
+          return;
+        }
 
-      const { name, size, type } = files[0];
-      if (!type || !type.startsWith('image/')) {
-        toast({ title: "Preview must be an image file", status: "error" });
-        return;
-      }
+        const { name, size, type } = files[0];
+        if (!type || !type.startsWith("image/")) {
+          toast({ title: "Preview must be an image file", status: "error" });
+          return;
+        }
 
-      newState.previewImage = {
-        name: `preview${name.substring(name.lastIndexOf("."))}`,
-        type,
-        size,
-        data: reader.result as ArrayBuffer,
+        newState.previewImage = {
+          name: `preview${name.substring(name.lastIndexOf("."))}`,
+          type,
+          size,
+          data: reader.result as ArrayBuffer,
+        };
+
+        newState.totalSize =
+          (newState.previewImage?.size || 0) +
+          (newState.contentFile?.size || 0);
+
+        if (newState.totalSize > mintEmbedMaxBytes) {
+          toast({
+            title: "Combined file size is too large",
+            description:
+              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+            status: "error",
+          });
+          return;
+        }
+
+        const typedArray = new Uint8Array(reader.result as ArrayBuffer);
+        newState.previewImgSrc = btoa(
+          typedArray.reduce((data, byte) => {
+            return data + String.fromCharCode(byte);
+          }, "")
+        );
+        newState.previewHash = sha256(typedArray);
+
+        setDualFileState(newState);
       };
+      reader.readAsArrayBuffer(files[0]);
+    },
+    [dualFileState]
+  );
 
-      newState.totalSize = (newState.previewImage?.size || 0) + (newState.contentFile?.size || 0);
+  const onContentDrop = useCallback(
+    async (files: File[]) => {
+      const reader = new FileReader();
 
-      if (newState.totalSize > mintEmbedMaxBytes) {
-        toast({ 
-          title: "Combined file size is too large", 
-          description: "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
-          status: "error" 
-        });
-        return;
-      }
+      reader.onload = async () => {
+        const newState = { ...dualFileState };
 
-      const typedArray = new Uint8Array(reader.result as ArrayBuffer);
-      newState.previewImgSrc = btoa(
-        typedArray.reduce((data, byte) => {
-          return data + String.fromCharCode(byte);
-        }, "")
-      );
-      newState.previewHash = sha256(typedArray);
+        if (files[0].size > mintEmbedMaxBytes) {
+          toast({ title: "Content file is too large", status: "error" });
+          return;
+        }
 
-      setDualFileState(newState);
-    };
-    reader.readAsArrayBuffer(files[0]);
-  }, [dualFileState]);
+        const { name, size, type } = files[0];
 
-  const onContentDrop = useCallback(async (files: File[]) => {
-    const reader = new FileReader();
+        newState.contentFile = {
+          name: `content${name.substring(name.lastIndexOf("."))}`,
+          type,
+          size,
+          data: reader.result as ArrayBuffer,
+        };
 
-    reader.onload = async () => {
-      const newState = { ...dualFileState };
+        newState.totalSize =
+          (newState.previewImage?.size || 0) +
+          (newState.contentFile?.size || 0);
 
-      if (files[0].size > mintEmbedMaxBytes) {
-        toast({ title: "Content file is too large", status: "error" });
-        return;
-      }
+        if (newState.totalSize > mintEmbedMaxBytes) {
+          toast({
+            title: "Combined file size is too large",
+            description:
+              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+            status: "error",
+          });
+          return;
+        }
 
-      const { name, size, type } = files[0];
+        const typedArray = new Uint8Array(reader.result as ArrayBuffer);
+        newState.contentHash = sha256(typedArray);
 
-      newState.contentFile = {
-        name: `content${name.substring(name.lastIndexOf("."))}`,
-        type,
-        size,
-        data: reader.result as ArrayBuffer,
+        setDualFileState(newState);
       };
+      reader.readAsArrayBuffer(files[0]);
+    },
+    [dualFileState]
+  );
 
-      newState.totalSize = (newState.previewImage?.size || 0) + (newState.contentFile?.size || 0);
-
-      if (newState.totalSize > mintEmbedMaxBytes) {
-        toast({ 
-          title: "Combined file size is too large", 
-          description: "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
-          status: "error" 
-        });
-        return;
-      }
-
-      const typedArray = new Uint8Array(reader.result as ArrayBuffer);
-      newState.contentHash = sha256(typedArray);
-
-      setDualFileState(newState);
-    };
-    reader.readAsArrayBuffer(files[0]);
-  }, [dualFileState]);
-
-  const { getRootProps: getPreviewRootProps, getInputProps: getPreviewInputProps, isDragActive: isPreviewDragActive } = useDropzone({
+  const {
+    getRootProps: getPreviewRootProps,
+    getInputProps: getPreviewInputProps,
+    isDragActive: isPreviewDragActive,
+  } = useDropzone({
     onDrop: onPreviewDrop,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.avif']
-    }
+      "image/*": [".jpeg", ".jpg", ".png", ".gif", ".webp", ".avif"],
+    },
   });
-  const { onClick: onPreviewClick, ...previewRootProps } = getPreviewRootProps();
+  const { onClick: onPreviewClick } = getPreviewRootProps();
 
-  const { getRootProps: getContentRootProps, getInputProps: getContentInputProps, isDragActive: isContentDragActive } = useDropzone({
+  const {
+    getRootProps: getContentRootProps,
+    getInputProps: getContentInputProps,
+    isDragActive: isContentDragActive,
+  } = useDropzone({
     onDrop: onContentDrop,
   });
-  const { onClick: onContentClick, ...contentRootProps } = getContentRootProps();
+  const { onClick: onContentClick } = getContentRootProps();
 
   const addAttr = () => {
     if (attrName.current?.value && attrValue.current?.value) {
@@ -1302,7 +1404,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   };
 
   const delPreviewImage = () => {
-    setDualFileState(prev => ({
+    setDualFileState((prev) => ({
       ...prev,
       previewImage: undefined,
       previewImgSrc: "",
@@ -1312,7 +1414,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   };
 
   const delContentFile = () => {
-    setDualFileState(prev => ({
+    setDualFileState((prev) => ({
       ...prev,
       contentFile: undefined,
       contentHash: undefined,
@@ -1333,9 +1435,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     // Hashrate estimates per algorithm (RTX 4090 approx):
     //   SHA256d: ~5 GH/s, Blake3: ~8 GH/s, K12: ~6 GH/s
     const hashRates: Record<string, number> = {
-      'sha256d': 5_000_000_000,
-      'blake3': 8_000_000_000,
-      'k12': 6_000_000_000,
+      sha256d: 5_000_000_000,
+      blake3: 8_000_000_000,
+      k12: 6_000_000_000,
     };
     const rate = hashRates[formData.algorithm] || 5_000_000_000;
     const seconds = Math.round((diff * Math.pow(2, 33)) / rate);
@@ -1409,7 +1511,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     ))}
                   </Select>
                   <FormHelperText>
-                    {"Assigning an author is recommended for authentication of tokens."}
+                    {
+                      "Assigning an author is recommended for authentication of tokens."
+                    }
                   </FormHelperText>
                 </FormControl>
                 {tokenType === "object" && (
@@ -1450,7 +1554,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl zIndex={0}>
                     <FormLabel>{"File"}</FormLabel>
                     <FormHelperText mb={4}>
-                      {"Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
+                      {
+                        "Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                      }
                     </FormHelperText>
                     {fileState.file?.data ? (
                       <Flex
@@ -1507,22 +1613,29 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   </FormControl>
                 </>
               )}
-              {((mode === "file" && fileState.file?.data) || (mode === "text" && !!formData.text)) && (
+              {((mode === "file" && fileState.file?.data) ||
+                (mode === "text" && !!formData.text)) && (
                 <EncryptionSection
                   state={encState}
                   onChange={setEncState}
-                  fileSize={mode === "text" ? new TextEncoder().encode(formData.text ?? "").length : fileState.file?.size}
+                  fileSize={
+                    mode === "text"
+                      ? new TextEncoder().encode(formData.text ?? "").length
+                      : fileState.file?.size
+                  }
                   disabled={loading}
                 />
               )}
-              {((mode === "file" && fileState.file?.data) || (mode === "text" && !!formData.text)) && encState.enabled && (
-                <TimelockSection
-                  state={timelockState}
-                  onChange={setTimelockState}
-                  encryptionEnabled={encState.enabled}
-                  disabled={loading}
-                />
-              )}
+              {((mode === "file" && fileState.file?.data) ||
+                (mode === "text" && !!formData.text)) &&
+                encState.enabled && (
+                  <TimelockSection
+                    state={timelockState}
+                    onChange={setTimelockState}
+                    encryptionEnabled={encState.enabled}
+                    disabled={loading}
+                  />
+                )}
               {mode === "file" && fileState.file?.data && !fileState.ipfs && (
                 <>
                   <Alert status="info">
@@ -1531,10 +1644,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <Alert status="warning" mt={2}>
                     <AlertIcon />
                     <Text>
-                      {"Estimated fee: ~${photonsToRXD(estimateMintFee(fileState.file.size || 0, feeRate.value))} ${network.value.ticker}"}
+                      {`Estimated fee: ~${photonsToRXD(
+                        estimateMintFee(fileState.file.size || 0, feeRate.value)
+                      )} ${network.value.ticker}`}
                       {(fileState.file.size || 0) > 50000 && (
                         <Text as="span" fontWeight="bold" color="orange.300">
-                          {" "}{"(Large file - consider compressing)"}
+                          {" "}
+                          {"(Large file - consider compressing)"}
                         </Text>
                       )}
                     </Text>
@@ -1580,7 +1696,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           </Stack>
                         </RadioGroup>
                         <FormHelperText mb={4}>
-                          {"A compressed copy of the token image stored on-chain"}
+                          {
+                            "A compressed copy of the token image stored on-chain"
+                          }
                         </FormHelperText>
                         {enableHashstamp && (
                           <>
@@ -1614,10 +1732,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl>
                     <FormLabel>{"Preview Image + Content File"}</FormLabel>
                     <FormHelperText mb={4}>
-                      {"Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB total)"}
+                      {
+                        "Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB total)"
+                      }
                     </FormHelperText>
                   </FormControl>
-                  
+
                   {/* Preview Image Upload */}
                   <FormControl zIndex={0}>
                     <FormLabel>{"Preview Image"}</FormLabel>
@@ -1646,7 +1766,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             {dualFileState.previewImage.type}
                           </Text>
                           <Text color="gray.400">
-                            {filesize(dualFileState.previewImage.size) as string}
+                            {
+                              filesize(
+                                dualFileState.previewImage.size
+                              ) as string
+                            }
                           </Text>
                         </Box>
                         <IconButton
@@ -1688,7 +1812,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         <Box flexGrow={1}>
                           <div>{dualFileState.contentFile.name}</div>
                           <Text color="gray.400">
-                            {dualFileState.contentFile.type || "application/octet-stream"}
+                            {dualFileState.contentFile.type ||
+                              "application/octet-stream"}
                           </Text>
                           <Text color="gray.400">
                             {filesize(dualFileState.contentFile.size) as string}
@@ -1717,21 +1842,34 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   </FormControl>
 
                   {/* Combined Size Display */}
-                  {(dualFileState.previewImage || dualFileState.contentFile) && (
+                  {(dualFileState.previewImage ||
+                    dualFileState.contentFile) && (
                     <>
                       <Alert status="info">
                         <AlertIcon />
                         <Text>
-                          {"Combined size: ${filesize(dualFileState.totalSize) as string} / ${formatNumber(mintEmbedMaxBytes / 1000)} KB"}
+                          {`Combined size: ${
+                            filesize(dualFileState.totalSize) as string
+                          } / ${formatNumber(mintEmbedMaxBytes / 1000)} KB`}
                         </Text>
                       </Alert>
                       <Alert status="warning" mt={2}>
                         <AlertIcon />
                         <Text>
-                          {"Estimated fee: ~${photonsToRXD(estimateMintFee(dualFileState.totalSize, feeRate.value))} ${network.value.ticker}"}
+                          {`Estimated fee: ~${photonsToRXD(
+                            estimateMintFee(
+                              dualFileState.totalSize,
+                              feeRate.value
+                            )
+                          )} ${network.value.ticker}`}
                           {dualFileState.totalSize > 50000 && (
-                            <Text as="span" fontWeight="bold" color="orange.300">
-                              {" "}{"(Large file - consider compressing)"}
+                            <Text
+                              as="span"
+                              fontWeight="bold"
+                              color="orange.300"
+                            >
+                              {" "}
+                              {"(Large file - consider compressing)"}
                             </Text>
                           )}
                         </Text>
@@ -1745,7 +1883,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl>
                     <FormLabel>Text</FormLabel>
                     <FormHelperText mb={4}>
-                      {"Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
+                      {
+                        "Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                      }
                     </FormHelperText>
                     <Textarea
                       name="text"
@@ -1761,7 +1901,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   <FormControl>
                     <FormLabel>URL</FormLabel>
                     <FormHelperText mb={4}>
-                      {"Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"}
+                      {
+                        "Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                      }
                     </FormHelperText>
                     <Input name="url" onChange={onFormChange} />
                   </FormControl>
@@ -1773,7 +1915,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       onChange={onFormChange}
                     />
                     <FormHelperText>
-                      {"Type of content the URL links to. Leave empty for a website link."}
+                      {
+                        "Type of content the URL links to. Leave empty for a website link."
+                      }
                     </FormHelperText>
                   </FormControl>
                 </>
@@ -1877,7 +2021,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   </RadioGroup>
                   {["user", "container"].includes(tokenType) && (
                     <FormHelperText mb={4}>
-                      {"Mutable tokens are recommended for user and container tokens"}
+                      {
+                        "Mutable tokens are recommended for user and container tokens"
+                      }
                     </FormHelperText>
                   )}
                 </FormControl>
@@ -1886,7 +2032,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
             {formData.immutable !== "1" && (
               <Alert status="info">
                 <AlertIcon />
-                {"A mutable contract will be created. The token owner can edit name, description, and attributes after minting."}
+                {
+                  "A mutable contract will be created. The token owner can edit name, description, and attributes after minting."
+                }
               </Alert>
             )}
             {tokenType === "fungible" && (
@@ -1914,20 +2062,28 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <option value="k12">KangarooTwelve</option>
                         </Select>
                         <FormHelperText>
-                          {formData.algorithm === 'sha256d' 
+                          {formData.algorithm === "sha256d"
                             ? "Legacy double-SHA256 algorithm. Competes with Radiant L1 mining hashrate."
-                            : formData.algorithm === 'blake3'
+                            : formData.algorithm === "blake3"
                             ? "High-performance GPU-friendly hash. Requires V2 fork (block 410,000)."
-                            : formData.algorithm === 'k12'
+                            : formData.algorithm === "k12"
                             ? "Keccak-based hash, excellent CPU/GPU balance. Requires V2 fork (block 410,000)."
-                            : ""
-                          }
+                            : ""}
                         </FormHelperText>
                       </FormControl>
-                      {(formData.algorithm === 'blake3' || formData.algorithm === 'k12') && (
+                      {(formData.algorithm === "blake3" ||
+                        formData.algorithm === "k12") && (
                         <Alert status="info" fontSize="sm">
                           <AlertIcon />
-                          {formData.algorithm === 'blake3' ? 'Blake3' : 'KangarooTwelve'} uses on-chain OP_{formData.algorithm === 'blake3' ? 'BLAKE3' : 'K12'} (V2 hard fork, block 410,000). Contracts deployed before activation will not be mineable.
+                          {formData.algorithm === "blake3"
+                            ? "Blake3"
+                            : "KangarooTwelve"}{" "}
+                          uses on-chain OP_
+                          {formData.algorithm === "blake3"
+                            ? "BLAKE3"
+                            : "K12"}{" "}
+                          (V2 hard fork, block 410,000). Contracts deployed
+                          before activation will not be mineable.
                         </Alert>
                       )}
                       <FormControl>
@@ -1944,19 +2100,18 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <option value="schedule">Schedule</option>
                         </Select>
                         <FormHelperText>
-                          {formData.daaMode === 'fixed'
+                          {formData.daaMode === "fixed"
                             ? "Difficulty never changes"
-                            : formData.daaMode === 'asert'
+                            : formData.daaMode === "asert"
                             ? "Exponential moving average, smooth adjustments"
-                            : formData.daaMode === 'lwma'
+                            : formData.daaMode === "lwma"
                             ? "Linear weighted moving average"
-                            : formData.daaMode === 'epoch'
+                            : formData.daaMode === "epoch"
                             ? "Bitcoin-style periodic adjustment (only at epoch boundaries)"
-                            : "Pre-determined difficulty curve at fixed heights"
-                          }
+                            : "Pre-determined difficulty curve at fixed heights"}
                         </FormHelperText>
                       </FormControl>
-                      {formData.daaMode !== 'fixed' && (
+                      {formData.daaMode !== "fixed" && (
                         <FormControl>
                           <FormLabel>{"Target Block Time (seconds)"}</FormLabel>
                           <Input
@@ -1969,13 +2124,14 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             max={3600}
                           />
                           <FormHelperText>
-                            Desired time between mints. Higher values reduce collisions.
+                            Desired time between mints. Higher values reduce
+                            collisions.
                           </FormHelperText>
                         </FormControl>
                       )}
-                      
+
                       {/* DAA-specific parameters */}
-                      {formData.daaMode === 'asert' && (
+                      {formData.daaMode === "asert" && (
                         <>
                           <FormControl>
                             <FormLabel>{"ASERT Half Life (blocks)"}</FormLabel>
@@ -1989,11 +2145,14 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               max={10000}
                             />
                             <FormHelperText>
-                              Controls how quickly difficulty adjusts. Higher values = slower adjustment.
+                              Controls how quickly difficulty adjusts. Higher
+                              values = slower adjustment.
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
-                            <FormLabel>{"ASERT Asymptote (optional)"}</FormLabel>
+                            <FormLabel>
+                              {"ASERT Asymptote (optional)"}
+                            </FormLabel>
                             <Input
                               defaultValue={formData.asertAsymptote || "0"}
                               placeholder="0"
@@ -2009,8 +2168,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           </FormControl>
                         </>
                       )}
-                      
-                      {formData.daaMode === 'lwma' && (
+
+                      {formData.daaMode === "lwma" && (
                         <FormControl>
                           <FormLabel>{"LWMA Window Size (blocks)"}</FormLabel>
                           <Input
@@ -2023,12 +2182,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             max={1000}
                           />
                           <FormHelperText>
-                            Number of recent blocks to consider for difficulty calculation.
+                            Number of recent blocks to consider for difficulty
+                            calculation.
                           </FormHelperText>
                         </FormControl>
                       )}
-                      
-                      {formData.daaMode === 'epoch' && (
+
+                      {formData.daaMode === "epoch" && (
                         <>
                           <FormControl>
                             <FormLabel>{"Epoch Length (blocks)"}</FormLabel>
@@ -2043,7 +2203,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             />
                             <FormHelperText>
                               Number of blocks between difficulty adjustments.
-                              Adjustment fires when `height % epochLength == 0` (skipping height 0).
+                              Adjustment fires when `height % epochLength == 0`
+                              (skipping height 0).
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
@@ -2059,26 +2220,31 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               <option value="16">16x (aggressive)</option>
                             </Select>
                             <FormHelperText>
-                              Maximum factor difficulty can change per adjustment. Restricted to
-                              powers of 2 so on-chain clamping uses OP_LSHIFT/OP_RSHIFT (cheaper bytecode).
+                              Maximum factor difficulty can change per
+                              adjustment. Restricted to powers of 2 so on-chain
+                              clamping uses OP_LSHIFT/OP_RSHIFT (cheaper
+                              bytecode).
                             </FormHelperText>
                           </FormControl>
                         </>
                       )}
 
-                      {formData.daaMode === 'schedule' && (
+                      {formData.daaMode === "schedule" && (
                         <FormControl>
                           <FormLabel>{"Difficulty Schedule"}</FormLabel>
                           <Textarea
-                            defaultValue={formData.schedule || "1000:500,2000:250,5000:100"}
+                            defaultValue={
+                              formData.schedule || "1000:500,2000:250,5000:100"
+                            }
                             placeholder="1000:500,2000:250,5000:100"
                             name="schedule"
                             onChange={onFormChange}
                             rows={3}
                           />
                           <FormHelperText>
-                            Comma-separated `height:difficulty` pairs, strictly ascending by height.
-                            Up to 10 entries. Below the first boundary the initial difficulty applies.
+                            Comma-separated `height:difficulty` pairs, strictly
+                            ascending by height. Up to 10 entries. Below the
+                            first boundary the initial difficulty applies.
                           </FormHelperText>
                         </FormControl>
                       )}
@@ -2095,19 +2261,31 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         />
                         {timeToMine && (
                           <FormHelperText>
-                            Approx {timeToMine} to mine on an RTX 4090 ({formData.algorithm === 'blake3' ? 'Blake3' : formData.algorithm === 'k12' ? 'K12' : 'SHA256d'})
+                            Approx {timeToMine} to mine on an RTX 4090 (
+                            {formData.algorithm === "blake3"
+                              ? "Blake3"
+                              : formData.algorithm === "k12"
+                              ? "K12"
+                              : "SHA256d"}
+                            )
                           </FormHelperText>
                         )}
-                        {formData.daaMode === 'fixed' && Number(formData.difficulty) < 2500000 && (
-                          <FormHelperText color="orange.500">
-                            ⚠️ Low fixed difficulty may cause high collision rates. Consider using dynamic DAA.
-                          </FormHelperText>
-                        )}
+                        {formData.daaMode === "fixed" &&
+                          Number(formData.difficulty) < 2500000 && (
+                            <FormHelperText color="orange.500">
+                              ⚠️ Low fixed difficulty may cause high collision
+                              rates. Consider using dynamic DAA.
+                            </FormHelperText>
+                          )}
                       </FormControl>
                       <FormControl>
                         <FormLabel>{"Number of contracts"}</FormLabel>
                         <Input
-                          value={isAdaptiveDaaMode(formData.daaMode) ? "1" : formData.numContracts}
+                          value={
+                            isAdaptiveDaaMode(formData.daaMode)
+                              ? "1"
+                              : formData.numContracts
+                          }
                           placeholder=""
                           name="numContracts"
                           type="number"
@@ -2161,7 +2339,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           min={0}
                         />
                         <FormHelperText>
-                          {"Token supply sent directly to your wallet. Requires an equal amount of RXD photons."}
+                          {
+                            "Token supply sent directly to your wallet. Requires an equal amount of RXD photons."
+                          }
                         </FormHelperText>
                       </FormControl>
                     </>
@@ -2178,7 +2358,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         min={1}
                       />
                       <FormHelperText>
-                        {"Token supply requires an equal amount of RXD photons. This must be provided on mint for \u201cdirect to wallet\u201d deployments."}
+                        {
+                          "Token supply requires an equal amount of RXD photons. This must be provided on mint for \u201cdirect to wallet\u201d deployments."
+                        }
                       </FormHelperText>
                     </FormControl>
                   )}
@@ -2238,7 +2420,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                 {isConnected ? (
                   <Alert status="success">
                     <AlertIcon />
-                    {"Your token is ready to mint. Please review all data and the transaction fee before proceeding."}
+                    {
+                      "Your token is ready to mint. Please review all data and the transaction fee before proceeding."
+                    }
                   </Alert>
                 ) : (
                   <Alert status="warning">

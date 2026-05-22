@@ -1,5 +1,15 @@
 import { SmartToken, SmartTokenType } from "@app/types";
-import { Box, Button, ButtonProps, Text, useClipboard, useToast, HStack, Alert, AlertIcon } from "@chakra-ui/react";
+import {
+  Box,
+  Button,
+  ButtonProps,
+  Text,
+  useClipboard,
+  useToast,
+  HStack,
+  Alert,
+  AlertIcon,
+} from "@chakra-ui/react";
 import { CheckIcon, CopyIcon } from "@chakra-ui/icons";
 import { PropsWithChildren, useState } from "react";
 import { photonsToRXD } from "@lib/format";
@@ -100,8 +110,9 @@ export default function ViewSwap({
         {!showBroadcast && (
           <Alert status="info" mt={4}>
             <AlertIcon />
-            This is a partially signed swap offer. Copy and share the hex locally.
-            It cannot be broadcast directly until another party completes it.
+            This is a partially signed swap offer. Copy and share the hex
+            locally. It cannot be broadcast directly until another party
+            completes it.
           </Alert>
         )}
         {broadcastTxid && (

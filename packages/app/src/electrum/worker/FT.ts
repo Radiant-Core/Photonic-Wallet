@@ -36,25 +36,28 @@ export class FTWorker extends NFTWorker {
     status: string,
     manual = false
   ) {
+    // Early-return checks run BEFORE the work try/finally so the finally
+    // doesn't accidentally flip `this.ready` back to `true` when the
+    // !ready guard intentionally bailed out.
+    // Same subscription can be returned twice
+    if (!manual && status === this.lastReceivedStatus) {
+      console.debug("Duplicate subscription received", status);
+      return;
+    }
+
+    if (
+      !this.ready ||
+      (!manual &&
+        (!this.worker.active || (await db.kvp.get("consolidationRequired"))))
+    ) {
+      this.receivedStatuses.push(status);
+      return;
+    }
+
+    this.ready = false;
+    this.lastReceivedStatus = status;
+
     try {
-      // Same subscription can be returned twice
-      if (!manual && status === this.lastReceivedStatus) {
-        console.debug("Duplicate subscription received", status);
-        return;
-      }
-
-      if (
-        !this.ready ||
-        (!manual &&
-          (!this.worker.active || (await db.kvp.get("consolidationRequired"))))
-      ) {
-        this.receivedStatuses.push(status);
-        return;
-      }
-
-      this.ready = false;
-      this.lastReceivedStatus = status;
-
       const { added, spent } = await this.updateTXOs(
         scriptHash,
         status,
@@ -143,25 +146,33 @@ export class FTWorker extends NFTWorker {
       updateFtBalances(touched);
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.FT);
-      this.ready = true;
-      if (this.receivedStatuses.length > 0) {
-        const lastStatus = this.receivedStatuses.pop();
-        this.receivedStatuses = [];
-        if (lastStatus) {
-          this.onSubscriptionReceived(scriptHash, lastStatus);
-        }
-      }
-
-      consolidationCheck();
     } catch (error) {
-      console.debug(error);
+      // R10 follow-up: on socket close the in-flight electrum request
+      // rejects. Log it, mark the subscription failed, and let `finally`
+      // restore `ready` so the next sync isn't permanently skipped.
+      console.warn("[FT] subscription update failed:", error);
+      if (status) this.receivedStatuses.push(status);
       db.subscriptionStatus.put({
         scriptHash,
         status: "",
         contractType: ContractType.FT,
         sync: { done: true, error: true },
       });
+    } finally {
+      this.ready = true;
     }
+
+    if (this.receivedStatuses.length > 0) {
+      const lastStatus = this.receivedStatuses.pop();
+      this.receivedStatuses = [];
+      if (lastStatus) {
+        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+          console.warn("[FT] requeued sync failed:", e)
+        );
+      }
+    }
+
+    consolidationCheck();
   }
 
   async register(address: string) {
@@ -175,10 +186,17 @@ export class FTWorker extends NFTWorker {
         this.scriptHash
       );
     } catch (error) {
-      console.warn("[FT] Subscription failed, falling back to manual sync:", error);
+      console.warn(
+        "[FT] Subscription failed, falling back to manual sync:",
+        error
+      );
       // Subscription may fail for large histories, but listunspent still works
       try {
-        await this.onSubscriptionReceived(this.scriptHash, "manual-fallback", true);
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
         console.debug("[FT] Manual fallback sync completed");
       } catch (fallbackError) {
         console.warn("[FT] Manual fallback also failed:", fallbackError);

@@ -7,7 +7,6 @@ import { describe, it, expect } from "vitest";
 import {
   nftRoyaltyScript,
   calculateRoyalty,
-  validateRoyaltyPayment,
   buildRoyaltyOutputs,
   checkRoyaltyCompliance,
   createRoyalty,
@@ -24,7 +23,7 @@ const TEST_REF = "a".repeat(64) + "00000000";
 describe("createRoyalty", () => {
   it("should create basic royalty metadata", () => {
     const royalty = createRoyalty(TEST_RECIPIENT, 500); // 5%
-    
+
     expect(royalty.enforced).toBe(false);
     expect(royalty.bps).toBe(500);
     expect(royalty.address).toBe(TEST_RECIPIENT);
@@ -63,7 +62,9 @@ describe("createRoyalty", () => {
       { address: TEST_RECIPIENT, bps: 300 },
       { address: TEST_SPLIT_RECIPIENT, bps: 100 }, // Only 400, not 500
     ];
-    expect(() => createRoyalty(TEST_RECIPIENT, 500, true, { splits })).toThrow();
+    expect(() =>
+      createRoyalty(TEST_RECIPIENT, 500, true, { splits })
+    ).toThrow();
   });
 });
 
@@ -136,7 +137,7 @@ describe("nftRoyaltyScript", () => {
       address: TEST_RECIPIENT,
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Should not contain OP_STATESEPARATOR or OP_OUTPUTVALUE
     expect(script).not.toContain("bd"); // OP_STATESEPARATOR
     expect(script).toContain("d8"); // OP_PUSHINPUTREFSINGLETON
@@ -149,7 +150,7 @@ describe("nftRoyaltyScript", () => {
       address: TEST_RECIPIENT,
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Should contain state separator and introspection opcodes
     expect(script).toContain("bd"); // OP_STATESEPARATOR
     expect(script).toContain("cc"); // OP_OUTPUTVALUE (0xcc)
@@ -163,11 +164,11 @@ describe("nftRoyaltyScript", () => {
       address: TEST_RECIPIENT,
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Check for OP_OUTPUTVALUE (0xcc) and OP_OUTPUTBYTECODE (0xcd) in hex
     expect(script).toMatch(/cc/); // OP_OUTPUTVALUE
     expect(script).toMatch(/cd/); // OP_OUTPUTBYTECODE
-    
+
     // Should contain expected P2PKH script for recipient
     const expectedP2pkh = p2pkhScript(TEST_RECIPIENT);
     expect(script).toContain(expectedP2pkh);
@@ -180,7 +181,7 @@ describe("nftRoyaltyScript", () => {
       address: TEST_RECIPIENT,
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Should contain the introspection opcodes
     expect(script).toContain("cc"); // OP_OUTPUTVALUE
     expect(script).toContain("cd"); // OP_OUTPUTBYTECODE
@@ -195,7 +196,7 @@ describe("nftRoyaltyScript", () => {
       minimum: 1000,
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Should contain state separator and introspection opcodes
     expect(script).toContain("bd"); // OP_STATESEPARATOR
     expect(script).toContain("cc"); // OP_OUTPUTVALUE
@@ -213,14 +214,14 @@ describe("nftRoyaltyScript", () => {
       ],
     };
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Should contain both recipient P2PKH scripts in the hex
     const script1 = p2pkhScript(TEST_RECIPIENT);
     const script2 = p2pkhScript(TEST_SPLIT_RECIPIENT);
-    
+
     expect(script).toContain(script1);
     expect(script).toContain(script2);
-    
+
     // Should have OP_OUTPUTBYTECODE for both splits
     const bytecodeMatches = script.match(/cd/g);
     expect(bytecodeMatches?.length).toBeGreaterThanOrEqual(2);
@@ -246,7 +247,7 @@ describe("buildRoyaltyOutputs", () => {
     };
     const recipientScript = p2pkhScript(TEST_RECIPIENT);
     const outputs = buildRoyaltyOutputs(10000, royalty, [recipientScript]);
-    
+
     expect(outputs).toHaveLength(1);
     expect(outputs[0].satoshis).toBe(500); // 5% of 10000
     expect(outputs[0].script).toBe(recipientScript);
@@ -265,7 +266,7 @@ describe("buildRoyaltyOutputs", () => {
     const script1 = p2pkhScript(TEST_RECIPIENT);
     const script2 = p2pkhScript(TEST_SPLIT_RECIPIENT);
     const outputs = buildRoyaltyOutputs(10000, royalty, [script1, script2]);
-    
+
     expect(outputs).toHaveLength(2);
     expect(outputs[0].satoshis).toBe(700); // 7% of 10000
     expect(outputs[1].satoshis).toBe(300); // 3% of 10000
@@ -281,7 +282,7 @@ describe("buildRoyaltyOutputs", () => {
     const recipientScript = p2pkhScript(TEST_RECIPIENT);
     // Small sale price where minimum applies
     const outputs = buildRoyaltyOutputs(1000, royalty, [recipientScript]);
-    
+
     expect(outputs[0].satoshis).toBe(1000); // Minimum applied
   });
 });
@@ -305,7 +306,7 @@ describe("checkRoyaltyCompliance", () => {
     };
     // Only 2 outputs (NFT + payment), missing royalty
     const outputs = [
-      { script: "", satoshis: 0 },    // Output 0: NFT
+      { script: "", satoshis: 0 }, // Output 0: NFT
       { script: "", satoshis: 10000 }, // Output 1: Payment
     ];
     const result = checkRoyaltyCompliance(outputs, royalty, 10000);
@@ -321,9 +322,9 @@ describe("checkRoyaltyCompliance", () => {
       address: TEST_RECIPIENT,
     };
     const outputs = [
-      { script: "", satoshis: 0 },    // Output 0: NFT
+      { script: "", satoshis: 0 }, // Output 0: NFT
       { script: "", satoshis: 10000 }, // Output 1: Payment
-      { script: "", satoshis: 100 },   // Output 2: Royalty (too low!)
+      { script: "", satoshis: 100 }, // Output 2: Royalty (too low!)
     ];
     const result = checkRoyaltyCompliance(outputs, royalty, 10000);
     expect(result.compliant).toBe(false);
@@ -337,9 +338,9 @@ describe("checkRoyaltyCompliance", () => {
       address: TEST_RECIPIENT,
     };
     const outputs = [
-      { script: "", satoshis: 0 },    // Output 0: NFT
+      { script: "", satoshis: 0 }, // Output 0: NFT
       { script: "", satoshis: 10000 }, // Output 1: Payment
-      { script: "", satoshis: 600 },   // Output 2: Royalty (>= 500)
+      { script: "", satoshis: 600 }, // Output 2: Royalty (>= 500)
     ];
     const result = checkRoyaltyCompliance(outputs, royalty, 10000);
     expect(result.compliant).toBe(true);
@@ -357,9 +358,9 @@ describe("checkRoyaltyCompliance", () => {
     };
     // Only 3 outputs, missing second split
     const outputs = [
-      { script: "", satoshis: 0 },    // Output 0: NFT
+      { script: "", satoshis: 0 }, // Output 0: NFT
       { script: "", satoshis: 10000 }, // Output 1: Payment
-      { script: "", satoshis: 700 },   // Output 2: First split
+      { script: "", satoshis: 700 }, // Output 2: First split
     ];
     const result = checkRoyaltyCompliance(outputs, royalty, 10000);
     expect(result.compliant).toBe(false);
@@ -377,15 +378,15 @@ describe("REP-3012 Compliance", () => {
       bps: 500,
       address: TEST_RECIPIENT,
     };
-    
+
     const script = nftRoyaltyScript(TEST_ADDRESS, TEST_REF, royalty);
-    
+
     // Script should reference output 1 for sale price
     // and output 2 for royalty using introspection opcodes
     expect(script).toContain("cc"); // OP_OUTPUTVALUE
     expect(script).toContain("cd"); // OP_OUTPUTBYTECODE
     expect(script).toContain("bd"); // OP_STATESEPARATOR
-    
+
     // Should have the expected P2PKH script for royalty recipient
     const expectedScript = p2pkhScript(TEST_RECIPIENT);
     expect(script).toContain(expectedScript);
@@ -393,10 +394,10 @@ describe("REP-3012 Compliance", () => {
 
   it("should calculate royalty correctly on-chain", () => {
     const testCases = [
-      { bps: 500, salePrice: 10000, expected: 500 },    // 5%
-      { bps: 250, salePrice: 10000, expected: 250 },    // 2.5%
-      { bps: 1000, salePrice: 50000, expected: 5000 },  // 10%
-      { bps: 100, salePrice: 10000, expected: 100 },    // 1%
+      { bps: 500, salePrice: 10000, expected: 500 }, // 5%
+      { bps: 250, salePrice: 10000, expected: 250 }, // 2.5%
+      { bps: 1000, salePrice: 50000, expected: 5000 }, // 10%
+      { bps: 100, salePrice: 10000, expected: 100 }, // 1%
     ];
 
     for (const tc of testCases) {

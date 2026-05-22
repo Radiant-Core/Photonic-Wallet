@@ -4,7 +4,7 @@
  */
 
 import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bytesToHex } from "@noble/hashes/utils";
 import { encode } from "cbor-x";
 import rjs from "@radiant-core/radiantjs";
 
@@ -158,9 +158,10 @@ export type GlyphV2Metadata = {
 /**
  * Normalize v1 shorthand to v2 full content model
  */
-export function normalizeV1ToV2Content(
-  main?: { t: string; b: Uint8Array }
-): GlyphV2Content | undefined {
+export function normalizeV1ToV2Content(main?: {
+  t: string;
+  b: Uint8Array;
+}): GlyphV2Content | undefined {
   if (!main) return undefined;
 
   const hash = bytesToHex(sha256(main.b));
@@ -207,9 +208,10 @@ export function signMetadata(
   privateKey: string | rjs.PrivateKey,
   algorithm: "ecdsa-secp256k1" | "schnorr-secp256k1" = "ecdsa-secp256k1"
 ): GlyphV2Metadata {
-  const privKey = typeof privateKey === "string" 
-    ? PrivateKey.fromWIF(privateKey) 
-    : privateKey;
+  const privKey =
+    typeof privateKey === "string"
+      ? PrivateKey.fromWIF(privateKey)
+      : privateKey;
 
   const pubkey = privKey.toPublicKey().toString();
 
@@ -231,8 +233,11 @@ export function signMetadata(
   const prefix = Buffer.from("glyph-v2-creator:", "utf-8");
   const message = sha256(Buffer.concat([prefix, commitHash]));
 
-  // Sign message
-  const sig = (privKey as any).sign(Buffer.from(message));
+  // Sign message. `PrivateKey.sign(msg) → Buffer` exists at runtime but
+  // isn't in the upstream radiantjs typings.
+  const sig = (privKey as unknown as { sign(msg: Buffer): Buffer }).sign(
+    Buffer.from(message)
+  );
 
   // Return metadata with signature
   return {
@@ -248,9 +253,10 @@ export function signMetadata(
 /**
  * Verify creator signature
  */
-export function verifyCreatorSignature(
-  metadata: GlyphV2Metadata
-): { valid: boolean; error?: string } {
+export function verifyCreatorSignature(metadata: GlyphV2Metadata): {
+  valid: boolean;
+  error?: string;
+} {
   if (typeof metadata.creator !== "object" || !metadata.creator.sig) {
     return { valid: false, error: "No creator signature present" };
   }
@@ -294,9 +300,10 @@ export function verifyCreatorSignature(
 /**
  * Validate v2 metadata schema
  */
-export function validateV2Metadata(
-  metadata: GlyphV2Metadata
-): { valid: boolean; errors: string[] } {
+export function validateV2Metadata(metadata: GlyphV2Metadata): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   // Required fields
@@ -321,7 +328,13 @@ export function validateV2Metadata(
   if (metadata.content) {
     if (metadata.content.primary) {
       const primary = metadata.content.primary;
-      if (!primary.path || !primary.mime || !primary.size || !primary.hash || !primary.storage) {
+      if (
+        !primary.path ||
+        !primary.mime ||
+        !primary.size ||
+        !primary.hash ||
+        !primary.storage
+      ) {
         errors.push("Content primary file missing required fields");
       }
     }
@@ -329,7 +342,11 @@ export function validateV2Metadata(
 
   // Royalty validation
   if (metadata.royalty) {
-    if (typeof metadata.royalty.bps !== "number" || metadata.royalty.bps < 0 || metadata.royalty.bps > 10000) {
+    if (
+      typeof metadata.royalty.bps !== "number" ||
+      metadata.royalty.bps < 0 ||
+      metadata.royalty.bps > 10000
+    ) {
       errors.push("Royalty bps must be between 0 and 10000");
     }
     if (!metadata.royalty.address) {

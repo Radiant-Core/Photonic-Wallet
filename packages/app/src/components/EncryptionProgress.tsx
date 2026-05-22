@@ -113,7 +113,9 @@ export function EncryptionProgress({
       <div className="encryption-progress complete">
         <div className="progress-header">
           <span className="status-icon">✅</span>
-          <span className="operation-title">{getOperationTitle(operation)}</span>
+          <span className="operation-title">
+            {getOperationTitle(operation)}
+          </span>
         </div>
         <div className="success-message">Operation completed successfully</div>
 
@@ -155,7 +157,9 @@ export function EncryptionProgress({
       <div className="encryption-progress idle">
         <div className="progress-header">
           <span className="status-icon">⏳</span>
-          <span className="operation-title">{getOperationTitle(operation)}</span>
+          <span className="operation-title">
+            {getOperationTitle(operation)}
+          </span>
         </div>
         <div className="waiting-message">Waiting to start...</div>
 

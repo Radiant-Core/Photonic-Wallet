@@ -10,7 +10,9 @@
 
 import { useState } from "react";
 
-const HAS_IPFS_KEY = !!(import.meta.env.VITE_NFT_STORAGE_TOKEN as string | undefined);
+const HAS_IPFS_KEY = !!(import.meta.env.VITE_NFT_STORAGE_TOKEN as
+  | string
+  | undefined);
 
 export type StorageBackend = "glyph" | "ipfs" | "arweave" | "backend";
 
@@ -39,27 +41,31 @@ const BACKEND_OPTIONS: {
     id: "glyph",
     label: "On-Chain",
     icon: "⛓️",
-    description: "Encrypted data inscribed directly on Radiant. Self-sovereign, permanent, no external providers. Max 512KB.",
+    description:
+      "Encrypted data inscribed directly on Radiant. Self-sovereign, permanent, no external providers. Max 512KB.",
     sizeLimit: GLYPH_MAX_SIZE,
   },
   {
     id: "ipfs",
     label: "IPFS",
     icon: "🌐",
-    description: "Content-addressed decentralized storage. Requires NFT.Storage API key for pinning.",
+    description:
+      "Content-addressed decentralized storage. Requires NFT.Storage API key for pinning.",
     requiresApiKey: true,
   },
   {
     id: "arweave",
     label: "Arweave",
     icon: "💎",
-    description: "Permanent, immutable storage. Free for files ≤100KB via Irys node2.",
+    description:
+      "Permanent, immutable storage. Free for files ≤100KB via Irys node2.",
   },
   {
     id: "backend",
     label: "Wallet Backend",
     icon: "🔒",
-    description: "Photonic Wallet's private backend. Fast and convenient but centralized.",
+    description:
+      "Photonic Wallet's private backend. Fast and convenient but centralized.",
   },
 ];
 
@@ -106,7 +112,8 @@ export function StorageBackendSelector({
         <div className="help-panel">
           <p>
             Choose where the encrypted content is stored. The encrypted locator
-            (pointer + metadata) is always stored on-chain regardless of this choice.
+            (pointer + metadata) is always stored on-chain regardless of this
+            choice.
           </p>
         </div>
       )}
@@ -121,11 +128,17 @@ export function StorageBackendSelector({
           return (
             <button
               key={option.id}
-              className={`backend-option ${isSelected ? "selected" : ""} ${isUnavailable ? "disabled" : ""}`}
+              className={`backend-option ${isSelected ? "selected" : ""} ${
+                isUnavailable ? "disabled" : ""
+              }`}
               onClick={() => !isUnavailable && !disabled && onChange(option.id)}
               disabled={disabled || isUnavailable}
               type="button"
-              title={missingKey ? "VITE_NFT_STORAGE_TOKEN env var not set — IPFS unavailable" : undefined}
+              title={
+                missingKey
+                  ? "VITE_NFT_STORAGE_TOKEN env var not set — IPFS unavailable"
+                  : undefined
+              }
             >
               <span className="option-icon">{option.icon}</span>
               <div className="option-details">
@@ -138,7 +151,9 @@ export function StorageBackendSelector({
                   </span>
                 )}
                 {missingKey && (
-                  <span className="size-limit exceeded">API key not configured</span>
+                  <span className="size-limit exceeded">
+                    API key not configured
+                  </span>
                 )}
               </div>
               {isSelected && <span className="checkmark">✓</span>}

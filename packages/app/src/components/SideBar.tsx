@@ -12,16 +12,20 @@ import Logo from "./Logo";
 import StatusBar from "./StatusBar";
 import { language, openMenu } from "@app/signals";
 import { RiSwap2Line } from "react-icons/ri";
-import { t } from "@lingui/macro";
 import { HiOutlineAtSymbol } from "react-icons/hi";
 import { MdHome } from "react-icons/md";
-import { TbTriangleSquareCircle, TbCoins, TbStack2, TbLock } from "react-icons/tb";
+import {
+  TbTriangleSquareCircle,
+  TbCoins,
+  TbStack2,
+  TbLock,
+} from "react-icons/tb";
 import MenuButton from "./MenuButton";
 import SyncBar from "./SyncBar";
 
 export default function SideBar({ ...rest }: GridProps) {
   // Trigger rerender when language changes
-  language.value;
+  void language.value;
 
   return (
     <Grid
@@ -105,10 +109,7 @@ export default function SideBar({ ...rest }: GridProps) {
         >
           {"Swap"}
         </MenuButton>
-        <MenuButton
-          to="/vault"
-          leftIcon={<Icon as={TbLock} boxSize={5} />}
-        >
+        <MenuButton to="/vault" leftIcon={<Icon as={TbLock} boxSize={5} />}>
           {"Vault"}
         </MenuButton>
       </SimpleGrid>

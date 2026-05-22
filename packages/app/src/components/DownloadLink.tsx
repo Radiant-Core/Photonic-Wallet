@@ -1,5 +1,4 @@
 import { Button, ButtonProps } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 
 export default function DownloadLink({
   children,

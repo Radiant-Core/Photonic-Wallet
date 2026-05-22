@@ -38,15 +38,19 @@ export default function TokenContent({
   onDecrypted?: (bytes: Uint8Array, mime: string) => void;
 }) {
   const [internalBytes, setInternalBytes] = useState<Uint8Array | null>(null);
-  const [internalMime, setInternalMime] = useState<string>("application/octet-stream");
+  const [internalMime, setInternalMime] = useState<string>(
+    "application/octet-stream"
+  );
   // Use controlled state when parent provides it, otherwise fall back to internal
-  const decryptedBytes = controlledBytes !== undefined ? controlledBytes : internalBytes;
-  const decryptedMime = controlledMime !== undefined ? controlledMime : internalMime;
+  const decryptedBytes =
+    controlledBytes !== undefined ? controlledBytes : internalBytes;
+  const decryptedMime =
+    controlledMime !== undefined ? controlledMime : internalMime;
   const [, forceUpdate] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
-  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
+  const isEncrypted = !!glyph?.p?.includes(GLYPH_ENCRYPTED);
+  const isTimelocked = !!glyph?.p?.includes(GLYPH_TIMELOCK);
 
   // Start a 1-second interval while content is timelocked and not yet decrypted
   useEffect(() => {
@@ -58,21 +62,32 @@ export default function TokenContent({
   }, [isTimelocked, decryptedBytes]);
 
   if (isEncrypted && !decryptedBytes) {
-    const stub = glyph?.crypto as any;
+    type CryptoStub = {
+      timelock?: { unlock_at?: number };
+      main?: Record<string, unknown>;
+      key_format?: string;
+      [key: string]: unknown;
+    };
+    const stub = glyph?.crypto as CryptoStub | undefined;
     const cryptoObj = glyph?.crypto as Record<string, unknown> | undefined;
     const locator = cryptoObj?.locator as string | undefined;
     const locatorNonce = cryptoObj?.locator_nonce as string | undefined;
-    const mainObj = glyph?.main as any;
-    const mainB = mainObj?.b as string | undefined; // hex ciphertext for on-chain (glyph) storage
-    const contentType = mainObj?.type as string | undefined;
+    const mainObj = glyph?.main as { b?: string; type?: string } | undefined;
+    const mainB = mainObj?.b; // hex ciphertext for on-chain (glyph) storage
+    const contentType = mainObj?.type;
 
     const unlockAt: number | undefined = stub?.timelock?.unlock_at;
-    const remaining = isTimelocked && unlockAt
-      ? getUnlockRemaining(
-          // Minimal shape accepted by getUnlockRemaining
-          { p: glyph!.p, main: stub?.main ?? {}, crypto: stub ?? {} } as any
-        )
-      : 0;
+    const remaining =
+      isTimelocked && unlockAt
+        ? getUnlockRemaining(
+            // Minimal shape accepted by getUnlockRemaining
+            {
+              p: glyph!.p,
+              main: stub?.main ?? {},
+              crypto: stub ?? {},
+            } as Parameters<typeof getUnlockRemaining>[0]
+          )
+        : 0;
     const stillLocked = remaining > 0;
 
     if (thumbnail) {
@@ -82,8 +97,16 @@ export default function TokenContent({
       // 3. key_format=passphrase — password can be entered (MdLockOpen, blue)
       const keyFormat = stub?.key_format as string | undefined;
       const isRecipientMode = !stillLocked && keyFormat === "wrapped";
-      const iconAs = stillLocked ? MdTimer : isRecipientMode ? MdLock : MdLockOpen;
-      const iconColor = stillLocked ? "orange.400" : isRecipientMode ? "purple.400" : "blue.400";
+      const iconAs = stillLocked
+        ? MdTimer
+        : isRecipientMode
+        ? MdLock
+        : MdLockOpen;
+      const iconColor = stillLocked
+        ? "orange.400"
+        : isRecipientMode
+        ? "purple.400"
+        : "blue.400";
 
       return (
         <Box position="relative" width="100%" height="100%">
@@ -151,7 +174,18 @@ export default function TokenContent({
           </HStack>
         )}
         <EncryptedContentUnlock
-          stub={stub || { main: {}, crypto: {} }}
+          // CryptoStub is a runtime shape derived from `glyph.crypto`. The
+          // child needs the broader EncryptedContentStub; coerce here with
+          // the minimum required fields filled in.
+          stub={
+            {
+              p: (glyph?.p as number[] | undefined) ?? [],
+              type: glyph?.type ?? "",
+              name: glyph?.name ?? "",
+              main: stub?.main ?? {},
+              crypto: stub ?? {},
+            } as Parameters<typeof EncryptedContentUnlock>[0]["stub"]
+          }
           locator={locator}
           locatorNonce={locatorNonce}
           mainB={mainB}

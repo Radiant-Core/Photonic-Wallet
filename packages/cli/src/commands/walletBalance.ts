@@ -1,7 +1,7 @@
 import fs from "fs";
 import chalk from "chalk";
 import { Command } from "commander";
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@photonic/lib/electrumWsClient";
 import {
   catchErrors,
   decryptWallet,

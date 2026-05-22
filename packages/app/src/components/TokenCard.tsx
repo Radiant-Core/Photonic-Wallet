@@ -27,8 +27,8 @@ export default function TokenCard({
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isLink = !!glyph?.location;
-  const isEncrypted = !!(glyph?.p?.includes(GLYPH_ENCRYPTED));
-  const isTimelocked = !!(glyph?.p?.includes(GLYPH_TIMELOCK));
+  const isEncrypted = !!glyph?.p?.includes(GLYPH_ENCRYPTED);
+  const isTimelocked = !!glyph?.p?.includes(GLYPH_TIMELOCK);
 
   const short = ref.shortInput();
   return (
@@ -67,7 +67,10 @@ export default function TokenCard({
           </Box>
         )}
         {(isEncrypted || isTimelocked) && (
-          <Tooltip label={isTimelocked ? "Timelocked" : "Encrypted"} placement="top">
+          <Tooltip
+            label={isTimelocked ? "Timelocked" : "Encrypted"}
+            placement="top"
+          >
             <Box
               position="absolute"
               top={2}

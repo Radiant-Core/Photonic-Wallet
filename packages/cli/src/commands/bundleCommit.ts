@@ -3,7 +3,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@photonic/lib/electrumWsClient";
 import rjs from "@radiant-core/radiantjs";
 import {
   electrumToCoinSel,
@@ -146,9 +146,7 @@ export default async function bundleCommit(
     Object.entries(token.files || {}).map((tokenFile) => {
       if (typeof tokenFile === "string") {
         const safePath = safeResolvePath(bundleDir, tokenFile);
-        if (
-          fs.statSync(safePath).size > config.maxFileSize
-        ) {
+        if (fs.statSync(safePath).size > config.maxFileSize) {
           throw new Error(`File '${tokenFile}' is too large`);
         }
       }

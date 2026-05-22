@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import { Trans, t } from "@lingui/macro";
 import { Link } from "react-router-dom";
 import { PromiseExtended } from "dexie";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -74,7 +73,11 @@ export default function IpfsSettings() {
         </FormControl>
         <FormControl>
           <FormLabel>{"Method to resolve IPFS token content"}</FormLabel>
-          <Select ref={ipfsMethodRef} defaultValue={ipfsMethod || "gateway"} aria-label="Method to resolve IPFS token content">
+          <Select
+            ref={ipfsMethodRef}
+            defaultValue={ipfsMethod || "gateway"}
+            aria-label="Method to resolve IPFS token content"
+          >
             <option value="gateway">{"Gateway"}</option>
             <option value="default">{"Default"}</option>
           </Select>

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import { SelectableInput } from "@lib/coinSelect";
 import { photonsToRXD } from "@lib/format";
 import {
@@ -38,7 +37,10 @@ import db from "@app/db";
 import { SmartToken, ContractType } from "@app/types";
 import { ftScript, isP2pkh, p2pkhScript } from "@lib/script";
 import { feeRate, network, wallet } from "@app/signals";
-import { useWaveResolver, isPotentialWaveName } from "@app/hooks/useWaveResolver";
+import {
+  useWaveResolver,
+  isPotentialWaveName,
+} from "@app/hooks/useWaveResolver";
 import { HiOutlineAtSymbol } from "react-icons/hi";
 import { reverseRef } from "@lib/Outpoint";
 import TokenContent from "./TokenContent";
@@ -133,7 +135,11 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     // Use resolved WAVE name address or direct address input
     const recipientAddress = finalAddress || toAddress.current?.value || "";
     if (!recipientAddress || !isP2pkh(recipientAddress)) {
-      return setFailure(waveResolver.isWaveName && !finalAddress ? "WAVE name could not be resolved" : "Invalid address");
+      return setFailure(
+        waveResolver.isWaveName && !finalAddress
+          ? "WAVE name could not be resolved"
+          : "Invalid address"
+      );
     }
 
     const value = parseInt(amount.current?.value, 10);
@@ -153,15 +159,21 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
         recipientAddress,
         value,
         feeRate.value,
-        wallet.value.wif as string
+        wallet.value.wif!.toString()
       );
       const rawTx = tx.toString();
       const txid = tx.hash;
       const changeScript = p2pkhScript(wallet.value.address);
 
       // Calculate fee
-      const inputTotal = selected.inputs.reduce((sum, input) => sum + input.value, 0);
-      const outputTotal = selected.outputs.reduce((sum, output) => sum + output.value, 0);
+      const inputTotal = selected.inputs.reduce(
+        (sum, input) => sum + input.value,
+        0
+      );
+      const outputTotal = selected.outputs.reduce(
+        (sum, output) => sum + output.value,
+        0
+      );
       const fee = inputTotal - outputTotal;
 
       // SECURITY FIX (C4): Show confirmation modal before broadcasting
@@ -186,7 +198,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       );
       updateFtBalances(new Set([fromScript]));
 
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
     } catch (error) {
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
@@ -229,7 +241,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       setConfirmModalOpen(false);
       setPendingTx(null);
 
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
     } catch (error) {
       console.error("Broadcast error:", error);
       toast({
@@ -383,19 +395,21 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
                 <strong>Token Amount:</strong> {pendingTx?.tokenAmount}
               </Text>
               <Text>
-                <strong>Fee:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+                <strong>Fee:</strong> {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                {network.value.ticker}
               </Text>
               <Text>
                 <strong>Total Cost:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)} {network.value.ticker}
+                {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                {network.value.ticker}
               </Text>
               <Text fontSize="xs" color="gray.500">
                 <strong>TxID:</strong> {pendingTx?.txid}
               </Text>
               <Divider my={2} />
               <Text fontSize="sm" color="orange.500">
-                Please verify the recipient address and amount before confirming.
+                Please verify the recipient address and amount before
+                confirming.
               </Text>
             </VStack>
           </ModalBody>

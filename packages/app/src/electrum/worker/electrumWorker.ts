@@ -42,7 +42,11 @@ const worker = {
     servers = newServers;
   },
   connect(_address: string) {
-    workerLog("[Worker] connect called", { address: _address, servers, serverNum });
+    workerLog("[Worker] connect called", {
+      address: _address,
+      servers,
+      serverNum,
+    });
     const endpoint = servers[serverNum];
     workerLog("[Worker] Selected endpoint:", endpoint);
 
@@ -59,7 +63,10 @@ const worker = {
       address = _address;
       clearTimers();
       workerLog(`[Worker] Connecting to: ${endpoint}`);
-      db.kvp.put({ status: ElectrumStatus.CONNECTING, server: endpoint }, "electrumStatus");
+      db.kvp.put(
+        { status: ElectrumStatus.CONNECTING, server: endpoint },
+        "electrumStatus"
+      );
       const result = electrum.changeEndpoint(endpoint);
       workerLog("[Worker] changeEndpoint result:", result);
       if (!result) {
@@ -69,7 +76,9 @@ const worker = {
       }
       connectTimer = setTimeout(tryNextServer, FAILOVER_TIMEOUT);
     } else {
-      workerLog("[Worker] Skipping connection - already connected to same endpoint/address");
+      workerLog(
+        "[Worker] Skipping connection - already connected to same endpoint/address"
+      );
     }
   },
   reconnect() {
@@ -83,7 +92,7 @@ const worker = {
       throw new Error("Electrum client not connected");
     }
 
-    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+    const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
       Promise.race([
         promise,
         new Promise<T>((_, reject) =>
@@ -139,7 +148,9 @@ const worker = {
         );
         throw new Error(
           `Transaction verification failed: ${
-            verifyError instanceof Error ? verifyError.message : String(verifyError)
+            verifyError instanceof Error
+              ? verifyError.message
+              : String(verifyError)
           }`
         );
       }
@@ -185,15 +196,19 @@ const worker = {
   },
   async getBlockHeight(): Promise<number> {
     try {
-      const result = await electrum.client?.request(
+      const result = (await electrum.client?.request(
         "blockchain.headers.subscribe"
-      ) as { height: number; hex: string } | undefined;
+      )) as { height: number; hex: string } | undefined;
       return result?.height ?? 0;
     } catch {
       return 0;
     }
   },
-  async resolveWaveName(name: string): Promise<{ target: string; isDuplicate?: boolean; warning?: string } | null> {
+  async resolveWaveName(name: string): Promise<{
+    target: string;
+    isDuplicate?: boolean;
+    warning?: string;
+  } | null> {
     // Normalize input: strip .rxd suffix if present to get bare name
     const parts = name.toLowerCase().split(".");
     const bareName = parts[0];
@@ -223,19 +238,27 @@ const worker = {
           return {
             target,
             isDuplicate,
-            warning: isDuplicate ? "⚠️ DUPLICATE: This is NOT the canonical (first) registration. It is NOT used for name resolution. Consider burning this token." : undefined,
+            warning: isDuplicate
+              ? "⚠️ DUPLICATE: This is NOT the canonical (first) registration. It is NOT used for name resolution. Consider burning this token."
+              : undefined,
           };
         }
       }
 
       // Fall back to RPC (RXinDexer supports this natively)
       // Try the connected server first, then fall back to RXinDexer directly
-      type WaveResolveResult = { target?: string; is_duplicate?: boolean; warning?: string } | null | undefined;
-      
+      type WaveResolveResult =
+        | { target?: string; is_duplicate?: boolean; warning?: string }
+        | null
+        | undefined;
+
       // Try connected server first
       try {
         if (electrum.client && electrum.connected()) {
-          const result = await electrum.client.request("wave.resolve", bareName) as WaveResolveResult;
+          const result = (await electrum.client.request(
+            "wave.resolve",
+            bareName
+          )) as WaveResolveResult;
           if (result && result.target) {
             return {
               target: result.target,
@@ -251,29 +274,57 @@ const worker = {
       // Fall back: direct WebSocket RPC to RXinDexer
       try {
         const ws = new WebSocket(RXINDEXER_WSS);
-        const result = await new Promise<WaveResolveResult>((resolve, reject) => {
-          const timeout = setTimeout(() => { ws.close(); reject(new Error("timeout")); }, 10000);
-          ws.onopen = () => {
-            ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server.version", params: ["photonic", "1.4"] }));
-          };
-          let versionSent = false;
-          ws.onmessage = (ev) => {
-            try {
-              const data = JSON.parse(ev.data as string);
-              if (!versionSent) {
-                versionSent = true;
-                ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "wave.resolve", params: [bareName] }));
-                return;
-              }
-              clearTimeout(timeout);
+        const result = await new Promise<WaveResolveResult>(
+          (resolve, reject) => {
+            const timeout = setTimeout(() => {
               ws.close();
-              if (data.result) resolve(data.result);
-              else resolve(null);
-            } catch { clearTimeout(timeout); ws.close(); resolve(null); }
-          };
-          ws.onerror = () => { clearTimeout(timeout); reject(new Error("ws error")); };
-          ws.onclose = () => { clearTimeout(timeout); };
-        });
+              reject(new Error("timeout"));
+            }, 10000);
+            ws.onopen = () => {
+              ws.send(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 1,
+                  method: "server.version",
+                  params: ["photonic", "1.4"],
+                })
+              );
+            };
+            let versionSent = false;
+            ws.onmessage = (ev) => {
+              try {
+                const data = JSON.parse(ev.data as string);
+                if (!versionSent) {
+                  versionSent = true;
+                  ws.send(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: 2,
+                      method: "wave.resolve",
+                      params: [bareName],
+                    })
+                  );
+                  return;
+                }
+                clearTimeout(timeout);
+                ws.close();
+                if (data.result) resolve(data.result);
+                else resolve(null);
+              } catch {
+                clearTimeout(timeout);
+                ws.close();
+                resolve(null);
+              }
+            };
+            ws.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("ws error"));
+            };
+            ws.onclose = () => {
+              clearTimeout(timeout);
+            };
+          }
+        );
         if (result && result.target) {
           return {
             target: result.target,
@@ -298,12 +349,12 @@ const worker = {
     // Try RPC via connected server first
     try {
       if (electrum.client && electrum.connected()) {
-        const result = await electrum.client.request(
+        const result = (await electrum.client.request(
           "wave.check_available",
           bareName
-        ) as { available: boolean } | null | undefined;
+        )) as { available: boolean } | null | undefined;
 
-        if (result && typeof result === 'object' && 'available' in result) {
+        if (result && typeof result === "object" && "available" in result) {
           return result.available;
         }
       }
@@ -314,32 +365,64 @@ const worker = {
     // Fall back: direct WebSocket RPC to RXinDexer (same as waveResolveRPC)
     try {
       const ws = new WebSocket(RXINDEXER_WSS);
-      const result = await new Promise<{ available: boolean } | null>((resolve, reject) => {
-        const timeout = setTimeout(() => { ws.close(); reject(new Error("timeout")); }, 10000);
-        ws.onopen = () => {
-          ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server.version", params: ["photonic", "1.4"] }));
-        };
-        let versionSent = false;
-        ws.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data as string);
-            if (!versionSent) {
-              versionSent = true;
-              ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "wave.check_available", params: [bareName] }));
-              return;
-            }
-            clearTimeout(timeout);
+      const result = await new Promise<{ available: boolean } | null>(
+        (resolve, reject) => {
+          const timeout = setTimeout(() => {
             ws.close();
-            if (data.result && typeof data.result === 'object' && 'available' in data.result) {
-              resolve(data.result);
-            } else {
+            reject(new Error("timeout"));
+          }, 10000);
+          ws.onopen = () => {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "server.version",
+                params: ["photonic", "1.4"],
+              })
+            );
+          };
+          let versionSent = false;
+          ws.onmessage = (ev) => {
+            try {
+              const data = JSON.parse(ev.data as string);
+              if (!versionSent) {
+                versionSent = true;
+                ws.send(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 2,
+                    method: "wave.check_available",
+                    params: [bareName],
+                  })
+                );
+                return;
+              }
+              clearTimeout(timeout);
+              ws.close();
+              if (
+                data.result &&
+                typeof data.result === "object" &&
+                "available" in data.result
+              ) {
+                resolve(data.result);
+              } else {
+                resolve(null);
+              }
+            } catch {
+              clearTimeout(timeout);
+              ws.close();
               resolve(null);
             }
-          } catch { clearTimeout(timeout); ws.close(); resolve(null); }
-        };
-        ws.onerror = () => { clearTimeout(timeout); reject(new Error("ws error")); };
-        ws.onclose = () => { clearTimeout(timeout); };
-      });
+          };
+          ws.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error("ws error"));
+          };
+          ws.onclose = () => {
+            clearTimeout(timeout);
+          };
+        }
+      );
       if (result) return result.available;
     } catch (e) {
       console.warn("[WAVE] Direct RXinDexer availability check failed:", e);
@@ -355,8 +438,10 @@ const worker = {
         if (glyph.spent !== 0) return false;
         const attrs = glyph.attrs as Record<string, string> | undefined;
         if (!attrs) return false;
-        return (attrs.name || "").toLowerCase() === bareName &&
-               (attrs.domain || "rxd").toLowerCase() === domain;
+        return (
+          (attrs.name || "").toLowerCase() === bareName &&
+          (attrs.domain || "rxd").toLowerCase() === domain
+        );
       })
       .first();
 
@@ -387,19 +472,28 @@ function tryNextServer() {
   connectionAttempts++;
   const totalServers = Math.max(1, servers.length);
   serverNum = (serverNum + 1) % totalServers;
-  
+
   // If we've tried all servers multiple times, pause before retrying
   if (connectionAttempts >= MAX_ATTEMPTS_BEFORE_PAUSE) {
-    workerLog(`[Worker] Tried all servers ${Math.floor(connectionAttempts / totalServers)} times, pausing for ${PAUSE_DURATION/1000}s`);
-    db.kvp.put({ status: ElectrumStatus.DISCONNECTED, reason: "all_servers_failed" }, "electrumStatus");
+    workerLog(
+      `[Worker] Tried all servers ${Math.floor(
+        connectionAttempts / totalServers
+      )} times, pausing for ${PAUSE_DURATION / 1000}s`
+    );
+    db.kvp.put(
+      { status: ElectrumStatus.DISCONNECTED, reason: "all_servers_failed" },
+      "electrumStatus"
+    );
     reconnectTimer = setTimeout(() => {
       connectionAttempts = 0; // Reset counter after pause
       worker.connect(address);
     }, PAUSE_DURATION);
     return;
   }
-  
-  workerLog(`[Worker] Trying next server (attempt ${connectionAttempts}): ${servers[serverNum]}`);
+
+  workerLog(
+    `[Worker] Trying next server (attempt ${connectionAttempts}): ${servers[serverNum]}`
+  );
   worker.connect(address);
 }
 
@@ -408,7 +502,10 @@ electrum.addEvent("connected", () => {
   clearTimers();
   connectionAttempts = 0; // Reset on successful connection
   connectedGeneration = electrum.generation;
-  db.kvp.put({ status: ElectrumStatus.CONNECTED, server: electrum.endpoint }, "electrumStatus");
+  db.kvp.put(
+    { status: ElectrumStatus.CONNECTED, server: electrum.endpoint },
+    "electrumStatus"
+  );
   if (address) {
     workerLog("[Worker] Connected, registering address:", address);
     rxd.register(address);
@@ -424,7 +521,11 @@ electrum.addEvent("error", (error: unknown) => {
 
 electrum.addEvent("close", (event: unknown) => {
   const { reason } = event as { reason: string };
-  workerLog("[Worker] CLOSE event received", { reason, gen: electrum.generation, connGen: connectedGeneration });
+  workerLog("[Worker] CLOSE event received", {
+    reason,
+    gen: electrum.generation,
+    connGen: connectedGeneration,
+  });
 
   // Ignore close events from old clients when we intentionally switched servers
   if (reason === "switching") {
@@ -434,7 +535,9 @@ electrum.addEvent("close", (event: unknown) => {
 
   // Ignore stale close events from old connections
   if (electrum.connected()) {
-    workerLog("[Worker] Ignoring stale close - already connected to another server");
+    workerLog(
+      "[Worker] Ignoring stale close - already connected to another server"
+    );
     return;
   }
 

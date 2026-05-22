@@ -9,7 +9,6 @@ import {
   AlertIcon,
   AlertDescription,
 } from "@chakra-ui/react";
-import { Trans } from "@lingui/macro";
 import { GlyphV2Policy } from "@lib/v2metadata";
 
 type PolicyConfigProps = {
@@ -66,9 +65,7 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
           onChange={(e) => updatePolicy("nsfw", e.target.checked)}
         />
       </FormControl>
-      <FormHelperText mt={-2}>
-        Adult or sensitive content flag
-      </FormHelperText>
+      <FormHelperText mt={-2}>Adult or sensitive content flag</FormHelperText>
 
       <FormControl display="flex" alignItems="center">
         <FormLabel mb={0} flex={1}>
@@ -89,8 +86,8 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
         <Alert status="warning" borderRadius="md">
           <AlertIcon />
           <AlertDescription>
-            Soulbound tokens are permanently bound to the original owner and
-            can only be burned. This cannot be changed after minting.
+            Soulbound tokens are permanently bound to the original owner and can
+            only be burned. This cannot be changed after minting.
           </AlertDescription>
         </Alert>
       )}

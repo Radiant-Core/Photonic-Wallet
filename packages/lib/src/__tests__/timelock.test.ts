@@ -16,11 +16,10 @@ import {
   getReveal,
   confirmReveal,
   deleteReveal,
+  setTimelockRevealStore,
   type TimelockReveal,
 } from "../timelock";
-import {
-  buildEncryptedMetadata,
-} from "../encryption";
+import { buildEncryptedMetadata } from "../encryption";
 import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "../protocols";
 
 // ============================================================================
@@ -366,7 +365,10 @@ describe("formatUnlockCondition", () => {
 // Reveal persistence (localStorage mocked)
 // ============================================================================
 
-describe("Reveal persistence", () => {
+describe("Reveal persistence (pluggable store)", () => {
+  // After R15 the reveal store is pluggable. These tests exercise the
+  // public API against the default localStorage backend. The localStorage
+  // stub lets the default `LocalStorageRevealStore` work under vitest.
   let store: Record<string, string> = {};
 
   beforeEach(() => {
@@ -380,6 +382,52 @@ describe("Reveal persistence", () => {
         delete store[key];
       },
     });
+    // Re-install the default LocalStorageRevealStore so it picks up the
+    // freshly-stubbed `localStorage`. (The module loads its singleton
+    // adapter once at import time; resetting via setTimelockRevealStore
+    // creates a fresh instance bound to the current global.)
+    setTimelockRevealStore(
+      new (class {
+        async load() {
+          const raw = localStorage.getItem("glyph_timelock_reveals");
+          try {
+            return raw ? (JSON.parse(raw) as TimelockReveal[]) : [];
+          } catch {
+            return [];
+          }
+        }
+        async save(reveal: TimelockReveal) {
+          const existing = await this.load();
+          const updated = existing.filter(
+            (r) => r.tokenRef !== reveal.tokenRef
+          );
+          updated.push(reveal);
+          localStorage.setItem(
+            "glyph_timelock_reveals",
+            JSON.stringify(updated)
+          );
+        }
+        async rename(tempId: string, confirmedTokenRef: string) {
+          const reveals = await this.load();
+          const idx = reveals.findIndex((r) => r.tokenRef === tempId);
+          if (idx === -1) return;
+          reveals[idx] = { ...reveals[idx], tokenRef: confirmedTokenRef };
+          localStorage.setItem(
+            "glyph_timelock_reveals",
+            JSON.stringify(reveals)
+          );
+        }
+        async delete(tokenRef: string) {
+          const updated = (await this.load()).filter(
+            (r) => r.tokenRef !== tokenRef
+          );
+          localStorage.setItem(
+            "glyph_timelock_reveals",
+            JSON.stringify(updated)
+          );
+        }
+      })()
+    );
   });
 
   afterEach(() => {
@@ -395,59 +443,84 @@ describe("Reveal persistence", () => {
     createdAt: Math.floor(Date.now() / 1000),
   });
 
-  it("saveReveal and loadReveals round-trip", () => {
+  it("saveReveal and loadReveals round-trip", async () => {
     const reveal = makeReveal();
-    saveReveal(reveal);
-    const loaded = loadReveals();
+    await saveReveal(reveal);
+    const loaded = await loadReveals();
     expect(loaded).toHaveLength(1);
     expect(loaded[0].tokenRef).toBe(reveal.tokenRef);
     expect(loaded[0].cek).toBe(reveal.cek);
   });
 
-  it("overwriting a tokenRef replaces the record", () => {
+  it("overwriting a tokenRef replaces the record", async () => {
     const r1 = makeReveal("txid:0");
-    saveReveal(r1);
+    await saveReveal(r1);
     const r2 = { ...makeReveal("txid:0"), cek: "ef".repeat(32) };
-    saveReveal(r2);
-    const loaded = loadReveals();
+    await saveReveal(r2);
+    const loaded = await loadReveals();
     expect(loaded).toHaveLength(1);
     expect(loaded[0].cek).toBe(r2.cek);
   });
 
-  it("getReveal returns the correct record", () => {
-    saveReveal(makeReveal("txid:1"));
-    saveReveal(makeReveal("txid:2"));
-    const r = getReveal("txid:1");
+  it("getReveal returns the correct record", async () => {
+    await saveReveal(makeReveal("txid:1"));
+    await saveReveal(makeReveal("txid:2"));
+    const r = await getReveal("txid:1");
     expect(r).toBeDefined();
     expect(r!.tokenRef).toBe("txid:1");
   });
 
-  it("getReveal returns undefined for unknown ref", () => {
-    expect(getReveal("nope")).toBeUndefined();
+  it("getReveal returns undefined for unknown ref", async () => {
+    expect(await getReveal("nope")).toBeUndefined();
   });
 
-  it("confirmReveal updates tokenRef", () => {
+  it("confirmReveal updates tokenRef", async () => {
     const reveal = makeReveal("pending");
-    saveReveal(reveal);
-    confirmReveal("pending", "txid:confirmed");
-    const r = getReveal("txid:confirmed");
+    await saveReveal(reveal);
+    await confirmReveal("pending", "txid:confirmed");
+    const r = await getReveal("txid:confirmed");
     expect(r).toBeDefined();
-    expect(getReveal("pending")).toBeUndefined();
+    expect(await getReveal("pending")).toBeUndefined();
   });
 
-  it("deleteReveal removes the record", () => {
-    saveReveal(makeReveal("txid:del"));
-    deleteReveal("txid:del");
-    expect(getReveal("txid:del")).toBeUndefined();
-    expect(loadReveals()).toHaveLength(0);
+  it("deleteReveal removes the record", async () => {
+    await saveReveal(makeReveal("txid:del"));
+    await deleteReveal("txid:del");
+    expect(await getReveal("txid:del")).toBeUndefined();
+    expect(await loadReveals()).toHaveLength(0);
   });
 
-  it("loadReveals returns empty array on empty storage", () => {
-    expect(loadReveals()).toEqual([]);
+  it("loadReveals returns empty array on empty storage", async () => {
+    expect(await loadReveals()).toEqual([]);
   });
 
-  it("loadReveals returns empty array on corrupted storage", () => {
+  it("loadReveals returns empty array on corrupted storage", async () => {
     store["glyph_timelock_reveals"] = "not json {";
-    expect(loadReveals()).toEqual([]);
+    expect(await loadReveals()).toEqual([]);
+  });
+
+  it("custom store: in-memory adapter is honored after setTimelockRevealStore", async () => {
+    const records = new Map<string, TimelockReveal>();
+    setTimelockRevealStore({
+      async load() {
+        return Array.from(records.values());
+      },
+      async save(r) {
+        records.set(r.tokenRef, r);
+      },
+      async rename(tempId, newRef) {
+        const r = records.get(tempId);
+        if (!r) return;
+        records.delete(tempId);
+        records.set(newRef, { ...r, tokenRef: newRef });
+      },
+      async delete(ref) {
+        records.delete(ref);
+      },
+    });
+    await saveReveal(makeReveal("in-memory"));
+    expect(await getReveal("in-memory")).toBeDefined();
+    // The localStorage backend should NOT have seen this write.
+    expect(store["glyph_timelock_reveals"]).toBeUndefined();
   });
 });

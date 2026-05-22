@@ -11,8 +11,5 @@ minimumReleaseAgeExclude:
   - '@radiant-core/radiantjs@2.0.1'
   - '@radiant-core/radiantjs@2.0.2'
   - '@radiant-core/radiantjs@2.0.3'
-patchedDependencies:
-  bsv-coinselect@4.2.5: patches/bsv-coinselect@4.2.5.patch
-  ws-electrumx-client@1.0.5: patches/ws-electrumx-client@1.0.5.patch
 overrides:
   protobufjs: ^7.5.5

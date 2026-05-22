@@ -14,17 +14,20 @@
 
 export type CekShareToken = {
   v: 1;
-  ref: string;        // tokenRef ("txid:vout") — for display only
-  kid: string;        // "x25519" | "x25519mlkem768"
+  ref: string; // tokenRef ("txid:vout") — for display only
+  kid: string; // "x25519" | "x25519mlkem768"
   wrapped_cek: string; // base64 — wrapped CEK (nonce || ciphertext) — REP-3006 wrapped_cek
-  epk: string;        // base64 — ephemeral X25519 public key — REP-3006 epk
-  cek_hash: string;   // "sha256:<hex>" — on-chain commitment (also used as AAD)
+  epk: string; // base64 — ephemeral X25519 public key — REP-3006 epk
+  cek_hash: string; // "sha256:<hex>" — on-chain commitment (also used as AAD)
 };
 
 /** Encode a token into a full shareable URL using the current page location */
 export function buildShareUrl(token: CekShareToken): string {
   const json = JSON.stringify(token);
-  const b64 = btoa(json).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  const b64 = btoa(json)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "");
   // window.location.hash already includes the leading '#', e.g. "#/objects/token/abc"
   // We append our fragment parameter with a second '#' — browsers keep only the last
   // fragment, so we use '&' within the existing hash segment instead.
@@ -61,7 +64,9 @@ export function parseShareInput(input: string): CekShareToken | null {
   try {
     const obj = JSON.parse(trimmed) as CekShareToken;
     if (obj.v === 1 && obj.wrapped_cek && obj.epk && obj.cek_hash) return obj;
-  } catch { /* not JSON */ }
+  } catch {
+    /* not JSON */
+  }
 
   return null;
 }
@@ -73,7 +78,9 @@ function decodeShareB64(b64: string): CekShareToken | null {
     const json = atob(padded);
     const obj = JSON.parse(json) as CekShareToken;
     if (obj.v === 1 && obj.wrapped_cek && obj.epk && obj.cek_hash) return obj;
-  } catch { /* invalid */ }
+  } catch {
+    /* invalid */
+  }
   return null;
 }
 
@@ -93,7 +100,9 @@ export function consumeShareFromUrl(): CekShareToken | null {
   try {
     const cleaned = raw.replace(/[#&]share=[A-Za-z0-9+/\-_=]+/, "");
     window.history.replaceState(null, "", cleaned);
-  } catch { /* non-browser env (tests) */ }
+  } catch {
+    /* non-browser env (tests) */
+  }
 
   return token;
 }

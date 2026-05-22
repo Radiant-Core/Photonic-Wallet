@@ -1,0 +1,486 @@
+// In-tree minimal Electrum WebSocket client. Replaces `ws-electrumx-client` so
+// the workspace no longer carries a third-party dependency for a small JSON-RPC
+// surface. Public API matches the subset of `ws-electrumx-client@1.0.5` used by
+// the app and CLI: constructor(endpoint, options?), request, batchRequest,
+// subscribe, unsubscribe, isConnected, close, on/once/off, ElectrumWSEvent.
+//
+// Differences from the (now-removed) upstream patch:
+//   - Request timeout defaults to 10s (the upstream patch had bumped it to 120s,
+//     which hid dead sockets for two minutes).
+//   - Resubscribe failures tear the socket down (CLOSE_CODE) so a higher layer
+//     can react. The patch turned this into a silent console.warn, which masked
+//     auth/desync failures.
+//
+// Behaviour kept from the patch (the parts that were legitimate fixes):
+//   - Snapshot subscriptions before firing CONNECTED so handlers that subscribe
+//     during the CONNECTED callback don't get double-fired.
+//   - Don't split frames on the space character — only on \r and \n.
+
+import WebSocketImpl from "isomorphic-ws";
+
+type AnyWebSocket = {
+  readyState: number;
+  binaryType: string;
+  send(data: string | ArrayBufferLike | ArrayBufferView): void;
+  close(code?: number, reason?: string): void;
+  addEventListener(event: string, listener: (ev: unknown) => void): void;
+};
+
+type WebSocketCtor = new (url: string) => AnyWebSocket;
+
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
+// CLOSING / CLOSED are part of the standard WebSocket readyState set but
+// aren't compared against in this client — kept underscore-prefixed for
+// documentation per the eslint `^_` opt-out (R23).
+const _WS_CLOSING = 2;
+const _WS_CLOSED = 3;
+
+export type RpcResponse = {
+  jsonrpc: string;
+  result?: unknown;
+  error?: string | { code: number; message: string };
+  id: number;
+};
+
+export type RpcRequest = {
+  jsonrpc: string;
+  method: string;
+  params?: unknown[];
+};
+
+export function isRpcResponse(obj: unknown): obj is RpcResponse {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "jsonrpc" in obj &&
+    typeof (obj as { jsonrpc: unknown }).jsonrpc === "string" &&
+    "id" in obj &&
+    typeof (obj as { id: unknown }).id === "number"
+  );
+}
+
+export function isRpcRequest(obj: unknown): obj is RpcRequest {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "jsonrpc" in obj &&
+    typeof (obj as { jsonrpc: unknown }).jsonrpc === "string" &&
+    "method" in obj &&
+    typeof (obj as { method: unknown }).method === "string"
+  );
+}
+
+export type ElectrumWSOptions = {
+  token?: string;
+  reconnect: boolean;
+  verbose: boolean;
+  /** Request timeout in ms. Defaults to 10s. */
+  requestTimeoutMs: number;
+  /** Override the WebSocket constructor. Defaults to isomorphic-ws. */
+  WebSocketCtor?: WebSocketCtor;
+};
+
+export enum ElectrumWSEvent {
+  OPEN = "open",
+  CLOSE = "close",
+  CONNECTED = "connected",
+  DISCONNECTED = "disconnected",
+  RECONNECTING = "reconnecting",
+  ERROR = "error",
+  MESSAGE = "message",
+}
+
+const RECONNECT_TIMEOUT = 1000;
+const CONNECTED_TIMEOUT = 500;
+const DEFAULT_REQUEST_TIMEOUT = 1000 * 10;
+const CLOSE_CODE = 1000;
+
+type PendingRequest = {
+  resolve: (value: unknown) => void;
+  reject: (reason: Error) => void;
+  method: string;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+type Subscription = (...payload: unknown[]) => unknown;
+
+type Listener = ((...args: unknown[]) => void) | null;
+
+class Observable {
+  private listeners = new Map<string, Listener[]>();
+
+  on(event: string, callback: (...args: unknown[]) => void): number {
+    let arr = this.listeners.get(event);
+    if (!arr) {
+      arr = [];
+      this.listeners.set(event, arr);
+    }
+    return arr.push(callback) - 1;
+  }
+
+  once(event: string, callback: (...args: unknown[]) => void): void {
+    const id = this.on(event, (...args) => {
+      this.off(event, id);
+      callback(...args);
+    });
+  }
+
+  off(event: string, id: number): void {
+    const arr = this.listeners.get(event);
+    if (!arr || arr.length < id + 1) return;
+    arr[id] = null;
+  }
+
+  allOff(event: string): void {
+    this.listeners.delete(event);
+  }
+
+  protected fire(event: string, ...payload: unknown[]): void {
+    const arr = this.listeners.get(event);
+    if (!arr || !arr.length) return;
+    for (const cb of arr) {
+      if (!cb) continue;
+      cb(...payload);
+    }
+  }
+}
+
+function subscriptionKey(method: string, params: unknown[]): string {
+  return `${method}${typeof params[0] === "string" ? `-${params[0]}` : ""}`;
+}
+
+function bytesToString(data: unknown): string {
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(data));
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder("utf-8").decode(data as unknown as Uint8Array);
+  }
+  if (Array.isArray(data)) {
+    // Node 'ws' delivers Buffer-array for fragmented messages.
+    const parts = data as Array<ArrayBufferLike | Uint8Array>;
+    const buffers = parts.map((p) =>
+      p instanceof Uint8Array ? p : new Uint8Array(p as ArrayBuffer)
+    );
+    const total = buffers.reduce((n, b) => n + b.byteLength, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const b of buffers) {
+      merged.set(b, offset);
+      offset += b.byteLength;
+    }
+    return new TextDecoder("utf-8").decode(merged);
+  }
+  return String(data);
+}
+
+function stringToBytes(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
+}
+
+function formatRequest(r: RpcRequest & { id: number }): Uint8Array {
+  return stringToBytes(JSON.stringify(r) + "\n");
+}
+
+function resolveDefaultWebSocket(): WebSocketCtor {
+  const fromGlobal = (globalThis as { WebSocket?: WebSocketCtor }).WebSocket;
+  if (fromGlobal) return fromGlobal;
+  return WebSocketImpl as unknown as WebSocketCtor;
+}
+
+export class ElectrumWS extends Observable {
+  static DEFAULT_OPTIONS: ElectrumWSOptions = {
+    reconnect: true,
+    verbose: false,
+    requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT,
+  };
+
+  private options: ElectrumWSOptions;
+  private endpoint: string;
+  private requests = new Map<number, PendingRequest>();
+  private subscriptions = new Map<string, Subscription>();
+  private connected = false;
+  private connectedTimeout?: ReturnType<typeof setTimeout>;
+  private reconnectionTimeout?: ReturnType<typeof setTimeout>;
+  private incompleteMessage = "";
+  private WebSocketCtor: WebSocketCtor;
+  // Public so legacy code that pokes `client.ws` (the upstream lib exposed it)
+  // keeps working.
+  ws!: AnyWebSocket;
+
+  constructor(endpoint: string, options: Partial<ElectrumWSOptions> = {}) {
+    super();
+    this.endpoint = endpoint;
+    this.options = { ...ElectrumWS.DEFAULT_OPTIONS, ...options };
+    this.WebSocketCtor = options.WebSocketCtor ?? resolveDefaultWebSocket();
+    this.connect();
+  }
+
+  get verbose(): boolean {
+    return this.options.verbose;
+  }
+
+  async batchRequest<R extends Array<unknown>>(
+    ...requests: { method: string; params: unknown[] }[]
+  ): Promise<R> {
+    if (!this.connected) {
+      await new Promise<void>((resolve) =>
+        this.once(ElectrumWSEvent.CONNECTED, () => resolve())
+      );
+    }
+    let id = this.nextId();
+    const payloads = requests.map((r) => ({
+      jsonrpc: "2.0",
+      method: r.method,
+      params: r.params,
+      id: id++,
+    }));
+    const promises = payloads.map((p) =>
+      this.createRequestPromise(p.id, p.method)
+    );
+    for (const p of payloads) {
+      this.ws.send(formatRequest(p));
+    }
+    return Promise.all(promises) as Promise<R>;
+  }
+
+  async request<ResponseType = unknown>(
+    method: string,
+    ...params: (boolean | string | number | (string | number)[])[]
+  ): Promise<ResponseType> {
+    const id = this.nextId();
+    const payload: RpcRequest & { id: number } = {
+      jsonrpc: "2.0",
+      method,
+      params,
+      id,
+    };
+    if (!this.connected) {
+      await new Promise<void>((resolve) =>
+        this.once(ElectrumWSEvent.CONNECTED, () => resolve())
+      );
+    }
+    const promise = this.createRequestPromise(id, method);
+    if (this.verbose) console.debug("ElectrumWS SEND:", method, ...params);
+    this.ws.send(formatRequest(payload));
+    return promise as Promise<ResponseType>;
+  }
+
+  private nextId(): number {
+    let id: number;
+    do {
+      id = Math.ceil(Math.random() * 1e5);
+    } while (this.requests.has(id));
+    return id;
+  }
+
+  private createRequestPromise(id: number, method: string): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.requests.delete(id);
+        reject(
+          new Error(`ElectrumWS request timeout. request ID: ${id} (${method})`)
+        );
+      }, this.options.requestTimeoutMs);
+      this.requests.set(id, { resolve, reject, method, timeout });
+    });
+  }
+
+  async subscribe(
+    method: string,
+    callback: (...payload: unknown[]) => unknown,
+    ...params: (string | number)[]
+  ): Promise<void> {
+    const key = subscriptionKey(method, params);
+    this.subscriptions.set(key, callback);
+    if (!this.connected) return;
+    callback(...params, await this.request(`${method}.subscribe`, ...params));
+  }
+
+  async unsubscribe(
+    method: string,
+    ...params: (string | number)[]
+  ): Promise<unknown> {
+    const key = subscriptionKey(method, params);
+    const deleted = this.subscriptions.delete(key);
+    if (deleted) return this.request(`${method}.unsubscribe`, ...params);
+    return Promise.resolve();
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  async close(reason: string): Promise<boolean> {
+    this.options.reconnect = false;
+    for (const [id, request] of this.requests) {
+      clearTimeout(request.timeout);
+      this.requests.delete(id);
+      request.reject(new Error(reason));
+    }
+    if (this.reconnectionTimeout) clearTimeout(this.reconnectionTimeout);
+    if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
+    if (
+      this.ws.readyState === WS_CONNECTING ||
+      this.ws.readyState === WS_OPEN
+    ) {
+      const closingPromise = new Promise<boolean>((resolve) =>
+        this.once(ElectrumWSEvent.CLOSE, () => resolve(true))
+      );
+      this.ws.close(CLOSE_CODE, reason);
+      return closingPromise;
+    }
+    return true;
+  }
+
+  private connect(): void {
+    let url = this.endpoint;
+    if (this.options.token) url = `${url}?token=${this.options.token}`;
+    this.ws = new this.WebSocketCtor(url);
+    this.ws.binaryType = "arraybuffer";
+    this.ws.addEventListener("open", () => this.onOpen());
+    this.ws.addEventListener("message", (ev) => this.onMessage(ev));
+    this.ws.addEventListener("error", (ev) => this.onError(ev));
+    this.ws.addEventListener("close", (ev) => this.onClose(ev));
+  }
+
+  private onOpen(): void {
+    this.fire(ElectrumWSEvent.OPEN);
+    this.connectedTimeout = setTimeout(() => {
+      this.connected = true;
+      // Snapshot subscriptions before firing CONNECTED so handlers that
+      // subscribe during the CONNECTED callback aren't fired twice.
+      const existing = new Map(this.subscriptions);
+      this.fire(ElectrumWSEvent.CONNECTED);
+      for (const [key, callback] of existing) {
+        const parts = key.split("-");
+        const method = parts.shift();
+        if (!method) {
+          if (this.verbose) {
+            console.warn(
+              "Cannot resubscribe, no method in subscription key:",
+              key
+            );
+          }
+          continue;
+        }
+        this.subscribe(method, callback, ...parts).catch((error: Error) => {
+          // A resubscribe failure means the server lost state (or rejected
+          // our auth). Tear the socket down so the reconnect logic — or the
+          // caller listening on CLOSE — sees the failure, rather than
+          // silently swallowing it.
+          if (
+            this.ws.readyState === WS_CONNECTING ||
+            this.ws.readyState === WS_OPEN
+          ) {
+            this.ws.close(CLOSE_CODE, error.message);
+          }
+        });
+      }
+    }, CONNECTED_TIMEOUT);
+  }
+
+  private onMessage(msg: unknown): void {
+    const ev = msg as { data: unknown };
+    const raw = bytesToString(ev.data);
+    // Don't split on space — JSON values can legitimately contain spaces.
+    // eslint-disable-next-line no-control-regex
+    const re = new RegExp("\r|\n", "g");
+    const lines = raw.split(re).filter((line) => line.length > 0);
+    for (const line of lines) {
+      const parsed = this.parseLine(line);
+      if (!parsed) continue;
+      this.fire(ElectrumWSEvent.MESSAGE, parsed);
+      if (typeof parsed !== "object") {
+        if (this.verbose) console.debug("Non-JSON response:", parsed);
+        continue;
+      }
+      const obj = parsed as RpcResponse | RpcRequest;
+      if (
+        "id" in obj &&
+        typeof obj.id === "number" &&
+        this.requests.has(obj.id)
+      ) {
+        const request = this.requests.get(obj.id)!;
+        clearTimeout(request.timeout);
+        this.requests.delete(obj.id);
+        const r = obj as RpcResponse;
+        if ("result" in r) {
+          request.resolve(r.result);
+        } else if (r.error) {
+          const errorMsg =
+            typeof r.error === "string" ? r.error : r.error.message;
+          request.reject(new Error(errorMsg));
+        } else {
+          request.reject(new Error("No result"));
+        }
+      }
+      if (
+        "method" in obj &&
+        typeof obj.method === "string" &&
+        obj.method.endsWith("subscribe")
+      ) {
+        const method = obj.method.replace(".subscribe", "");
+        const params = (obj as RpcRequest).params || [];
+        const key = subscriptionKey(method, params);
+        const callback = this.subscriptions.get(key);
+        if (callback) callback(...params);
+      }
+    }
+  }
+
+  private parseLine(line: string): RpcResponse | RpcRequest | false {
+    try {
+      const parsed = JSON.parse(line);
+      if (isRpcResponse(parsed) || isRpcRequest(parsed)) {
+        this.incompleteMessage = "";
+        return parsed;
+      }
+    } catch {
+      if (this.verbose) console.debug("Failed to parse:", line);
+    }
+    if (this.incompleteMessage && !line.includes(this.incompleteMessage)) {
+      return this.parseLine(`${this.incompleteMessage}${line}`);
+    }
+    if (this.verbose) {
+      console.debug(
+        `Failed to parse JSON, retrying together with next message: "${line}"`
+      );
+    }
+    this.incompleteMessage = line;
+    return false;
+  }
+
+  private onError(event: unknown): void {
+    const err = (event as { error?: unknown }).error;
+    if (err) {
+      if (this.verbose) console.error("ElectrumWS ERROR:", err);
+      this.fire(ElectrumWSEvent.ERROR, err);
+    }
+  }
+
+  private onClose(event: unknown): void {
+    this.fire(ElectrumWSEvent.CLOSE, event);
+    if (!this.connected) {
+      if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
+    } else {
+      this.fire(ElectrumWSEvent.DISCONNECTED);
+    }
+    // Reject any outstanding requests so callers don't hang.
+    for (const [id, request] of this.requests) {
+      clearTimeout(request.timeout);
+      this.requests.delete(id);
+      request.reject(new Error("connection closed"));
+    }
+    if (this.options.reconnect && this.connected) {
+      this.fire(ElectrumWSEvent.RECONNECTING);
+      this.reconnectionTimeout = setTimeout(
+        () => this.connect(),
+        RECONNECT_TIMEOUT
+      );
+    }
+    this.connected = false;
+  }
+}

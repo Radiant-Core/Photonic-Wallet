@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { t } from "@lingui/macro";
 import {
   Box,
   Button,
@@ -42,7 +41,9 @@ function TokenGrid() {
   const [mediaOnly, setMediaOnly] = useState(false);
   const [tickerOnly, setTickerOnly] = useState(false);
   const [sortBy, setSortBy] = useState("balance_desc");
-  const [viewMode, setViewMode] = useState<"compact" | "comfortable">("compact");
+  const [viewMode, setViewMode] = useState<"compact" | "comfortable">(
+    "compact"
+  );
 
   const [tokens, balances] = useLiveQuery(
     async () => {
@@ -213,8 +214,9 @@ function TokenGrid() {
         {listed.length === 0 ? (
           <NoContent>{"No assets"}</NoContent>
         ) : (
-          listed.map(({ token, value }) =>
-            value > 0 && (
+          listed.map(
+            ({ token, value }) =>
+              value > 0 && (
                 <TokenRow
                   glyph={token}
                   value={value}

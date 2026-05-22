@@ -14,7 +14,6 @@ import {
   Icon,
   Image,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import dayjs from "dayjs";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MdOutlineSwapHoriz } from "react-icons/md";

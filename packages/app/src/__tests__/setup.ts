@@ -1,13 +1,13 @@
 /**
  * Vitest Test Setup
- * 
+ *
  * Global setup for Photonic-Wallet tests.
  */
 
-import { vi } from 'vitest';
+import { vi } from "vitest";
 
 // Mock @lingui/macro
-vi.mock('@lingui/macro', () => ({
+vi.mock("@lingui/macro", () => ({
   t: (str: string) => str,
 }));
 
@@ -29,7 +29,7 @@ global.indexedDB = {
 } as unknown as IDBFactory;
 
 // Mock database for tests
-vi.mock('@app/db', () => ({
+vi.mock("@app/db", () => ({
   default: {
     kvp: {
       get: vi.fn().mockResolvedValue(undefined),
@@ -69,7 +69,7 @@ vi.mock('@app/db', () => ({
 }));
 
 // Mock crypto.getRandomValues
-Object.defineProperty(global, 'crypto', {
+Object.defineProperty(global, "crypto", {
   value: {
     getRandomValues: (arr: Uint8Array) => {
       for (let i = 0; i < arr.length; i++) {
@@ -86,7 +86,7 @@ Object.defineProperty(global, 'crypto', {
 });
 
 // Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
+Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
     matches: false,
@@ -114,4 +114,4 @@ global.IntersectionObserver = vi.fn().mockImplementation(() => ({
   disconnect: vi.fn(),
 }));
 
-console.log('🧪 Photonic-Wallet test environment initialized');
+console.log("🧪 Photonic-Wallet test environment initialized");

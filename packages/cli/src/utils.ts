@@ -11,7 +11,7 @@ import { decrypt } from "@photonic/lib/encryption";
 import { WalletFile } from "./types";
 import { walletFileSchema } from "./schemas";
 import { Command } from "commander";
-import { ElectrumWS } from "ws-electrumx-client";
+import { ElectrumWS } from "@photonic/lib/electrumWsClient";
 import ora from "ora";
 
 const symbols = {
@@ -49,13 +49,26 @@ export const createHashStamp = (img: ArrayBuffer) => {
   }
 };
 
-export const combineMerge = (target: any, source: any, options: any) => {
+// `combineMerge` is passed as deepmerge's `arrayMerge` callback. We
+// reuse the library's own option types (`Options['arrayMerge']`) so
+// the signature matches exactly — the values flow through opaquely as
+// `any[]` per deepmerge's API contract.
+import type { Options as DeepmergeOptions } from "deepmerge";
+
+export const combineMerge: NonNullable<DeepmergeOptions["arrayMerge"]> = (
+  target,
+  source,
+  options
+) => {
   const destination = target.slice();
 
-  source.forEach((item: any, index: number) => {
+  source.forEach((item, index) => {
     if (typeof destination[index] === "undefined") {
-      destination[index] = options.cloneUnlessOtherwiseSpecified(item, options);
-    } else if (options.isMergeableObject(item)) {
+      destination[index] = options?.cloneUnlessOtherwiseSpecified(
+        item,
+        options
+      );
+    } else if (options?.isMergeableObject(item)) {
       destination[index] = merge(target[index], item, options);
     } else if (target.indexOf(item) === -1) {
       destination.push(item);
@@ -113,9 +126,15 @@ export const decryptWallet = async (pw: string, walletFile: WalletFile) => {
           pw
         )
       ),
-      walletFile.net
+      walletFile.net,
+      // Honour the wallet file's coinType. When omitted (older CLI wallet
+      // files), defaults to the modern SLIP-0044 Radiant coin type (512).
+      // Legacy wallets created before Photonic Wallet v3.0.0 must add
+      // `"coinType": 0` to their JSON so the CLI derives the same address
+      // the app holds the UTXOs at. See R7 in REMEDIATION_PLAN.md.
+      walletFile.coinType
     );
-  } catch (error) {
+  } catch {
     return undefined;
   }
 };

@@ -40,9 +40,7 @@ export default function Coins() {
     async () => {
       let collection;
       if (filter === "all") {
-        collection = db.txo
-          .where("contractType")
-          .equals(ContractType.RXD);
+        collection = db.txo.where("contractType").equals(ContractType.RXD);
       } else {
         collection = db.txo
           .where("[contractType+spent]")
@@ -134,7 +132,12 @@ export default function Coins() {
         </Select>
 
         <Badge colorScheme="gray" fontSize="xs">
-          {totalCount} {filter === "all" ? "total" : filter === "unspent" ? "unspent" : "spent"}
+          {totalCount}{" "}
+          {filter === "all"
+            ? "total"
+            : filter === "unspent"
+            ? "unspent"
+            : "spent"}
         </Badge>
       </Flex>
 
@@ -167,7 +170,11 @@ export default function Coins() {
                 <Photons value={value} />
               </Td>
               <Td>
-                <a href={createExplorerUrl(txid)} target="_blank" aria-label="View on explorer">
+                <a
+                  href={createExplorerUrl(txid)}
+                  target="_blank"
+                  aria-label="View on explorer"
+                >
                   <ExternalLinkIcon />
                 </a>
               </Td>

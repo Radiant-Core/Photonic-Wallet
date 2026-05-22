@@ -98,6 +98,14 @@ export function commitScriptSize(
 }
 
 export function scriptHash(hex: string): string {
+  // Guard: hashing the empty script silently produces a constant — the
+  // sha256("") digest — which has historically masked upstream bugs where
+  // p2pkhScript() / payToScript() / nftScript() returned "" from a swallowed
+  // exception. Surface the failure here instead of letting it propagate as
+  // a meaningless ElectrumX subscription target.
+  if (!hex) {
+    throw new Error("scriptHash: cannot hash empty script");
+  }
   return Buffer.from(sha256(Buffer.from(hex, "hex")))
     .reverse()
     .toString("hex");
@@ -106,8 +114,14 @@ export function scriptHash(hex: string): string {
 export function p2pkhScript(address: string): string {
   try {
     return Script.buildPublicKeyHashOut(address).toHex();
-  } catch {
-    return "";
+  } catch (err) {
+    // The previous version returned "" here, which then flowed into
+    // scriptHash() and produced a meaningless constant. Surface the real
+    // failure so callers (UI flows, subscription paths) see a clear
+    // signal instead of a silent dead address.
+    throw new Error(
+      `p2pkhScript: invalid address ${JSON.stringify(address)}: ${String(err)}`
+    );
   }
 }
 
@@ -115,11 +129,18 @@ export function p2pkhScript(address: string): string {
 export function payToScript(address: string): string {
   try {
     return Script.fromAddress(address).toHex();
-  } catch {
-    return "";
+  } catch (err) {
+    throw new Error(
+      `payToScript: invalid address ${JSON.stringify(address)}: ${String(err)}`
+    );
   }
 }
 
+/**
+ * Boolean predicate: returns false for any input that isn't a valid P2PKH
+ * address. The `try/catch → false` here is intentional — callers use this
+ * as input validation. Distinct from the throwing wrappers above.
+ */
 export function isP2pkh(address: string): boolean {
   try {
     const addr = new Address(address);
@@ -167,8 +188,14 @@ export function ftCommitScript(
     .add(Opcode.OP_EQUALVERIFY);
   // gly
   script.add(glyphMagicBytesBuffer).add(Opcode.OP_EQUALVERIFY);
-  // Ensure normal ref for this input exists in an output
-  // TODO should supply be enforced? Maybe not since output can be a PoW mint contract which doesn't provide photon supply
+  // Ensure normal ref for this input exists in an output.
+  //
+  // R17 decision (2026-05-21): supply is NOT enforced at this layer.
+  // Rationale: the matching output is permitted to be a PoW mint
+  // contract (dmint) which produces tokens without providing a fixed
+  // photon supply at the script level. Enforcing supply here would
+  // make dmint reveals fail validation. Supply caps for non-dmint
+  // mints are enforced upstream by the bundle/schema layer.
   script.add(
     Script.fromASM(
       "OP_INPUTINDEX OP_OUTPOINTTXHASH OP_INPUTINDEX OP_OUTPOINTINDEX OP_4 OP_NUM2BIN OP_CAT OP_REFTYPE_OUTPUT OP_1 OP_NUMEQUALVERIFY"
@@ -248,8 +275,12 @@ export function nftScript(address: string, ref: string) {
       `OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`
     ).add(Script.buildPublicKeyHashOut(address));
     return script.toHex();
-  } catch {
-    return "";
+  } catch (err) {
+    throw new Error(
+      `nftScript: invalid address/ref (addr=${JSON.stringify(
+        address
+      )}, ref=${ref}): ${String(err)}`
+    );
   }
 }
 
@@ -453,41 +484,41 @@ function buildDmintPreimageBytecodePartA(stateItemCount: number) {
   const nonceRollIndex = stateItemCount + 4;
 
   return [
-    '51',
-    '75',
-    'c8',
+    "51",
+    "75",
+    "c8",
     pushMinimal(contractRefPickIndex),
-    '79',
-    '7e',
-    'a8',
+    "79",
+    "7e",
+    "a8",
     pushMinimal(inputOutputPickIndex),
-    '79',
+    "79",
     pushMinimal(inputOutputPickIndex),
-    '79',
-    '7e',
-    'a8',
-    '7e',
+    "79",
+    "7e",
+    "a8",
+    "7e",
     pushMinimal(nonceRollIndex),
-    '7a',
-    '7e',
-  ].join('');
+    "7a",
+    "7e",
+  ].join("");
 }
 
 function parseScriptNumberToken(token: string): number {
   if (/^OP_[0-9]+$/.test(token)) {
     return Number(token.slice(3));
   }
-  if (token === 'OP_0') {
+  if (token === "OP_0") {
     return 0;
   }
-  if (token === 'OP_1NEGATE') {
+  if (token === "OP_1NEGATE") {
     return -1;
   }
   if (!/^[0-9a-f]+$/i.test(token) || token.length % 2 !== 0) {
     throw new Error(`Unsupported script number token: ${token}`);
   }
 
-  const bytes = Array.from(Buffer.from(token, 'hex'));
+  const bytes = Array.from(Buffer.from(token, "hex"));
   if (bytes.length === 0) {
     return 0;
   }
@@ -569,19 +600,19 @@ function assertDmintPreimageLayout(partAHex: string, stateItemCount: number) {
   } = extractPreimageIndicesFromPartA(partAHex);
 
   const stateLabels = [
-    'height',
-    'contractRef',
-    'tokenRef',
+    "height",
+    "contractRef",
+    "tokenRef",
     ...Array.from({ length: stateItemCount - 3 }, (_, i) => `state${i}`),
   ];
 
   const stack = [
-    'nonce',
-    'inputHash',
-    'outputHash',
-    'outputIndex',
+    "nonce",
+    "inputHash",
+    "outputHash",
+    "outputIndex",
     ...stateLabels,
-    'outpointTxHash',
+    "outpointTxHash",
   ];
 
   stackPick(stack, contractRefPickIndex);
@@ -600,10 +631,10 @@ function assertDmintPreimageLayout(partAHex: string, stateItemCount: number) {
   const rollNonce = stackRoll(stack, nonceRollIndex);
 
   if (
-    pickContractRef !== 'contractRef' ||
-    pickInputHash !== 'inputHash' ||
-    pickOutputHash !== 'outputHash' ||
-    rollNonce !== 'nonce'
+    pickContractRef !== "contractRef" ||
+    pickInputHash !== "inputHash" ||
+    pickOutputHash !== "outputHash" ||
+    rollNonce !== "nonce"
   ) {
     throw new Error(
       `Invalid dMint preimage stack mapping: stateItems=${stateItemCount}, picks=[${pickContractRef},${pickInputHash},${pickOutputHash}], roll=${rollNonce}`
@@ -613,16 +644,21 @@ function assertDmintPreimageLayout(partAHex: string, stateItemCount: number) {
 
 // V2 BYTECODE constants (Design Spec §4.3)
 // Part B.1: PoW hash extraction (reverse, split, zeros check, bin2num, dup, >=0 verify)
-const V2_BYTECODE_PART_B1 = 'bc01147f77587f040000000088817600a269';
+const V2_BYTECODE_PART_B1 = "bc01147f77587f040000000088817600a269";
 // Part B.2: Target comparison with preservation (OP_1 PICK target, SWAP, >=, VERIFY)
-const V2_BYTECODE_PART_B2 = '51797ca269';
+const V2_BYTECODE_PART_B2 = "51797ca269";
 // Part B.4: Stack cleanup — drop 5 V2 extras (target, lastTime, targetTime, daaMode, algoId)
-const V2_BYTECODE_PART_B4 = '7575757575';
+const V2_BYTECODE_PART_B4 = "7575757575";
 // Part C: Output validation (same as V1 — code script continuity, token reward, height checks)
-const V2_BYTECODE_PART_C = 'a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551';
+const V2_BYTECODE_PART_C =
+  "a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
 
-// V1 legacy BYTECODE_PART_B (for backward-compatible parsing only)
-const V1_BYTECODE_PART_B = 'bc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551';
+// V1 legacy BYTECODE_PART_B kept as a reference for any future
+// backward-compatible parser. Prefixed with `_` to opt out of
+// `no-unused-vars` while documenting intent.
+const _V1_BYTECODE_PART_B =
+  "bc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
+void _V1_BYTECODE_PART_B;
 
 function buildAsertDaaBytecode(halfLife: number): string {
   // ASERT-lite DAA (Design Spec §4.5)
@@ -635,59 +671,60 @@ function buildAsertDaaBytecode(halfLife: number): string {
   // shift count. New deployments after the fix use the correct opcode.
   const halfLifePush = pushMinimal(halfLife);
   return [
-    'c5',             // OP_TXLOCKTIME → currentTime
-    '5279',           // OP_2 PICK lastTime
-    '94',             // OP_SUB → time_delta
-    '5379',           // OP_3 PICK targetTime
-    '94',             // OP_SUB → excess
-    halfLifePush,     // push halfLife constant
-    '96',             // OP_DIV → drift
+    "c5", // OP_TXLOCKTIME → currentTime
+    "5279", // OP_2 PICK lastTime
+    "94", // OP_SUB → time_delta
+    "5379", // OP_3 PICK targetTime
+    "94", // OP_SUB → excess
+    halfLifePush, // push halfLife constant
+    "96", // OP_DIV → drift
     // Clamp drift to [-4, +4]
-    '7654a0',         // DUP OP_4 GT
-    '63',             // IF
-    '7554',           //   DROP, push 4
-    '68',             // ENDIF
-    '76548f', '9f',   // DUP OP_4 NEGATE LT
-    '63',             // IF
-    '75548f',         //   DROP, push -4
-    '68',             // ENDIF
+    "7654a0", // DUP OP_4 GT
+    "63", // IF
+    "7554", //   DROP, push 4
+    "68", // ENDIF
+    "76548f",
+    "9f", // DUP OP_4 NEGATE LT
+    "63", // IF
+    "75548f", //   DROP, push -4
+    "68", // ENDIF
     // Apply shift: drift>0 → LSHIFT, drift<0 → RSHIFT(|drift|), drift==0 → unchanged
-    '7600a0',         // DUP 0 GT
-    '63',             // IF (positive)
-    '98',             //   LSHIFT
-    '67',             // ELSE
-    '76009f',         //   DUP 0 LT
-    '63',             //   IF (negative)
-    '8f99',           //     NEGATE RSHIFT
-    '67',             //   ELSE (zero)
-    '75',             //     DROP (drift=0, target unchanged)
-    '68',             //   ENDIF
-    '68',             // ENDIF
+    "7600a0", // DUP 0 GT
+    "63", // IF (positive)
+    "98", //   LSHIFT
+    "67", // ELSE
+    "76009f", //   DUP 0 LT
+    "63", //   IF (negative)
+    "8f99", //     NEGATE RSHIFT
+    "67", //   ELSE (zero)
+    "75", //     DROP (drift=0, target unchanged)
+    "68", //   ENDIF
+    "68", // ENDIF
     // Clamp target to minimum 1
-    '76519f',         // DUP OP_1 LT
-    '63',             // IF
-    '7551',           //   DROP, push 1
-    '68',             // ENDIF
-  ].join('');
+    "76519f", // DUP OP_1 LT
+    "63", // IF
+    "7551", //   DROP, push 1
+    "68", // ENDIF
+  ].join("");
 }
 
 function buildLinearDaaBytecode(): string {
   // Linear DAA (Design Spec §4.6)
   // new_target = old_target * time_delta / targetTime
   return [
-    'c5',             // OP_TXLOCKTIME → currentTime
-    '5279',           // OP_2 PICK lastTime
-    '94',             // OP_SUB → time_delta
-    '7c',             // SWAP → [target, time_delta, ...]
-    '95',             // MUL → [target*time_delta, ...]
-    '5379',           // OP_3 PICK targetTime
-    '96',             // DIV → [new_target, ...]
+    "c5", // OP_TXLOCKTIME → currentTime
+    "5279", // OP_2 PICK lastTime
+    "94", // OP_SUB → time_delta
+    "7c", // SWAP → [target, time_delta, ...]
+    "95", // MUL → [target*time_delta, ...]
+    "5379", // OP_3 PICK targetTime
+    "96", // DIV → [new_target, ...]
     // Clamp target to minimum 1
-    '76519f',
-    '63',
-    '7551',
-    '68',
-  ].join('');
+    "76519f",
+    "63",
+    "7551",
+    "68",
+  ].join("");
 }
 
 /**
@@ -697,12 +734,13 @@ function buildLinearDaaBytecode(): string {
  * log2 shift count (1 → 2x, 2 → 4x, 3 → 8x, 4 → 16x).
  */
 export const EPOCH_MAX_ADJUSTMENT_LOG2_VALUES = [1, 2, 3, 4] as const;
-export type EpochMaxAdjustmentLog2 = (typeof EPOCH_MAX_ADJUSTMENT_LOG2_VALUES)[number];
+export type EpochMaxAdjustmentLog2 =
+  (typeof EPOCH_MAX_ADJUSTMENT_LOG2_VALUES)[number];
 
 /** Per the EPOCH/SCHEDULE design doc §3.7, target > 2^48 risks overflow in
  * `target * clampedDelta` (delta ≤ targetTime * 16). Rejected at wallet build
  * time when daaMode === 'epoch'. */
-export const EPOCH_MAX_SAFE_TARGET = (1n << 48n);
+export const EPOCH_MAX_SAFE_TARGET = 1n << 48n;
 
 /** Maximum number of entries in a SCHEDULE (design doc §4.2, decided 2026-05-19). */
 export const SCHEDULE_MAX_ENTRIES = 10;
@@ -737,49 +775,55 @@ function buildEpochDaaBytecode(
       `EPOCH: epochLength must be a positive integer (got ${epochLength})`
     );
   }
-  if (!EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(maxAdjustmentLog2 as EpochMaxAdjustmentLog2)) {
+  if (
+    !EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(
+      maxAdjustmentLog2 as EpochMaxAdjustmentLog2
+    )
+  ) {
     throw new DaaParamsValidationError(
-      `EPOCH: maxAdjustmentLog2 must be one of ${EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.join(', ')} (got ${maxAdjustmentLog2})`
+      `EPOCH: maxAdjustmentLog2 must be one of ${EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.join(
+        ", "
+      )} (got ${maxAdjustmentLog2})`
     );
   }
   const epochLengthPush = pushMinimal(epochLength);
   const nPush = pushMinimal(maxAdjustmentLog2);
   return [
     // ── Boundary check: (height > 0) AND (height % epochLength == 0) ──
-    '5979',           // OP_9 OP_PICK       — copy height (state pos 9)
-    '76',             // OP_DUP             — dup for two checks
-    '00a0',           // OP_0 OP_GREATERTHAN — height > 0?
-    '7c',             // OP_SWAP            — move height_copy back to top
-    epochLengthPush,  // push epochLength
-    '97',             // OP_MOD             — height % epochLength
-    '009c',           // OP_0 OP_NUMEQUAL   — mod == 0?
-    '9a',             // OP_BOOLAND         — combine
-    '63',             // OP_IF
-      // ── delta = currentTime - lastTime ──
-      'c5',           //   OP_TXLOCKTIME    — currentTime
-      '5279',         //   OP_2 OP_PICK     — copy lastTime
-      '94',           //   OP_SUB           — delta
-      // ── clamp delta to [targetTime>>N, targetTime<<N] ──
-      '5379',         //   OP_3 OP_PICK     — copy targetTime
-      nPush,          //   push N
-      '98',           //   OP_LSHIFT        — upperBound = targetTime << N
-      'a3',           //   OP_MIN           — delta = min(delta, upperBound)
-      '5379',         //   OP_3 OP_PICK     — copy targetTime
-      nPush,          //   push N
-      '99',           //   OP_RSHIFT        — lowerBound = targetTime >> N
-      'a4',           //   OP_MAX           — delta = max(delta, lowerBound)
-      // ── newTarget = target * clampedDelta / targetTime ──
-      '7c',           //   OP_SWAP          — [target, clampedDelta, ...]
-      '95',           //   OP_MUL           — target * clampedDelta
-      '5279',         //   OP_2 OP_PICK     — copy targetTime
-      '96',           //   OP_DIV           — newTarget
-      // ── clamp newTarget to ≥1 ──
-      '76519f',       //   OP_DUP OP_1 OP_LESSTHAN
-      '63',           //   OP_IF
-      '7551',         //     OP_DROP OP_1
-      '68',           //   OP_ENDIF
-    '68',             // OP_ENDIF (outer)
-  ].join('');
+    "5979", // OP_9 OP_PICK       — copy height (state pos 9)
+    "76", // OP_DUP             — dup for two checks
+    "00a0", // OP_0 OP_GREATERTHAN — height > 0?
+    "7c", // OP_SWAP            — move height_copy back to top
+    epochLengthPush, // push epochLength
+    "97", // OP_MOD             — height % epochLength
+    "009c", // OP_0 OP_NUMEQUAL   — mod == 0?
+    "9a", // OP_BOOLAND         — combine
+    "63", // OP_IF
+    // ── delta = currentTime - lastTime ──
+    "c5", //   OP_TXLOCKTIME    — currentTime
+    "5279", //   OP_2 OP_PICK     — copy lastTime
+    "94", //   OP_SUB           — delta
+    // ── clamp delta to [targetTime>>N, targetTime<<N] ──
+    "5379", //   OP_3 OP_PICK     — copy targetTime
+    nPush, //   push N
+    "98", //   OP_LSHIFT        — upperBound = targetTime << N
+    "a3", //   OP_MIN           — delta = min(delta, upperBound)
+    "5379", //   OP_3 OP_PICK     — copy targetTime
+    nPush, //   push N
+    "99", //   OP_RSHIFT        — lowerBound = targetTime >> N
+    "a4", //   OP_MAX           — delta = max(delta, lowerBound)
+    // ── newTarget = target * clampedDelta / targetTime ──
+    "7c", //   OP_SWAP          — [target, clampedDelta, ...]
+    "95", //   OP_MUL           — target * clampedDelta
+    "5279", //   OP_2 OP_PICK     — copy targetTime
+    "96", //   OP_DIV           — newTarget
+    // ── clamp newTarget to ≥1 ──
+    "76519f", //   OP_DUP OP_1 OP_LESSTHAN
+    "63", //   OP_IF
+    "7551", //     OP_DROP OP_1
+    "68", //   OP_ENDIF
+    "68", // OP_ENDIF (outer)
+  ].join("");
 }
 
 /**
@@ -802,7 +846,7 @@ function buildEpochDaaBytecode(
 function buildScheduleDaaBytecode(schedule: ScheduleEntry[]): string {
   if (schedule.length === 0) {
     // Empty schedule = FIXED behavior. Caller should map this to mode 'fixed'.
-    return '';
+    return "";
   }
   if (schedule.length > SCHEDULE_MAX_ENTRIES) {
     throw new DaaParamsValidationError(
@@ -823,7 +867,9 @@ function buildScheduleDaaBytecode(schedule: ScheduleEntry[]): string {
     }
     if (i > 0 && entry.height <= schedule[i - 1].height) {
       throw new DaaParamsValidationError(
-        `SCHEDULE: entries must be strictly ascending by height (entry ${i} height ${entry.height} <= ${schedule[i - 1].height})`
+        `SCHEDULE: entries must be strictly ascending by height (entry ${i} height ${
+          entry.height
+        } <= ${schedule[i - 1].height})`
       );
     }
   }
@@ -831,20 +877,20 @@ function buildScheduleDaaBytecode(schedule: ScheduleEntry[]): string {
   // Build the nested IF/ELSE chain from the inside out: start with the
   // lowest-boundary check, wrap with each next-higher boundary. After all
   // iterations, the outermost layer is the highest boundary.
-  let body = '';
+  let body = "";
   for (let i = 0; i < schedule.length; i++) {
     const { height, target } = schedule[i];
     body = [
-      '5979',                  // OP_9 OP_PICK         — copy height
-      pushMinimal(height),     // push boundary
-      'a2',                    // OP_GREATERTHANOREQUAL
-      '63',                    // OP_IF
-      '75',                    //   OP_DROP            — drop old target
-      pushMinimal(target),     //   push new target
-      body ? '67' : '',        // OP_ELSE (only if there's a deeper layer to fall back to)
+      "5979", // OP_9 OP_PICK         — copy height
+      pushMinimal(height), // push boundary
+      "a2", // OP_GREATERTHANOREQUAL
+      "63", // OP_IF
+      "75", //   OP_DROP            — drop old target
+      pushMinimal(target), //   push new target
+      body ? "67" : "", // OP_ELSE (only if there's a deeper layer to fall back to)
       body,
-      '68',                    // OP_ENDIF
-    ].join('');
+      "68", // OP_ENDIF
+    ].join("");
   }
   return body;
 }
@@ -855,11 +901,13 @@ function buildScheduleDaaBytecode(schedule: ScheduleEntry[]): string {
  * already speak that form. Throws DaaParamsValidationError for anything else.
  */
 function maxAdjustmentToLog2(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return 2; // default 4x (log2=2)
   }
   // Direct log2 form (callers that already pass shift count)
-  if (EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(value as EpochMaxAdjustmentLog2)) {
+  if (
+    EPOCH_MAX_ADJUSTMENT_LOG2_VALUES.includes(value as EpochMaxAdjustmentLog2)
+  ) {
     return value;
   }
   // Factor form (2, 4, 8, 16) — convert to log2
@@ -875,27 +923,36 @@ function maxAdjustmentToLog2(value: unknown): number {
  * `target`, or both) into the canonical { height, target } form the bytecode
  * generator expects.
  */
-function normalizeScheduleEntries(
-  raw: unknown
-): ScheduleEntry[] {
+type RawScheduleEntry = {
+  height?: unknown;
+  target?: unknown;
+  difficulty?: unknown;
+};
+
+function normalizeScheduleEntries(raw: unknown): ScheduleEntry[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((e: any, i: number) => {
-    if (!e || typeof e !== 'object') {
+  return raw.map((rawEntry: unknown, i: number) => {
+    if (!rawEntry || typeof rawEntry !== "object") {
       throw new DaaParamsValidationError(
         `SCHEDULE: entry ${i} is not an object`
       );
     }
-    if (typeof e.height !== 'number') {
+    const e = rawEntry as RawScheduleEntry;
+    if (typeof e.height !== "number") {
       throw new DaaParamsValidationError(
         `SCHEDULE: entry ${i} missing numeric height`
       );
     }
     let target: bigint;
-    if (typeof e.target === 'bigint') {
+    if (typeof e.target === "bigint") {
       target = e.target;
-    } else if (typeof e.target === 'number' && Number.isFinite(e.target)) {
+    } else if (typeof e.target === "number" && Number.isFinite(e.target)) {
       target = BigInt(e.target);
-    } else if (typeof e.difficulty === 'number' && Number.isFinite(e.difficulty) && e.difficulty > 0) {
+    } else if (
+      typeof e.difficulty === "number" &&
+      Number.isFinite(e.difficulty) &&
+      e.difficulty > 0
+    ) {
       target = dMintDiffToTarget(e.difficulty);
     } else {
       throw new DaaParamsValidationError(
@@ -906,16 +963,37 @@ function normalizeScheduleEntries(
   });
 }
 
-function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
-  let daaBytecode = '';
+/** Shape DAA params can take depending on `daaMode`. Each field is optional;
+ *  the dispatcher picks what it needs.
+ *
+ *  Carries an index signature so callers can pass additional fields without
+ *  forcing this union to grow on every new DAA mode.
+ */
+export type DaaParams = {
+  halfLife?: number;
+  epochLength?: number;
+  maxAdjustmentLog2?: number;
+  maxAdjustment?: number;
+  schedule?: unknown;
+  /** Generic seconds-per-block hint used by some modes. */
+  targetBlockTime?: number;
+  targetTime?: number;
+  [key: string]: unknown;
+};
+
+function buildV2BytecodePartB(
+  daaMode: string,
+  daaParams: DaaParams | null
+): string {
+  let daaBytecode = "";
   switch (daaMode) {
-    case 'asert':
+    case "asert":
       daaBytecode = buildAsertDaaBytecode(daaParams?.halfLife || 3600);
       break;
-    case 'lwma':
+    case "lwma":
       daaBytecode = buildLinearDaaBytecode();
       break;
-    case 'epoch':
+    case "epoch":
       daaBytecode = buildEpochDaaBytecode(
         daaParams?.epochLength ?? 2016,
         maxAdjustmentToLog2(
@@ -924,14 +1002,14 @@ function buildV2BytecodePartB(daaMode: string, daaParams: any): string {
         )
       );
       break;
-    case 'schedule':
+    case "schedule":
       daaBytecode = buildScheduleDaaBytecode(
         normalizeScheduleEntries(daaParams?.schedule)
       );
       break;
-    case 'fixed':
+    case "fixed":
     default:
-      daaBytecode = '';
+      daaBytecode = "";
       break;
   }
   return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${V2_BYTECODE_PART_B4}`;
@@ -951,9 +1029,9 @@ export function dMintScript(
   maxHeight: number,
   reward: number,
   target: bigint,
-  algorithm: string = 'sha256d',
-  daaMode: string = 'fixed',
-  daaParams: any = null,
+  algorithm: string = "sha256d",
+  daaMode: string = "fixed",
+  daaParams: DaaParams | null = null,
   lastTime: number = 0
 ) {
   const algorithmIds: Record<string, number> = {
@@ -976,11 +1054,11 @@ export function dMintScript(
 
   // PoW hash opcode: aa=OP_HASH256(SHA256d), ee=OP_BLAKE3, ef=OP_K12
   const powHashOpcodes: Record<string, string> = {
-    'sha256d': 'aa',
-    'blake3': 'ee',
-    'k12': 'ef',
+    sha256d: "aa",
+    blake3: "ee",
+    k12: "ef",
   };
-  const powHashOp = powHashOpcodes[algorithm] || 'aa';
+  const powHashOp = powHashOpcodes[algorithm] || "aa";
 
   // V2 state layout (10 items, Design Spec §4.2):
   // height | d8:contractRef | d0:tokenRef | maxHeight | reward |
@@ -998,7 +1076,7 @@ export function dMintScript(
     pushMinimal(targetTime),
     push4bytes(lastTime),
     pushMinimal(target),
-  ].join('');
+  ].join("");
 
   const bytecodePartA = buildDmintPreimageBytecodePartA(V2_STATE_ITEM_COUNT);
   assertDmintPreimageLayout(bytecodePartA, V2_STATE_ITEM_COUNT);

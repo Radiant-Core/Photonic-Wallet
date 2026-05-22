@@ -22,7 +22,10 @@ export function safeResolvePath(rootDir: string, relativePath: string): string {
 
   // Reject paths containing .. components
   const normalizedRelative = path.normalize(relativePath);
-  if (normalizedRelative.startsWith("..") || normalizedRelative.includes("../")) {
+  if (
+    normalizedRelative.startsWith("..") ||
+    normalizedRelative.includes("../")
+  ) {
     throw new Error(`Path traversal detected: ${relativePath}`);
   }
 

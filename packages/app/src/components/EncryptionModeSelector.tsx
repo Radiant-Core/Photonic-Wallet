@@ -5,6 +5,7 @@
  */
 
 import { useState } from "react";
+import { t, Trans } from "@lingui/macro";
 import {
   VStack,
   HStack,
@@ -25,7 +26,13 @@ import {
   Box,
   Icon,
 } from "@chakra-ui/react";
-import { MdVisibility, MdVisibilityOff, MdPersonAdd, MdLock, MdPeople } from "react-icons/md";
+import {
+  MdVisibility,
+  MdVisibilityOff,
+  MdPersonAdd,
+  MdLock,
+  MdPeople,
+} from "react-icons/md";
 import type { EncryptionMode } from "../encryptionService";
 
 export type EncryptionModeSelectorProps = {
@@ -59,9 +66,9 @@ function evaluateStrength(pass: string): number {
 }
 
 function strengthMeta(score: number): { label: string; color: string } {
-  if (score < 40) return { label: "Weak", color: "red" };
-  if (score < 70) return { label: "Medium", color: "yellow" };
-  return { label: "Strong", color: "green" };
+  if (score < 40) return { label: t`Weak`, color: "red" };
+  if (score < 70) return { label: t`Medium`, color: "yellow" };
+  return { label: t`Strong`, color: "green" };
 }
 
 /**
@@ -92,7 +99,7 @@ export function EncryptionModeSelector({
           colorScheme={mode === "passphrase" ? "blue" : undefined}
           flex={1}
         >
-          Passphrase
+          <Trans>Passphrase</Trans>
         </Button>
         <Button
           leftIcon={<Icon as={MdPeople} />}
@@ -101,27 +108,33 @@ export function EncryptionModeSelector({
           colorScheme={mode === "recipient" ? "blue" : undefined}
           flex={1}
         >
-          Recipients
+          <Trans>Recipients</Trans>
         </Button>
       </ButtonGroup>
 
       {mode === "passphrase" && (
         <VStack spacing={2} align="stretch">
           <FormControl isRequired>
-            <FormLabel fontSize="sm">Encryption Passphrase</FormLabel>
+            <FormLabel fontSize="sm">
+              <Trans>Encryption Passphrase</Trans>
+            </FormLabel>
             <InputGroup size="sm">
               <Input
                 type={showPassword ? "text" : "password"}
                 value={passphrase || ""}
                 onChange={(e) => onPassphraseChange?.(e.target.value)}
-                placeholder="Enter a strong passphrase…"
+                placeholder={t`Enter a strong passphrase…`}
                 isDisabled={disabled}
                 pr="2.5rem"
               />
               <InputRightElement>
                 <IconButton
-                  aria-label={showPassword ? "Hide passphrase" : "Show passphrase"}
-                  icon={<Icon as={showPassword ? MdVisibilityOff : MdVisibility} />}
+                  aria-label={
+                    showPassword ? t`Hide passphrase` : t`Show passphrase`
+                  }
+                  icon={
+                    <Icon as={showPassword ? MdVisibilityOff : MdVisibility} />
+                  }
                   size="xs"
                   variant="ghost"
                   onClick={() => setShowPassword((v) => !v)}
@@ -148,7 +161,10 @@ export function EncryptionModeSelector({
 
           <FormControl>
             <FormHelperText fontSize="xs">
-              Required to decrypt content. Store it securely — it cannot be recovered.
+              <Trans>
+                Required to decrypt content. Store it securely — it cannot be
+                recovered.
+              </Trans>
             </FormHelperText>
           </FormControl>
         </VStack>
@@ -156,12 +172,19 @@ export function EncryptionModeSelector({
 
       {mode === "recipient" && (
         <VStack spacing={2} align="stretch">
-          <Text fontSize="sm" fontWeight="medium" mb={0}>Recipients</Text>
+          <Text fontSize="sm" fontWeight="medium" mb={0}>
+            <Trans>Recipients</Trans>
+          </Text>
 
           {recipientKeys && recipientKeys.length > 0 && (
             <HStack flexWrap="wrap" gap={2}>
               {recipientKeys.map((key, index) => (
-                <Tag key={index} size="sm" colorScheme="blue" borderRadius="full">
+                <Tag
+                  key={index}
+                  size="sm"
+                  colorScheme="blue"
+                  borderRadius="full"
+                >
                   <TagLabel fontFamily="mono" fontSize="xs">
                     {key.slice(0, 8)}…{key.slice(-6)}
                   </TagLabel>
@@ -182,12 +205,15 @@ export function EncryptionModeSelector({
             isDisabled={disabled}
             alignSelf="flex-start"
           >
-            Add Recipient
+            <Trans>Add Recipient</Trans>
           </Button>
 
           <FormControl>
             <FormHelperText fontSize="xs">
-              Add by WAVE name (e.g. alice.rxd) or X25519 public key. Only listed recipients can decrypt.
+              <Trans>
+                Add by WAVE name (e.g. alice.rxd) or X25519 public key. Only
+                listed recipients can decrypt.
+              </Trans>
             </FormHelperText>
           </FormControl>
         </VStack>

@@ -1,5 +1,4 @@
 import { Container, Heading, Text } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import License from "@app/components/License";
 
 export default function About() {
@@ -9,7 +8,9 @@ export default function About() {
       <Text mb={4}>
         {"Version:"} {APP_VERSION}
       </Text>
-      <Heading mb={4} size="md">{"License"}</Heading>
+      <Heading mb={4} size="md">
+        {"License"}
+      </Heading>
       <License />
     </Container>
   );

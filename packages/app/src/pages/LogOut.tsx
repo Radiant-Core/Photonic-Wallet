@@ -1,4 +1,3 @@
-import { t } from "@lingui/macro";
 import db from "@app/db";
 import {
   Alert,
@@ -11,6 +10,7 @@ import {
   Text,
 } from "@chakra-ui/react";
 import opfs from "@app/opfs";
+import { lockWallet } from "@app/wallet";
 
 /** Keys to clear from localStorage on logout */
 const LOCAL_STORAGE_KEYS_TO_CLEAR = [
@@ -25,6 +25,10 @@ const LOCAL_STORAGE_KEYS_TO_CLEAR = [
 
 export default function LogOut() {
   const logout = async () => {
+    // R4: wipe the in-memory secret bytes BEFORE clearing storage so a
+    // memory dump captured during the (brief) deletion window has no
+    // recoverable mnemonic/WIF.
+    lockWallet();
     await db.delete();
     await opfs.deleteAll();
 
@@ -47,14 +51,20 @@ export default function LogOut() {
 
   return (
     <Container maxW="container.lg">
-      <Heading mb={4} size="md">{"Log out"}</Heading>
+      <Heading mb={4} size="md">
+        {"Log out"}
+      </Heading>
       <Text mb={4}>
-        {"Logging out will remove your wallet and all saved data from your browser."}
+        {
+          "Logging out will remove your wallet and all saved data from your browser."
+        }
       </Text>
       <Alert status="error">
         <AlertIcon />
         <AlertDescription>
-          {"Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet."}
+          {
+            "Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet."
+          }
         </AlertDescription>
       </Alert>
       <Flex justifyContent="center" py={8} mb={16}>

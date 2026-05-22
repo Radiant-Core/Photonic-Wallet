@@ -72,26 +72,42 @@ export class RXDWorker implements Subscription {
     this.ready = false;
     this.lastReceivedStatus = status;
 
-    const { added } = await this.updateTXOs(scriptHash, status, manual);
+    // R10 follow-up: electrum requests reject pending promises when the
+    // socket closes mid-flight (heavy-history accounts trigger this when
+    // the server returns "excessive resource usage" and drops the
+    // connection). Without this try/finally the rejection escapes as
+    // an unhandled promise and `this.ready` stays false forever — every
+    // subsequent sync is silently skipped.
+    try {
+      const { added } = await this.updateTXOs(scriptHash, status, manual);
 
-    // Batch insert txos to avoid Safari IndexedDB "out of memory" errors
-    // from too many concurrent transactions
-    const chunks = arrayChunks(added, 1000);
-    for (const chunk of chunks) {
-      await db.transaction("rw", db.txo, async () => {
-        await db.txo.bulkPut(chunk);
-      });
+      // Batch insert txos to avoid Safari IndexedDB "out of memory" errors
+      // from too many concurrent transactions
+      const chunks = arrayChunks(added, 1000);
+      for (const chunk of chunks) {
+        await db.transaction("rw", db.txo, async () => {
+          await db.txo.bulkPut(chunk);
+        });
+      }
+
+      updateRxdBalances(this.address);
+
+      setSubscriptionStatus(scriptHash, status, false, ContractType.RXD);
+    } catch (err) {
+      console.warn("[RXD] subscription update failed:", err);
+      // Queue this status so the next ready window retries it.
+      if (status) this.receivedStatuses.push(status);
+    } finally {
+      this.ready = true;
     }
 
-    updateRxdBalances(this.address);
-
-    setSubscriptionStatus(scriptHash, status, false, ContractType.RXD);
-    this.ready = true;
     if (this.receivedStatuses.length > 0) {
       const lastStatus = this.receivedStatuses.pop();
       this.receivedStatuses = [];
       if (lastStatus) {
-        this.onSubscriptionReceived(scriptHash, lastStatus);
+        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+          console.warn("[RXD] requeued sync failed:", e)
+        );
       }
     }
 
@@ -109,9 +125,16 @@ export class RXDWorker implements Subscription {
         this.scriptHash
       );
     } catch (error) {
-      console.warn("[RXD] Subscription failed, falling back to manual sync:", error);
+      console.warn(
+        "[RXD] Subscription failed, falling back to manual sync:",
+        error
+      );
       try {
-        await this.onSubscriptionReceived(this.scriptHash, "manual-fallback", true);
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
         console.debug("[RXD] Manual fallback sync completed");
       } catch (fallbackError) {
         console.warn("[RXD] Manual fallback also failed:", fallbackError);

@@ -18,7 +18,6 @@ import {
   Badge,
   Box,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { filesize } from "filesize";
 import TokenData from "./TokenData";
 import Identicon from "./Identicon";
@@ -28,7 +27,7 @@ import { SmartToken } from "@app/types";
 import Outpoint from "@lib/Outpoint";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { Link } from "react-router-dom";
-import { PropsWithChildren } from "react";
+import { ComponentProps, PropsWithChildren } from "react";
 import ContractAddresses from "./ContractAddresses";
 import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "@lib/protocols";
 import EncryptedContentUnlock from "./EncryptedContentUnlock";
@@ -81,11 +80,14 @@ export default function TokenDetails({
   const containerRef = glyph.container && Outpoint.fromString(glyph.container);
   const hasAttrs = glyph.attrs && Object.keys(glyph.attrs).length > 0;
   const isIPFS = glyph.remote?.u?.startsWith("ipfs://");
-  const isEncrypted = !!(glyph.p?.includes(GLYPH_ENCRYPTED));
-  const isTimelocked = !!(glyph.p?.includes(GLYPH_TIMELOCK));
+  const isEncrypted = !!glyph.p?.includes(GLYPH_ENCRYPTED);
+  const isTimelocked = !!glyph.p?.includes(GLYPH_TIMELOCK);
   const cryptoObj = glyph.crypto as Record<string, unknown> | undefined;
   const mainObj = glyph.main as Record<string, unknown> | undefined;
-  const encScheme = (mainObj?.scheme as string) ?? (mainObj?.enc as string) ?? "xchacha20poly1305";
+  const encScheme =
+    (mainObj?.scheme as string) ??
+    (mainObj?.enc as string) ??
+    "xchacha20poly1305";
   const encType = mainObj?.type as string | undefined;
   const encSize = mainObj?.size as number | undefined;
   const encLocator = cryptoObj?.locator as string | undefined;
@@ -110,10 +112,24 @@ export default function TokenDetails({
               <PropertyCard
                 heading={
                   <HStack spacing={2}>
-                    <Icon as={decryptedBytes ? MdLockOpen : MdLock} color={decryptedBytes ? "green.400" : isTimelocked ? "orange.400" : "blue.400"} />
-                    <Text as="span">{decryptedBytes ? "Decrypted" : "Encrypted Content"}</Text>
+                    <Icon
+                      as={decryptedBytes ? MdLockOpen : MdLock}
+                      color={
+                        decryptedBytes
+                          ? "green.400"
+                          : isTimelocked
+                          ? "orange.400"
+                          : "blue.400"
+                      }
+                    />
+                    <Text as="span">
+                      {decryptedBytes ? "Decrypted" : "Encrypted Content"}
+                    </Text>
                     {!decryptedBytes && (
-                      <Badge colorScheme={isTimelocked ? "orange" : "blue"} fontSize="xs">
+                      <Badge
+                        colorScheme={isTimelocked ? "orange" : "blue"}
+                        fontSize="xs"
+                      >
                         {isTimelocked ? "Timelocked" : encScheme.toUpperCase()}
                       </Badge>
                     )}
@@ -128,10 +144,14 @@ export default function TokenDetails({
                         <PropertyCard heading="Type">{encType}</PropertyCard>
                       )}
                       {encSize !== undefined && (
-                        <PropertyCard heading="Size">{filesize(encSize) as string}</PropertyCard>
+                        <PropertyCard heading="Size">
+                          {filesize(encSize) as string}
+                        </PropertyCard>
                       )}
                       {encScheme && (
-                        <PropertyCard heading="Cipher">{encScheme.toUpperCase()}</PropertyCard>
+                        <PropertyCard heading="Cipher">
+                          {encScheme.toUpperCase()}
+                        </PropertyCard>
                       )}
                     </SimpleGrid>
                   </Box>
@@ -143,13 +163,20 @@ export default function TokenDetails({
                   </Text>
                 ) : (
                   <EncryptedContentUnlock
-                    stub={(glyph.crypto as any) ?? { main: {}, crypto: {} }}
+                    stub={
+                      (glyph.crypto as ComponentProps<
+                        typeof EncryptedContentUnlock
+                      >["stub"]) ?? { main: {}, crypto: {} }
+                    }
                     locator={encLocator}
                     locatorNonce={encLocatorNonce}
                     mainB={encMainB}
                     tokenRef={glyph.ref}
                     onDecrypted={(plaintext) =>
-                      onDecrypted?.(plaintext, encType ?? "application/octet-stream")
+                      onDecrypted?.(
+                        plaintext,
+                        encType ?? "application/octet-stream"
+                      )
                     }
                   />
                 )}
@@ -164,8 +191,8 @@ export default function TokenDetails({
                   <RefProperty tokenRef={Outpoint.fromString(glyph.location)} />
                 </PropertyCard>
                 <PropertyCard heading={"Mining Contracts"} mb={4}>
-                  <ContractAddresses 
-                    linkRef={Outpoint.fromString(glyph.location).ref()} 
+                  <ContractAddresses
+                    linkRef={Outpoint.fromString(glyph.location).ref()}
                   />
                 </PropertyCard>
               </>
@@ -249,7 +276,9 @@ export default function TokenDetails({
                   heading={"HashStamp"}
                   info={
                     <Tooltip
-                      label={"A HashStamp is a compressed on-chain copy of the token image, displayed alongside the SHA-256 of the original file"}
+                      label={
+                        "A HashStamp is a compressed on-chain copy of the token image, displayed alongside the SHA-256 of the original file"
+                      }
                       placement="bottom-end"
                       hasArrow
                     >

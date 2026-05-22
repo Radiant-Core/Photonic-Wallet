@@ -1,7 +1,6 @@
 import db from "@app/db";
 import {
   ContractType,
-  ElectrumStatus,
   SmartToken,
   SwapError,
   SwapStatus,
@@ -26,7 +25,6 @@ import SwapTable from "@app/components/SwapTable";
 import Card from "@app/components/Card";
 import { cancelSwap, syncSwaps } from "@app/swap";
 import { TbZoom } from "react-icons/tb";
-import { t } from "@lingui/macro";
 import {
   createContext,
   PropsWithChildren,
@@ -35,7 +33,6 @@ import {
   useState,
 } from "react";
 import ViewSwap from "@app/components/ViewSwap";
-import { electrumWorker } from "@app/electrum/Electrum";
 
 const ModalContext = createContext<((swap: TokenSwap) => void) | null>(null);
 

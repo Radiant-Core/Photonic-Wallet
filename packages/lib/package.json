@@ -15,7 +15,8 @@
     "./mint": "./src/mint.ts",
     "./types": "./src/types.ts",
     "./protocols": "./src/protocols.ts",
-    "./transfer": "./src/transfer.ts"
+    "./transfer": "./src/transfer.ts",
+    "./electrumWsClient": "./src/electrumWsClient.ts"
   },
   "scripts": {
     "lint": "eslint \"src/**/*.ts*\"",
@@ -35,19 +36,20 @@
   },
   "dependencies": {
     "@bitauth/libauth": "^3.0.0",
-    "@noble/ciphers": "^1.0.0",
-    "@noble/curves": "^1.6.0",
-    "@noble/hashes": "^1.5.0",
-    "@noble/post-quantum": "^0.4.0",
-    "@radiant-core/radiantjs": "^2.0.3",
-    "@scure/base": "^1.1.9",
-    "@scure/bip32": "^1.5.0",
-    "@scure/bip39": "^1.4.0",
+    "@noble/ciphers": "1.3.0",
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
+    "@noble/post-quantum": "0.4.1",
+    "@radiant-core/radiantjs": "2.0.3",
+    "@scure/base": "1.2.6",
+    "@scure/bip32": "1.7.0",
+    "@scure/bip39": "1.6.0",
     "big.js": "^6.2.2",
-    "bsv-coinselect": "^4.2.5",
     "buffer": "^6.0.3",
     "cbor-x": "^1.6.0",
-    "nft.storage": "^7.2.0"
+    "isomorphic-ws": "^5.0.0",
+    "nft.storage": "^7.2.0",
+    "ws": "^8.18.0"
   },
   "description": "",
   "main": "eslint.config.js",

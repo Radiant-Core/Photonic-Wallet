@@ -18,7 +18,6 @@ import {
   estimateVaultClaimSize,
   estimateVaultClaimFee,
   parseVaultRedeemScript,
-  decodeVaultMetadata,
   isVaultUnlockable,
   isVaultClaimable,
   vaultTimeRemaining,
@@ -31,6 +30,9 @@ import {
   VAULT_MAGIC_BYTES,
   CLTV_SEQUENCE,
   VAULT_DUST_THRESHOLD,
+  VAULT_PAYLOAD_VERSION,
+  buildVaultOpReturn,
+  parseVaultOpReturn,
   type VaultParams,
   type FundingUtxo,
 } from "../vault";
@@ -87,7 +89,9 @@ describe("encodeLocktime / decodeLocktime", () => {
   });
 
   it("round-trips various values", () => {
-    const values = [1, 127, 128, 255, 256, 65535, 100000, 499999999, 1700000000, 2000000000];
+    const values = [
+      1, 127, 128, 255, 256, 65535, 100000, 499999999, 1700000000, 2000000000,
+    ];
     for (const v of values) {
       expect(decodeLocktime(encodeLocktime(v))).toBe(v);
     }
@@ -119,7 +123,9 @@ describe("validateLocktime", () => {
   it("rejects block mode out of range", () => {
     expect(validateLocktime(0, "block")).toBe(false);
     expect(validateLocktime(-1, "block")).toBe(false);
-    expect(validateLocktime(VAULT_MAX_LOCKTIME_BLOCKS + 1, "block")).toBe(false);
+    expect(validateLocktime(VAULT_MAX_LOCKTIME_BLOCKS + 1, "block")).toBe(
+      false
+    );
     expect(validateLocktime(LOCKTIME_THRESHOLD, "block")).toBe(false);
   });
 
@@ -356,7 +362,11 @@ describe("parseVaultRedeemScript", () => {
   });
 
   it("returns null for non-vault scripts", () => {
-    expect(parseVaultRedeemScript("76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac")).toBeNull();
+    expect(
+      parseVaultRedeemScript(
+        "76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac"
+      )
+    ).toBeNull();
     expect(parseVaultRedeemScript("")).toBeNull();
     expect(parseVaultRedeemScript("abcd")).toBeNull();
   });
@@ -398,7 +408,10 @@ describe("encodeVaultMetadata / decodeVaultMetadata", () => {
     // We need to access encodeVaultMetadata — it's not exported but decodeVaultMetadata is
     // Use dynamic import or test the full flow via buildVaultOpReturn
     // For now, test that decodeVaultMetadata handles known binary
-    const encoded = (globalThis as any).__vaultEncodeTest?.(params);
+    const probe = globalThis as unknown as {
+      __vaultEncodeTest?: (p: VaultParams) => Uint8Array;
+    };
+    const encoded = probe.__vaultEncodeTest?.(params);
     // Skip if encode not accessible — will be tested via integration
     if (!encoded) return;
   });
@@ -470,7 +483,12 @@ describe("isVaultClaimable", () => {
 
     // One second before MTP buffer elapses: still not claimable
     expect(
-      isVaultClaimable(locktime, "time", 0, locktime + MTP_SAFETY_BUFFER_SEC - 1)
+      isVaultClaimable(
+        locktime,
+        "time",
+        0,
+        locktime + MTP_SAFETY_BUFFER_SEC - 1
+      )
     ).toBe(false);
 
     // Exactly at MTP buffer boundary: claimable
@@ -479,9 +497,7 @@ describe("isVaultClaimable", () => {
     ).toBe(true);
 
     // Well past: claimable
-    expect(
-      isVaultClaimable(locktime, "time", 0, locktime + 86400)
-    ).toBe(true);
+    expect(isVaultClaimable(locktime, "time", 0, locktime + 86400)).toBe(true);
   });
 });
 
@@ -594,7 +610,9 @@ describe("buildVaultTx — NFT vault with tokenUtxos", () => {
   };
 
   it("returns rawTx, txid, redeemScriptHex, and p2shAddr", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     expect(result.rawTx).toBeTruthy();
     expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
     expect(result.redeemScriptHex).toBeTruthy();
@@ -602,25 +620,33 @@ describe("buildVaultTx — NFT vault with tokenUtxos", () => {
   });
 
   it("includes token UTXO as the first input", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
-    // @ts-ignore — Transaction.fromString exists at runtime
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     const tx = new Transaction(result.rawTx);
     // First input prevTxId should be tokenUtxo.txid (reversed as bytes)
-    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId).reverse().toString("hex");
+    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId)
+      .reverse()
+      .toString("hex");
     expect(firstInputTxid).toBe(tokenUtxo.txid);
   });
 
   it("P2SH output script matches p2shOutputScript of redeemScript", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     const expectedP2sh = p2shOutputScript(result.redeemScriptHex);
-    // @ts-ignore
     const tx = new Transaction(result.rawTx);
-    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
+    const outputScripts: string[] = tx.outputs.map(
+      (o: { script: { toHex: () => string } }) => o.script.toHex()
+    );
     expect(outputScripts).toContain(expectedP2sh);
   });
 
   it("redeemScript is an NFT vault script (contains d8 singleton opcode)", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     expect(result.redeemScriptHex).toContain("d8");
     expect(result.redeemScriptHex).toContain(testRef);
   });
@@ -666,34 +692,47 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
   };
 
   it("returns rawTx, txid, and redeemScriptHex", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     expect(result.rawTx).toBeTruthy();
     expect(result.txid).toMatch(/^[0-9a-f]{64}$/);
     expect(result.redeemScriptHex).toBeTruthy();
   });
 
   it("FT vault output is the native locking script (not P2SH)", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
-    const expectedNativeScript = vaultFtNativeScript(locktime, fromAddress, testRef);
-    // @ts-ignore
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
+    const expectedNativeScript = vaultFtNativeScript(
+      locktime,
+      fromAddress,
+      testRef
+    );
     const tx = new Transaction(result.rawTx);
-    const outputScripts: string[] = tx.outputs.map((o: { script: { toHex: () => string } }) => o.script.toHex());
+    const outputScripts: string[] = tx.outputs.map(
+      (o: { script: { toHex: () => string } }) => o.script.toHex()
+    );
     expect(outputScripts).toContain(expectedNativeScript);
     // Must NOT be a P2SH script
     expect(outputScripts[0]).not.toMatch(/^a914[0-9a-f]{40}87$/);
   });
 
   it("includes token UTXO as the first input", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
-    // @ts-ignore
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     const tx = new Transaction(result.rawTx);
-    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId).reverse().toString("hex");
+    const firstInputTxid = Buffer.from(tx.inputs[0].prevTxId)
+      .reverse()
+      .toString("hex");
     expect(firstInputTxid).toBe(tokenUtxo.txid);
   });
 
   it("token input scriptSig is non-empty (signed)", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
-    // @ts-ignore
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     const tx = new Transaction(result.rawTx);
     const tokenInputScript = tx.inputs[0].script.toHex();
     // Must have sig + pubkey pushed — not empty
@@ -703,7 +742,9 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
   });
 
   it("redeemScript is an FT vault native script (contains b175, bd, d0, ref)", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     expect(result.redeemScriptHex).toContain("b175"); // CLTV DROP
     expect(result.redeemScriptHex).toContain("bd"); // OP_STATESEPARATOR
     expect(result.redeemScriptHex).toContain("d0"); // OP_PUSHINPUTREF
@@ -711,7 +752,9 @@ describe("buildVaultTx — FT vault with tokenUtxos", () => {
   });
 
   it("parseVaultRedeemScript round-trips the FT native script", () => {
-    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [tokenUtxo]);
+    const result = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
     const parsed = parseVaultRedeemScript(result.redeemScriptHex);
     expect(parsed).not.toBeNull();
     expect(parsed!.assetType).toBe("ft");
@@ -813,9 +856,11 @@ describe("estimateVaultClaimSize / estimateVaultClaimFee", () => {
 });
 
 describe("claimVaultTx — funding selection", () => {
-  // Real key derived from the test address
+  // Real key derived from the test address. PrivateKey.fromRandom("livenet")
+  // produces a livenet WIF; .toAddress() then defaults to livenet too — no
+  // need to pass the network argument again (which isn't in the .d.ts).
   const wif = PrivateKey.fromRandom("livenet").toWIF();
-  const claimAddress = new PrivateKey(wif).toAddress("livenet").toString();
+  const claimAddress = new PrivateKey(wif).toAddress().toString();
   const rxdRedeem = vaultP2pkhRedeemScript(800_000, claimAddress);
   const nftRedeem = vaultNftRedeemScript(800_000, claimAddress, testRef);
 
@@ -834,7 +879,14 @@ describe("claimVaultTx — funding selection", () => {
 
   it("throws a clear error when NFT claim has no funding and no callback", () => {
     expect(() =>
-      claimVaultTx(dummyVaultNft, claimAddress, wif, 10000, undefined, claimAddress)
+      claimVaultTx(
+        dummyVaultNft,
+        claimAddress,
+        wif,
+        10000,
+        undefined,
+        claimAddress
+      )
     ).toThrow(/Insufficient funding/i);
   });
 
@@ -896,5 +948,166 @@ describe("claimVaultTx — funding selection", () => {
       claimAddress
     );
     expect(result.rawTx).toBeTruthy();
+  });
+});
+
+// ============================================================================
+// Vault OP_RETURN (v2 ECDH-based encryption)
+// ============================================================================
+
+describe("vault OP_RETURN — v2 ECDH derivation", () => {
+  // Sender wallet.
+  const senderPriv = new PrivateKey();
+  const senderWif = senderPriv.toWIF();
+  const senderAddress = senderPriv.toAddress().toString();
+  const senderPubHex = senderPriv.toPublicKey().toBuffer().toString("hex");
+
+  // Distinct third-party recipient wallet.
+  const recipientPriv = new PrivateKey();
+  const recipientWif = recipientPriv.toWIF();
+  const recipientAddress = recipientPriv.toAddress().toString();
+  const recipientPubHex = recipientPriv
+    .toPublicKey()
+    .toBuffer()
+    .toString("hex");
+
+  // An uninvolved third party (observer).
+  const strangerPriv = new PrivateKey();
+  const strangerWif = strangerPriv.toWIF();
+
+  const selfVaultParams: VaultParams = {
+    mode: "block",
+    locktime: 150000,
+    assetType: "rxd",
+    recipientAddress: senderAddress,
+    value: 1_000_000,
+    label: "self-vault test",
+  };
+
+  const thirdPartyVaultParams: VaultParams = {
+    mode: "block",
+    locktime: 200000,
+    assetType: "rxd",
+    recipientAddress: recipientAddress,
+    recipientPubKey: recipientPubHex,
+    value: 2_000_000,
+    label: "gift",
+  };
+
+  it("emits a v2 payload with version byte = 2 and both pubkeys embedded", () => {
+    const scriptHex = buildVaultOpReturn(selfVaultParams, senderWif);
+    // 6a (OP_RETURN) + 05 (push 5) + 7661756c74 ("vault") + push(body)
+    // body starts after the magic-string push.
+    expect(scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)).toBe(true);
+    // The version byte is the first byte of the body. After the magic-string
+    // push there's a single push prefix (likely 0x4c <len> for ~100B bodies).
+    const afterMagic = scriptHex.slice(4 + VAULT_MAGIC_BYTES.length);
+    // Strip the push opcode/prefix to land on the body.
+    const head = parseInt(afterMagic.slice(0, 2), 16);
+    let bodyStartHex: string;
+    if (head < 0x4c) bodyStartHex = afterMagic.slice(2);
+    else if (head === 0x4c) bodyStartHex = afterMagic.slice(4);
+    else if (head === 0x4d) bodyStartHex = afterMagic.slice(6);
+    else throw new Error("unexpected push prefix");
+    expect(parseInt(bodyStartHex.slice(0, 2), 16)).toBe(VAULT_PAYLOAD_VERSION);
+
+    // senderPub bytes 1..34 of the body
+    const embeddedSenderPub = bodyStartHex.slice(2, 2 + 66);
+    expect(embeddedSenderPub).toBe(senderPubHex);
+    // recipientPub bytes 34..67
+    const embeddedRecipientPub = bodyStartHex.slice(2 + 66, 2 + 66 + 66);
+    // For a self-vault, sender == recipient.
+    expect(embeddedRecipientPub).toBe(senderPubHex);
+  });
+
+  it("sender can decrypt a self-vault payload they created", () => {
+    const scriptHex = buildVaultOpReturn(selfVaultParams, senderWif);
+    const decoded = parseVaultOpReturn(scriptHex, senderWif);
+    expect(decoded).not.toBeNull();
+    expect(decoded!.locktime).toBe(selfVaultParams.locktime);
+    expect(decoded!.assetType).toBe(selfVaultParams.assetType);
+    expect(decoded!.label).toBe(selfVaultParams.label);
+  });
+
+  it("both sender and recipient can decrypt a third-party vault", () => {
+    const scriptHex = buildVaultOpReturn(thirdPartyVaultParams, senderWif);
+
+    const asSender = parseVaultOpReturn(scriptHex, senderWif);
+    expect(asSender).not.toBeNull();
+    expect(asSender!.locktime).toBe(thirdPartyVaultParams.locktime);
+
+    const asRecipient = parseVaultOpReturn(scriptHex, recipientWif);
+    expect(asRecipient).not.toBeNull();
+    expect(asRecipient!.locktime).toBe(thirdPartyVaultParams.locktime);
+    expect(asRecipient!.label).toBe(thirdPartyVaultParams.label);
+  });
+
+  it("an uninvolved third party CANNOT decrypt the vault", () => {
+    // This is the core security guarantee R1 fixes: observers without one of
+    // the two private keys must not be able to recover the metadata.
+    const scriptHex = buildVaultOpReturn(thirdPartyVaultParams, senderWif);
+    const asStranger = parseVaultOpReturn(scriptHex, strangerWif);
+    expect(asStranger).toBeNull();
+  });
+
+  it("returns null for tampered ciphertext", () => {
+    const scriptHex = buildVaultOpReturn(selfVaultParams, senderWif);
+    // Flip the last byte of the script (inside the ciphertext / tag region).
+    const tampered =
+      scriptHex.slice(0, -2) +
+      (parseInt(scriptHex.slice(-2), 16) ^ 0xff).toString(16).padStart(2, "0");
+    expect(parseVaultOpReturn(tampered, senderWif)).toBeNull();
+  });
+
+  it("returns null for non-vault scripts", () => {
+    expect(
+      parseVaultOpReturn(
+        "76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac",
+        senderWif
+      )
+    ).toBeNull();
+    expect(parseVaultOpReturn("", senderWif)).toBeNull();
+    expect(parseVaultOpReturn("6a", senderWif)).toBeNull();
+  });
+
+  it("refuses to encrypt a third-party vault without recipientPubKey", () => {
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 100000,
+      assetType: "rxd",
+      recipientAddress: recipientAddress, // someone else's address
+      value: 1000,
+      // recipientPubKey intentionally omitted
+    };
+    expect(() => buildVaultOpReturn(params, senderWif)).toThrow(
+      /recipientPubKey/i
+    );
+  });
+
+  it("refuses recipientPubKey that does not match recipientAddress", () => {
+    const params: VaultParams = {
+      ...thirdPartyVaultParams,
+      // Address says recipient, but pubkey says sender — mismatch.
+      recipientPubKey: senderPubHex,
+    };
+    expect(() => buildVaultOpReturn(params, senderWif)).toThrow(
+      /does not hash to/i
+    );
+  });
+
+  it("two encryptions with the same params produce different ciphertexts (nonce randomness)", () => {
+    const a = buildVaultOpReturn(selfVaultParams, senderWif);
+    const b = buildVaultOpReturn(selfVaultParams, senderWif);
+    expect(a).not.toBe(b);
+  });
+
+  it("permanently rejects v1-format payloads", () => {
+    // Craft a fake v1-style payload: [nonce24][ciphertext...] (no version byte).
+    // The current parser must refuse it because the first byte will not equal
+    // VAULT_PAYLOAD_VERSION (=2).
+    const fakeV1Body = "00".repeat(24 + 32); // version byte=0x00, never matches
+    const scriptHex =
+      "6a05" + VAULT_MAGIC_BYTES + "39" /* push 0x39=57 bytes */ + fakeV1Body;
+    expect(parseVaultOpReturn(scriptHex, senderWif)).toBeNull();
   });
 });

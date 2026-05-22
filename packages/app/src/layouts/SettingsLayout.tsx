@@ -8,7 +8,7 @@ import { language } from "@app/signals";
 
 export default function SettingsLayout() {
   // Trigger rerender when language changes
-  language.value;
+  void language.value;
 
   const { pathname } = useLocation();
   const headings: { [key: string]: string } = {

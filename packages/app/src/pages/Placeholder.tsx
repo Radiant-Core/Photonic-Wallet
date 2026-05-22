@@ -1,5 +1,4 @@
 import { Flex, Text } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import ContentContainer from "@app/components/ContentContainer";
 import PageHeader from "../components/PageHeader";
 

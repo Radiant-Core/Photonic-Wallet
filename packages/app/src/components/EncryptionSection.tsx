@@ -15,7 +15,6 @@ import {
   Input,
   Button,
   Icon,
-  Text,
   Alert,
   AlertIcon,
   AlertDescription,
@@ -25,7 +24,10 @@ import { MdPersonAdd, MdClose } from "react-icons/md";
 import { EncryptToggle } from "./EncryptToggle";
 import { EncryptionModeSelector } from "./EncryptionModeSelector";
 import { EncryptionProgress } from "./EncryptionProgress";
-import { StorageBackendSelector, type StorageBackend } from "./StorageBackendSelector";
+import {
+  StorageBackendSelector,
+  type StorageBackend,
+} from "./StorageBackendSelector";
 import type {
   EncryptionMode,
   EncryptionProgress as ProgressType,
@@ -73,7 +75,9 @@ export function EncryptionSection({
 }: EncryptionSectionProps) {
   const [newRecipient, setNewRecipient] = useState("");
   const [showAddRecipient, setShowAddRecipient] = useState(false);
-  const [recipientKeyError, setRecipientKeyError] = useState<string | null>(null);
+  const [recipientKeyError, setRecipientKeyError] = useState<string | null>(
+    null
+  );
   const [isResolving, setIsResolving] = useState(false);
 
   const isValidX25519HexKey = (key: string): boolean =>
@@ -83,7 +87,9 @@ export function EncryptionSection({
    * Resolve a WAVE name (e.g. "alice.rxd") or raw hex key.
    * Returns the X25519 hex public key on success, or null with an error set.
    */
-  const resolveRecipientInput = async (input: string): Promise<string | null> => {
+  const resolveRecipientInput = async (
+    input: string
+  ): Promise<string | null> => {
     const trimmed = input.trim();
 
     // Already a valid hex key — use it directly
@@ -113,7 +119,9 @@ export function EncryptionSection({
           return null;
         }
 
-        const records = (match as any)?.attrs?.records as Record<string, string> | undefined;
+        const records = (
+          match?.attrs as { records?: Record<string, string> } | undefined
+        )?.records;
         const x25519pub = records?.x25519_pub;
 
         if (!x25519pub) {
@@ -198,7 +206,15 @@ export function EncryptionSection({
     : true;
 
   return (
-    <VStack spacing={3} align="stretch" p={4} borderWidth={1} borderRadius="md" borderColor="whiteAlpha.200" bg="whiteAlpha.50">
+    <VStack
+      spacing={3}
+      align="stretch"
+      p={4}
+      borderWidth={1}
+      borderRadius="md"
+      borderColor="whiteAlpha.200"
+      bg="whiteAlpha.50"
+    >
       <EncryptToggle
         enabled={state.enabled}
         onChange={handleToggle}
@@ -256,8 +272,19 @@ export function EncryptionSection({
                   size="sm"
                   colorScheme="blue"
                   onClick={handleAddRecipient}
-                  isDisabled={disabled || isEncrypting || isResolving || !newRecipient.trim()}
-                  leftIcon={isResolving ? <Spinner size="xs" /> : <Icon as={MdPersonAdd} />}
+                  isDisabled={
+                    disabled ||
+                    isEncrypting ||
+                    isResolving ||
+                    !newRecipient.trim()
+                  }
+                  leftIcon={
+                    isResolving ? (
+                      <Spinner size="xs" />
+                    ) : (
+                      <Icon as={MdPersonAdd} />
+                    )
+                  }
                   flexShrink={0}
                 >
                   {isResolving ? "Resolving…" : "Add"}
@@ -278,7 +305,9 @@ export function EncryptionSection({
                 </Button>
               </HStack>
               {recipientKeyError && (
-                <FormHelperText color="red.400" fontSize="xs">{recipientKeyError}</FormHelperText>
+                <FormHelperText color="red.400" fontSize="xs">
+                  {recipientKeyError}
+                </FormHelperText>
               )}
             </FormControl>
           )}

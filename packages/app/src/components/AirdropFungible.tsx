@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import { SelectableInput } from "@lib/coinSelect";
 import {
   Modal,
@@ -117,7 +116,7 @@ export default function AirdropFungible({
         addresses,
         values,
         feeRate.value,
-        wallet.value.wif as string
+        wallet.value.wif!.toString()
       );
       const rawTx = tx.toString();
       const changeScript = p2pkhScript(wallet.value.address);
@@ -141,7 +140,7 @@ export default function AirdropFungible({
       );
       updateFtBalances(new Set([fromScript]));
 
-      onSuccess && onSuccess(txid);
+      if (onSuccess) onSuccess(txid);
     } catch (error) {
       if (error instanceof TransferError) {
         setErrorMessage(error.message);

@@ -1,5 +1,4 @@
 import { Container } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 
 export default function Exit() {
   return (

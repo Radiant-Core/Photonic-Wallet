@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { t } from "@lingui/macro";
 import { EncryptionProgress } from "./EncryptionProgress";
 import type { EncryptionProgress as ProgressType } from "@app/encryptionService";
 import {
@@ -13,6 +14,12 @@ import {
   Alert,
   AlertIcon,
   AlertDescription,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Tabs,
   TabList,
   Tab,
@@ -26,7 +33,17 @@ import {
   Collapse,
   useDisclosure,
 } from "@chakra-ui/react";
-import { MdLock, MdLockOpen, MdTimer, MdKey, MdPublic, MdShare, MdContentCopy, MdCheck, MdOpenInNew } from "react-icons/md";
+import {
+  MdLock,
+  MdLockOpen,
+  MdTimer,
+  MdKey,
+  MdPublic,
+  MdShare,
+  MdContentCopy,
+  MdCheck,
+  MdOpenInNew,
+} from "react-icons/md";
 import {
   formatTimeRemaining,
   getReveal,
@@ -46,7 +63,12 @@ import { StorageManager } from "@lib/storage";
 import { wallet, feeRate } from "@app/signals";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { deriveKeyHKDF, unwrapCEK, wrapCEK } from "@lib/encryption";
-import { buildShareUrl, parseShareInput, consumeShareFromUrl, type CekShareToken } from "@app/shareLink";
+import {
+  buildShareUrl,
+  parseShareInput,
+  consumeShareFromUrl,
+  type CekShareToken,
+} from "@app/shareLink";
 import { useClipboard } from "@chakra-ui/react";
 import db from "@app/db";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -92,13 +114,16 @@ export default function EncryptedContentUnlock({
   const [password, setPassword] = useState("");
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isRevealing, setIsRevealing] = useState(false);
-  const [decryptProgress, setDecryptProgress] = useState<ProgressType | null>(null);
+  const [decryptProgress, setDecryptProgress] = useState<ProgressType | null>(
+    null
+  );
 
   // ── CEK sharing: export ──────────────────────────────────────────────────
   const [recipientPubkeyHex, setRecipientPubkeyHex] = useState("");
   const [exportedShareUrl, setExportedShareUrl] = useState("");
   const [isExporting, setIsExporting] = useState(false);
-  const { onCopy: onCopyExport, hasCopied: hasCopiedExport } = useClipboard(exportedShareUrl);
+  const { onCopy: onCopyExport, hasCopied: hasCopiedExport } =
+    useClipboard(exportedShareUrl);
   const exportDisclosure = useDisclosure();
 
   // ── CEK sharing: import ──────────────────────────────────────────────────
@@ -106,43 +131,88 @@ export default function EncryptedContentUnlock({
   const [isImporting, setIsImporting] = useState(false);
   const importDisclosure = useDisclosure();
 
-  // Auto-read a pending share link from the URL fragment on mount
+  // R16: confirmation gate for share-link import.
+  //
+  // Previously a `#share=<base64>` URL fragment opened the import panel
+  // automatically and pre-filled the input — a deceptively-styled link
+  // sent by an attacker could be one accidental click away from
+  // unwrapping a CEK on the user's wallet. The flow now requires an
+  // explicit "Continue" in an AlertDialog before the token is touched.
+  // The token cannot decrypt anything without the recipient's private
+  // key, but we still want the user to consciously decide whether to
+  // import it.
+  const [pendingShareToken, setPendingShareToken] =
+    useState<CekShareToken | null>(null);
+  const shareConfirmDisclosure = useDisclosure();
+  const shareCancelRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     const token = consumeShareFromUrl();
     if (!token) return;
-    // Pre-fill the import field and open the panel
-    setImportInput(buildShareUrl(token)); // store as URL so parseShareInput handles it
-    importDisclosure.onOpen();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setPendingShareToken(token);
+    shareConfirmDisclosure.onOpen();
   }, []);
-  // Local reveal record (CEK saved at mint time) — only the original minter has this
-  const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(() =>
-    tokenRef ? getReveal(tokenRef) : undefined
+
+  const acceptPendingShare = () => {
+    if (!pendingShareToken) return;
+    setImportInput(buildShareUrl(pendingShareToken));
+    setPendingShareToken(null);
+    shareConfirmDisclosure.onClose();
+    importDisclosure.onOpen();
+  };
+
+  const dismissPendingShare = () => {
+    setPendingShareToken(null);
+    shareConfirmDisclosure.onClose();
+  };
+  // Local reveal record (CEK saved at mint time) — only the original minter has this.
+  // After R15 the reveal store is IndexedDB-backed and asynchronous; load on mount.
+  const [savedReveal, setSavedReveal] = useState<TimelockReveal | undefined>(
+    undefined
   );
+  useEffect(() => {
+    let cancelled = false;
+    if (!tokenRef) {
+      setSavedReveal(undefined);
+      return;
+    }
+    void getReveal(tokenRef).then((r) => {
+      if (!cancelled) setSavedReveal(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenRef]);
 
   // Crash-safe broadcast check: if the app crashed after broadcasting but before
   // deleteReveal ran, the txid is in db.broadcast with description 'timelock_reveal'.
-  // When found, clean up the stale localStorage entry proactively.
-  const revealAlreadyBroadcast = useLiveQuery(async () => {
-    if (!savedReveal || !tokenRef) return false;
-    const rows = await db.broadcast
-      .where("txid")
-      .above("")
-      .filter((r) => r.description === "timelock_reveal")
-      .toArray();
-    const found = rows.length > 0;
-    if (found && getReveal(tokenRef)) {
-      deleteReveal(tokenRef);
-      setSavedReveal(undefined);
-    }
-    return found;
-  }, [savedReveal, tokenRef], false);
+  // When found, clean up the stale reveal entry proactively.
+  const revealAlreadyBroadcast = useLiveQuery(
+    async () => {
+      if (!savedReveal || !tokenRef) return false;
+      const rows = await db.broadcast
+        .where("txid")
+        .above("")
+        .filter((r) => r.description === "timelock_reveal")
+        .toArray();
+      const found = rows.length > 0;
+      if (found && (await getReveal(tokenRef))) {
+        await deleteReveal(tokenRef);
+        setSavedReveal(undefined);
+      }
+      return found;
+    },
+    [savedReveal, tokenRef],
+    false
+  );
   const toast = useToast();
 
-  const isTimelocked = stub.crypto?.timelock !== undefined && stub.p?.includes(GLYPH_TIMELOCK);
+  const isTimelocked =
+    stub.crypto?.timelock !== undefined && stub.p?.includes(GLYPH_TIMELOCK);
   const unlockAt = stub.crypto?.timelock?.unlock_at;
   const now = Date.now() / 1000;
-  const timelockExpired = !isTimelocked || (unlockAt !== undefined && now >= unlockAt);
+  const timelockExpired =
+    !isTimelocked || (unlockAt !== undefined && now >= unlockAt);
   const timeRemaining = unlockAt ? Math.max(0, unlockAt - now) : 0;
   const hint = stub.crypto?.timelock?.hint;
   const scheme = stub.main?.scheme || "xchacha20poly1305";
@@ -159,7 +229,10 @@ export default function EncryptedContentUnlock({
     const recipients = stub.crypto?.recipients;
     if (!recipients?.length) return false;
     try {
-      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const keypair = deriveEncryptionKeypair(
+        walletMnemonic.toString(),
+        wallet.value.coinType
+      );
       const recipientKeyPair = {
         x25519PrivateKey: keypair.x25519PrivateKey,
         x25519PublicKey: keypair.x25519PublicKey,
@@ -174,7 +247,11 @@ export default function EncryptedContentUnlock({
           const ephemeral = {
             x25519EphemeralPublicKey: ephemeralBytes,
             ...(r.mlkem_ct
-              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
+              ? {
+                  mlkemCiphertext: new Uint8Array(
+                    Buffer.from(r.mlkem_ct, "base64")
+                  ),
+                }
               : {}),
           };
           unwrapCEK(
@@ -194,7 +271,8 @@ export default function EncryptedContentUnlock({
     return false;
   }, [walletMnemonic, stub]);
 
-  const canUseWalletKey = !!walletMnemonic && !wallet.value.locked && isWalletKeyRecipient;
+  const canUseWalletKey =
+    !!walletMnemonic && !wallet.value.locked && isWalletKeyRecipient;
 
   /** True when content is stored on-chain (main.b present, no locator needed) */
   const isOnChain = !!mainB && !locator;
@@ -202,8 +280,9 @@ export default function EncryptedContentUnlock({
   const assertStorageAvailable = (): boolean => {
     if (!isOnChain && (!locator || !locatorNonce)) {
       toast({
-        title: "Storage Locator Missing",
-        description: "Cannot retrieve encrypted blob — locator not found in token metadata",
+        title: t`Storage Locator Missing`,
+        description:
+          "Cannot retrieve encrypted blob — locator not found in token metadata",
         status: "error",
         duration: 6000,
       });
@@ -222,7 +301,9 @@ export default function EncryptedContentUnlock({
   ): Promise<void> => {
     const storageManager = makeStorageManager();
     const locatorBytes = new Uint8Array(Buffer.from(locator!, "base64"));
-    const locatorNonceBytes = new Uint8Array(Buffer.from(locatorNonce!, "base64"));
+    const locatorNonceBytes = new Uint8Array(
+      Buffer.from(locatorNonce!, "base64")
+    );
 
     const encryptedBlob = await retrieveEncryptedContent(
       locatorBytes,
@@ -232,12 +313,17 @@ export default function EncryptedContentUnlock({
     );
 
     const plaintext = await decryptContent(encryptedBlob, decryptOptions, (p) =>
-      setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+      setDecryptProgress({
+        stage: p.stage as ProgressType["stage"],
+        loaded: p.loaded,
+        total: p.total,
+        percent: p.percent,
+      })
     );
 
     toast({
-      title: "Content Decrypted!",
-      description: "Successfully unlocked encrypted content",
+      title: t`Content Decrypted!`,
+      description: t`Successfully unlocked encrypted content`,
       status: "success",
     });
     onDecrypted(plaintext);
@@ -261,16 +347,23 @@ export default function EncryptedContentUnlock({
     const actualHash = sha256fn(encryptedBlob);
     const expectedHashHex = stub.main?.hash?.replace("sha256:", "");
     if (expectedHashHex && bytesToHex(actualHash) !== expectedHashHex) {
-      throw new Error("On-chain ciphertext hash mismatch — data may be corrupted");
+      throw new Error(
+        "On-chain ciphertext hash mismatch — data may be corrupted"
+      );
     }
 
     const plaintext = await decryptContent(encryptedBlob, decryptOptions, (p) =>
-      setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+      setDecryptProgress({
+        stage: p.stage as ProgressType["stage"],
+        loaded: p.loaded,
+        total: p.total,
+        percent: p.percent,
+      })
     );
 
     toast({
-      title: "Content Decrypted!",
-      description: "Successfully unlocked encrypted content",
+      title: t`Content Decrypted!`,
+      description: t`Successfully unlocked encrypted content`,
       status: "success",
     });
     onDecrypted(plaintext);
@@ -299,8 +392,9 @@ export default function EncryptedContentUnlock({
     const recipientPubHex = recipientPubkeyHex.trim().replace(/^0x/i, "");
     if (recipientPubHex.length !== 64) {
       toast({
-        title: "Invalid Public Key",
-        description: "Recipient X25519 public key must be 32 bytes (64 hex chars)",
+        title: t`Invalid Public Key`,
+        description:
+          "Recipient X25519 public key must be 32 bytes (64 hex chars)",
         status: "error",
         duration: 5000,
       });
@@ -308,7 +402,10 @@ export default function EncryptedContentUnlock({
     }
     setIsExporting(true);
     try {
-      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const keypair = deriveEncryptionKeypair(
+        walletMnemonic.toString(),
+        wallet.value.coinType
+      );
       const recipients = stub.crypto?.recipients;
       if (!recipients?.length) throw new Error("No recipients in metadata");
 
@@ -325,7 +422,11 @@ export default function EncryptedContentUnlock({
           const ephemeral = {
             x25519EphemeralPublicKey: ephemeralBytes,
             ...(r.mlkem_ct
-              ? { mlkemCiphertext: new Uint8Array(Buffer.from(r.mlkem_ct, "base64")) }
+              ? {
+                  mlkemCiphertext: new Uint8Array(
+                    Buffer.from(r.mlkem_ct, "base64")
+                  ),
+                }
               : {}),
           };
           cek = unwrapCEK(
@@ -335,9 +436,12 @@ export default function EncryptedContentUnlock({
             cekHashAad
           );
           break;
-        } catch { /* try next */ }
+        } catch {
+          /* try next */
+        }
       }
-      if (!cek) throw new Error("Could not unwrap CEK — wallet not a recipient");
+      if (!cek)
+        throw new Error("Could not unwrap CEK — wallet not a recipient");
 
       // Re-wrap for the target recipient's X25519 public key, binding cek_hash as AAD
       const recipientPub = new Uint8Array(Buffer.from(recipientPubHex, "hex"));
@@ -352,21 +456,23 @@ export default function EncryptedContentUnlock({
         ref: tokenRef ?? "",
         kid: "x25519",
         wrapped_cek: Buffer.from(wrappedCEK).toString("base64"),
-        epk: Buffer.from(newEphemeral.x25519EphemeralPublicKey).toString("base64"),
+        epk: Buffer.from(newEphemeral.x25519EphemeralPublicKey).toString(
+          "base64"
+        ),
         cek_hash: stub.crypto.cek_hash,
       };
 
       const shareUrl = buildShareUrl(tokenPayload);
       setExportedShareUrl(shareUrl);
       toast({
-        title: "Access link ready",
-        description: "Copy the link and send it to the recipient",
+        title: t`Access link ready`,
+        description: t`Copy the link and send it to the recipient`,
         status: "success",
         duration: 4000,
       });
     } catch (error) {
       toast({
-        title: "Export Failed",
+        title: t`Export Failed`,
         description: error instanceof Error ? error.message : String(error),
         status: "error",
         duration: 6000,
@@ -384,8 +490,8 @@ export default function EncryptedContentUnlock({
     if (!assertStorageAvailable()) return;
     if (!walletMnemonic) {
       toast({
-        title: "Wallet locked",
-        description: "Unlock your wallet first, then try again",
+        title: t`Wallet locked`,
+        description: t`Unlock your wallet first, then try again`,
         status: "warning",
       });
       return;
@@ -395,21 +501,30 @@ export default function EncryptedContentUnlock({
     try {
       const token: CekShareToken | null = parseShareInput(importInput);
       if (!token) {
-        throw new Error("Couldn't read the access link — paste the full link or token exactly as received");
+        throw new Error(
+          "Couldn't read the access link — paste the full link or token exactly as received"
+        );
       }
 
       // Verify cek_hash matches the on-chain commitment
       if (token.cek_hash && token.cek_hash !== stub.crypto.cek_hash) {
-        throw new Error("cek_hash mismatch — this token is for a different NFT");
+        throw new Error(
+          "cek_hash mismatch — this token is for a different NFT"
+        );
       }
 
-      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const keypair = deriveEncryptionKeypair(
+        walletMnemonic.toString(),
+        wallet.value.coinType
+      );
       // cek_hash from the share token is the binding AAD used when it was wrapped
       const tokenCekHashAad = token.cek_hash
         ? new TextEncoder().encode(token.cek_hash)
         : undefined;
       const ephemeral = {
-        x25519EphemeralPublicKey: new Uint8Array(Buffer.from(token.epk, "base64")),
+        x25519EphemeralPublicKey: new Uint8Array(
+          Buffer.from(token.epk, "base64")
+        ),
       };
       const cek = unwrapCEK(
         new Uint8Array(Buffer.from(token.wrapped_cek, "base64")),
@@ -435,11 +550,18 @@ export default function EncryptedContentUnlock({
         alg: (isHybrid
           ? "x25519mlkem768-hkdf-xchacha20poly1305"
           : "x25519-hkdf-xchacha20poly1305") as
-          "x25519-hkdf-xchacha20poly1305" | "x25519mlkem768-hkdf-xchacha20poly1305",
+          | "x25519-hkdf-xchacha20poly1305"
+          | "x25519mlkem768-hkdf-xchacha20poly1305",
         wrapped_cek: Buffer.from(myWrappedCEK).toString("base64"),
-        epk: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString("base64"),
+        epk: Buffer.from(myEphemeral.x25519EphemeralPublicKey).toString(
+          "base64"
+        ),
         ...(myEphemeral.mlkemCiphertext
-          ? { mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString("base64") }
+          ? {
+              mlkem_ct: Buffer.from(myEphemeral.mlkemCiphertext).toString(
+                "base64"
+              ),
+            }
           : {}),
       };
 
@@ -466,9 +588,15 @@ export default function EncryptedContentUnlock({
         const plaintext = await decryptContent(
           encryptedBlob,
           { metadata: patchedStub, privateKey: keypair },
-          (p) => setDecryptProgress({ stage: p.stage as ProgressType["stage"], loaded: p.loaded, total: p.total, percent: p.percent })
+          (p) =>
+            setDecryptProgress({
+              stage: p.stage as ProgressType["stage"],
+              loaded: p.loaded,
+              total: p.total,
+              percent: p.percent,
+            })
         );
-        toast({ title: "Content Decrypted!", status: "success" });
+        toast({ title: t`Content Decrypted!`, status: "success" });
         onDecrypted(plaintext);
       } else {
         await fetchAndDecryptOffChain(locatorKey!, {
@@ -481,7 +609,7 @@ export default function EncryptedContentUnlock({
     } catch (error) {
       console.error("CEK import error:", error);
       toast({
-        title: "Import Failed",
+        title: t`Import Failed`,
         description: error instanceof Error ? error.message : String(error),
         status: "error",
         duration: 7000,
@@ -495,8 +623,8 @@ export default function EncryptedContentUnlock({
   const handlePassphraseDecrypt = async () => {
     if (!password) {
       toast({
-        title: "Password Required",
-        description: "Please enter the decryption password",
+        title: t`Password Required`,
+        description: t`Please enter the decryption password`,
         status: "warning",
       });
       return;
@@ -509,12 +637,15 @@ export default function EncryptedContentUnlock({
       const locatorKey = isOnChain
         ? undefined // unused for on-chain path
         : deriveLocatorKeyFromPassphrase(password, stub);
-      await fetchAndDecrypt(locatorKey, { metadata: stub, passphrase: password });
+      await fetchAndDecrypt(locatorKey, {
+        metadata: stub,
+        passphrase: password,
+      });
     } catch (error) {
       console.error("Passphrase decryption error:", error);
       toast({
-        title: "Decryption Failed",
-        description: "Invalid password or corrupted content",
+        title: t`Decryption Failed`,
+        description: t`Invalid password or corrupted content`,
         status: "error",
         duration: 5000,
       });
@@ -528,8 +659,8 @@ export default function EncryptedContentUnlock({
     if (!assertStorageAvailable()) return;
     if (!walletMnemonic) {
       toast({
-        title: "Wallet Locked",
-        description: "Unlock your wallet first to use your encryption key",
+        title: t`Wallet Locked`,
+        description: t`Unlock your wallet first to use your encryption key`,
         status: "warning",
       });
       return;
@@ -538,7 +669,10 @@ export default function EncryptedContentUnlock({
     setIsDecrypting(true);
     setDecryptProgress(null);
     try {
-      const keypair = deriveEncryptionKeypair(walletMnemonic);
+      const keypair = deriveEncryptionKeypair(
+        walletMnemonic.toString(),
+        wallet.value.coinType
+      );
 
       // Derive locatorKey from the wallet's X25519 private key (recipient mode)
       const locatorKey = isOnChain
@@ -557,8 +691,8 @@ export default function EncryptedContentUnlock({
     } catch (error) {
       console.error("Wallet key decryption error:", error);
       toast({
-        title: "Decryption Failed",
-        description: "Your wallet key is not a recipient for this content",
+        title: t`Decryption Failed`,
+        description: t`Your wallet key is not a recipient for this content`,
         status: "error",
         duration: 5000,
       });
@@ -575,16 +709,16 @@ export default function EncryptedContentUnlock({
   const handlePublishReveal = async () => {
     if (!savedReveal || !tokenRef) {
       toast({
-        title: "No Reveal Available",
-        description: "No saved CEK was found for this token.",
+        title: t`No Reveal Available`,
+        description: t`No saved CEK was found for this token.`,
         status: "warning",
       });
       return;
     }
     if (!wallet.value.wif || !wallet.value.address) {
       toast({
-        title: "Wallet Locked",
-        description: "Unlock your wallet to publish a reveal transaction.",
+        title: t`Wallet Locked`,
+        description: t`Unlock your wallet to publish a reveal transaction.`,
         status: "warning",
       });
       return;
@@ -597,13 +731,15 @@ export default function EncryptedContentUnlock({
         .toArray();
 
       if (utxos.length === 0) {
-        throw new Error("No RXD UTXOs available to fund the reveal transaction");
+        throw new Error(
+          "No RXD UTXOs available to fund the reveal transaction"
+        );
       }
 
       const cekBytes = hexToBytes(savedReveal.cek);
       const result = buildRevealTx(
         wallet.value.address,
-        wallet.value.wif,
+        wallet.value.wif.toString(),
         {
           tokenRef,
           cek: cekBytes,
@@ -624,19 +760,22 @@ export default function EncryptedContentUnlock({
       });
 
       // Reveal succeeded — drop the local CEK record (it's now on-chain)
-      deleteReveal(tokenRef);
+      await deleteReveal(tokenRef);
       setSavedReveal(undefined);
 
       toast({
-        title: "Reveal Published",
-        description: `CEK is now on-chain — anyone can decrypt this content. Tx: ${txid.substring(0, 16)}…`,
+        title: t`Reveal Published`,
+        description: `CEK is now on-chain — anyone can decrypt this content. Tx: ${txid.substring(
+          0,
+          16
+        )}…`,
         status: "success",
         duration: 9000,
       });
     } catch (error) {
       console.error("Reveal broadcast error:", error);
       toast({
-        title: "Reveal Failed",
+        title: t`Reveal Failed`,
         description: error instanceof Error ? error.message : String(error),
         status: "error",
         duration: 8000,
@@ -647,295 +786,363 @@ export default function EncryptedContentUnlock({
   };
 
   return (
-    <Box borderWidth={1} borderRadius="md" p={4} bg="bg.400">
-      <VStack spacing={4} align="stretch">
-        <HStack>
-          <Icon as={MdLock} fontSize="2xl" color="blue.400" />
-          <VStack align="start" spacing={0}>
-            <Text fontWeight="bold">
-              Encrypted Content
-            </Text>
-            <Text fontSize="sm" color="gray.400">
-              {scheme.toUpperCase()}
-            </Text>
-          </VStack>
-        </HStack>
-
-        {isTimelocked && !timelockExpired && (
-          <Alert status="warning" borderRadius="md">
-            <AlertIcon as={MdTimer} />
-            <AlertDescription>
-              <VStack align="start" spacing={1}>
-                <Text fontWeight="bold">
-                  Timelocked Content
-                </Text>
-                <Text>
-                    This content will unlock in {formatTimeRemaining(timeRemaining)}
-                </Text>
-              </VStack>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {isTimelocked && timelockExpired && (
-          <Alert status="success" borderRadius="md">
-            <AlertIcon as={MdLockOpen} />
-            <AlertDescription>
-              Timelock has expired — content can now be decrypted
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {timelockExpired && (
-          <Tabs variant="soft-rounded" colorScheme="blue" size="sm">
-            <TabList>
-              <Tab><Icon as={MdLockOpen} mr={1} />Passphrase</Tab>
-              <Tab isDisabled={!walletMnemonic || !isWalletKeyRecipient}>
-                <Icon as={MdKey} mr={1} />
-                Wallet Key
-              </Tab>
-            </TabList>
-
-            <TabPanels>
-              {/* ── Passphrase tab ── */}
-              <TabPanel px={0}>
-                <VStack spacing={3} align="stretch">
-                  <FormControl>
-                    <FormLabel>
-                      Decryption Password
-                    </FormLabel>
-                    <Input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter password"
-                      onKeyPress={(e) => e.key === "Enter" && handlePassphraseDecrypt()}
-                    />
-                  </FormControl>
-
-                  {hint && (
-                    <Text fontSize="sm" color="gray.400">
-                      Hint: {hint}
-                    </Text>
-                  )}
-
-                  {isDecrypting && decryptProgress && (
-                    <EncryptionProgress
-                      progress={decryptProgress}
-                      operation="decrypting"
-                    />
-                  )}
-
-                  <Button
-                    colorScheme="blue"
-                    onClick={handlePassphraseDecrypt}
-                    isLoading={isDecrypting}
-                    isDisabled={!password}
-                    loadingText="Decrypting..."
-                    leftIcon={<Icon as={MdLockOpen} />}
-                  >
-                    Decrypt with Password
-                  </Button>
-                </VStack>
-              </TabPanel>
-
-              {/* ── Wallet key tab ── */}
-              <TabPanel px={0}>
-                <VStack spacing={3} align="stretch">
-                  <Text fontSize="sm" color="gray.400">
-                    Decrypt content that was shared directly with your wallet.
-                  </Text>
-                  {!walletMnemonic && (
-                    <Alert status="info" borderRadius="md">
-                      <AlertIcon />
-                      <AlertDescription fontSize="sm">
-                        Unlock your wallet to use your encryption key
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {walletMnemonic && !isWalletKeyRecipient && (
-                    <Alert status="warning" borderRadius="md">
-                      <AlertIcon />
-                      <AlertDescription fontSize="sm">
-                        Your wallet key is not a recipient for this content
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {isDecrypting && decryptProgress && (
-                    <EncryptionProgress
-                      progress={decryptProgress}
-                      operation="decrypting"
-                    />
-                  )}
-
-                  <Button
-                    colorScheme="blue"
-                    onClick={handleWalletKeyDecrypt}
-                    isLoading={isDecrypting}
-                    isDisabled={!canUseWalletKey}
-                    loadingText="Decrypting..."
-                    leftIcon={<Icon as={MdKey} />}
-                  >
-                    Decrypt with Wallet Key
-                  </Button>
-                </VStack>
-              </TabPanel>
-            </TabPanels>
-          </Tabs>
-        )}
-
-        {/* ── CEK Import (any wallet-unlocked viewer who received a share link) ── */}
-        {timelockExpired && !!walletMnemonic && !isWalletKeyRecipient && (
-          <>
-            <Divider />
-            <VStack spacing={3} align="stretch">
-              <Button
-                size="sm"
-                variant="ghost"
-                leftIcon={<Icon as={MdOpenInNew} />}
-                onClick={importDisclosure.onToggle}
-                justifyContent="flex-start"
-              >
-                Use an access link
-              </Button>
-              <Collapse in={importDisclosure.isOpen}>
-                <VStack spacing={3} align="stretch" pt={1}>
-                  <Text fontSize="xs" color="gray.400">
-                    Paste the access link sent to you by the content owner. Your wallet will automatically unlock and decrypt the content.
-                  </Text>
-                  <FormControl>
-                    <FormLabel fontSize="sm">Access link or token</FormLabel>
-                    <Textarea
-                      size="sm"
-                      rows={3}
-                      value={importInput}
-                      onChange={(e) => setImportInput(e.target.value)}
-                      placeholder="Paste the link you received here…"
-                    />
-                  </FormControl>
-                  {isImporting && decryptProgress && (
-                    <EncryptionProgress progress={decryptProgress} operation="decrypting" />
-                  )}
-                  <Button
-                    size="sm"
-                    colorScheme="blue"
-                    onClick={handleImportCEK}
-                    isLoading={isImporting}
-                    isDisabled={!importInput.trim()}
-                    loadingText="Unlocking…"
-                    leftIcon={<Icon as={MdLockOpen} />}
-                  >
-                    Unlock with access link
-                  </Button>
-                </VStack>
-              </Collapse>
-            </VStack>
-          </>
-        )}
-
-        {/* ── CEK Export (wallet-key recipients can share access to other wallets) ── */}
-        {timelockExpired && isWalletKeyRecipient && (
-          <>
-            <Divider />
-            <VStack spacing={3} align="stretch">
-              <Button
-                size="sm"
-                variant="ghost"
-                leftIcon={<Icon as={MdShare} />}
-                onClick={exportDisclosure.onToggle}
-                justifyContent="flex-start"
-              >
-                Give someone access
-              </Button>
-              <Collapse in={exportDisclosure.isOpen}>
-                <VStack spacing={3} align="stretch" pt={1}>
-                  <Text fontSize="xs" color="gray.400">
-                    Enter the recipient’s encryption public key to generate a one-time access link. Only they can use it — find the key in their wallet under Settings → Encryption Public Key.
-                  </Text>
-                  <FormControl>
-                    <FormLabel fontSize="sm">Recipient’s encryption public key</FormLabel>
-                    <Input
-                      size="sm"
-                      fontFamily="mono"
-                      fontSize="xs"
-                      value={recipientPubkeyHex}
-                      onChange={(e) => setRecipientPubkeyHex(e.target.value)}
-                      placeholder="64-character key from their wallet Settings"
-                    />
-                  </FormControl>
-                  <Button
-                    size="sm"
-                    colorScheme="teal"
-                    onClick={handleExportCEK}
-                    isLoading={isExporting}
-                    isDisabled={!walletMnemonic || recipientPubkeyHex.trim().replace(/^0x/i, "").length !== 64}
-                    loadingText="Creating link…"
-                    leftIcon={<Icon as={MdShare} />}
-                  >
-                    Create access link
-                  </Button>
-                  {exportedShareUrl && (
-                    <VStack spacing={2} align="stretch">
-                      <Text fontSize="xs" color="gray.400">
-                        Send this link to the recipient — it works only with their wallet key:
-                      </Text>
-                      <Code
-                        fontSize="xs"
-                        p={2}
-                        borderRadius="md"
-                        whiteSpace="pre-wrap"
-                        wordBreak="break-all"
-                        display="block"
-                        bg="bg.200"
-                      >
-                        {exportedShareUrl}
-                      </Code>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={onCopyExport}
-                        leftIcon={<Icon as={hasCopiedExport ? MdCheck : MdContentCopy} />}
-                      >
-                        {hasCopiedExport ? "Copied!" : "Copy link"}
-                      </Button>
-                    </VStack>
-                  )}
-                </VStack>
-              </Collapse>
-            </VStack>
-          </>
-        )}
-
-        {/* ── Publish Reveal (owner-only, after timelock expires) ── */}
-        {timelockExpired && savedReveal && tokenRef && !revealAlreadyBroadcast && (
-          <>
-            <Divider />
-            <VStack spacing={3} align="stretch">
-              <HStack>
-                <Icon as={MdPublic} color="purple.400" fontSize="lg" />
-                <Text fontWeight="bold" fontSize="sm">
-                  Publish Reveal (owner)
-                </Text>
-              </HStack>
-              <Text fontSize="xs" color="gray.400">
-                  You hold the saved CEK for this timelocked content. Publishing a reveal transaction broadcasts the key on-chain so anyone can decrypt it. This action is permanent.
+    <>
+      <Box borderWidth={1} borderRadius="md" p={4} bg="bg.400">
+        <VStack spacing={4} align="stretch">
+          <HStack>
+            <Icon as={MdLock} fontSize="2xl" color="blue.400" />
+            <VStack align="start" spacing={0}>
+              <Text fontWeight="bold">Encrypted Content</Text>
+              <Text fontSize="sm" color="gray.400">
+                {scheme.toUpperCase()}
               </Text>
-              <Button
-                size="sm"
-                colorScheme="purple"
-                variant="outline"
-                onClick={handlePublishReveal}
-                isLoading={isRevealing}
-                loadingText="Broadcasting…"
-                isDisabled={wallet.value.locked || !wallet.value.wif}
-                leftIcon={<Icon as={MdPublic} />}
-              >
-                Publish Reveal Transaction
-              </Button>
             </VStack>
-          </>
-        )}
-      </VStack>
-    </Box>
+          </HStack>
+
+          {isTimelocked && !timelockExpired && (
+            <Alert status="warning" borderRadius="md">
+              <AlertIcon as={MdTimer} />
+              <AlertDescription>
+                <VStack align="start" spacing={1}>
+                  <Text fontWeight="bold">Timelocked Content</Text>
+                  <Text>
+                    This content will unlock in{" "}
+                    {formatTimeRemaining(timeRemaining)}
+                  </Text>
+                </VStack>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {isTimelocked && timelockExpired && (
+            <Alert status="success" borderRadius="md">
+              <AlertIcon as={MdLockOpen} />
+              <AlertDescription>
+                Timelock has expired — content can now be decrypted
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {timelockExpired && (
+            <Tabs variant="soft-rounded" colorScheme="blue" size="sm">
+              <TabList>
+                <Tab>
+                  <Icon as={MdLockOpen} mr={1} />
+                  Passphrase
+                </Tab>
+                <Tab isDisabled={!walletMnemonic || !isWalletKeyRecipient}>
+                  <Icon as={MdKey} mr={1} />
+                  Wallet Key
+                </Tab>
+              </TabList>
+
+              <TabPanels>
+                {/* ── Passphrase tab ── */}
+                <TabPanel px={0}>
+                  <VStack spacing={3} align="stretch">
+                    <FormControl>
+                      <FormLabel>Decryption Password</FormLabel>
+                      <Input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder={t`Enter password`}
+                        onKeyPress={(e) =>
+                          e.key === "Enter" && handlePassphraseDecrypt()
+                        }
+                      />
+                    </FormControl>
+
+                    {hint && (
+                      <Text fontSize="sm" color="gray.400">
+                        Hint: {hint}
+                      </Text>
+                    )}
+
+                    {isDecrypting && decryptProgress && (
+                      <EncryptionProgress
+                        progress={decryptProgress}
+                        operation="decrypting"
+                      />
+                    )}
+
+                    <Button
+                      colorScheme="blue"
+                      onClick={handlePassphraseDecrypt}
+                      isLoading={isDecrypting}
+                      isDisabled={!password}
+                      loadingText="Decrypting..."
+                      leftIcon={<Icon as={MdLockOpen} />}
+                    >
+                      Decrypt with Password
+                    </Button>
+                  </VStack>
+                </TabPanel>
+
+                {/* ── Wallet key tab ── */}
+                <TabPanel px={0}>
+                  <VStack spacing={3} align="stretch">
+                    <Text fontSize="sm" color="gray.400">
+                      Decrypt content that was shared directly with your wallet.
+                    </Text>
+                    {!walletMnemonic && (
+                      <Alert status="info" borderRadius="md">
+                        <AlertIcon />
+                        <AlertDescription fontSize="sm">
+                          Unlock your wallet to use your encryption key
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {walletMnemonic && !isWalletKeyRecipient && (
+                      <Alert status="warning" borderRadius="md">
+                        <AlertIcon />
+                        <AlertDescription fontSize="sm">
+                          Your wallet key is not a recipient for this content
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {isDecrypting && decryptProgress && (
+                      <EncryptionProgress
+                        progress={decryptProgress}
+                        operation="decrypting"
+                      />
+                    )}
+
+                    <Button
+                      colorScheme="blue"
+                      onClick={handleWalletKeyDecrypt}
+                      isLoading={isDecrypting}
+                      isDisabled={!canUseWalletKey}
+                      loadingText="Decrypting..."
+                      leftIcon={<Icon as={MdKey} />}
+                    >
+                      Decrypt with Wallet Key
+                    </Button>
+                  </VStack>
+                </TabPanel>
+              </TabPanels>
+            </Tabs>
+          )}
+
+          {/* ── CEK Import (any wallet-unlocked viewer who received a share link) ── */}
+          {timelockExpired && !!walletMnemonic && !isWalletKeyRecipient && (
+            <>
+              <Divider />
+              <VStack spacing={3} align="stretch">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  leftIcon={<Icon as={MdOpenInNew} />}
+                  onClick={importDisclosure.onToggle}
+                  justifyContent="flex-start"
+                >
+                  Use an access link
+                </Button>
+                <Collapse in={importDisclosure.isOpen}>
+                  <VStack spacing={3} align="stretch" pt={1}>
+                    <Text fontSize="xs" color="gray.400">
+                      Paste the access link sent to you by the content owner.
+                      Your wallet will automatically unlock and decrypt the
+                      content.
+                    </Text>
+                    <FormControl>
+                      <FormLabel fontSize="sm">Access link or token</FormLabel>
+                      <Textarea
+                        size="sm"
+                        rows={3}
+                        value={importInput}
+                        onChange={(e) => setImportInput(e.target.value)}
+                        placeholder={t`Paste the link you received here…`}
+                      />
+                    </FormControl>
+                    {isImporting && decryptProgress && (
+                      <EncryptionProgress
+                        progress={decryptProgress}
+                        operation="decrypting"
+                      />
+                    )}
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      onClick={handleImportCEK}
+                      isLoading={isImporting}
+                      isDisabled={!importInput.trim()}
+                      loadingText="Unlocking…"
+                      leftIcon={<Icon as={MdLockOpen} />}
+                    >
+                      Unlock with access link
+                    </Button>
+                  </VStack>
+                </Collapse>
+              </VStack>
+            </>
+          )}
+
+          {/* ── CEK Export (wallet-key recipients can share access to other wallets) ── */}
+          {timelockExpired && isWalletKeyRecipient && (
+            <>
+              <Divider />
+              <VStack spacing={3} align="stretch">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  leftIcon={<Icon as={MdShare} />}
+                  onClick={exportDisclosure.onToggle}
+                  justifyContent="flex-start"
+                >
+                  Give someone access
+                </Button>
+                <Collapse in={exportDisclosure.isOpen}>
+                  <VStack spacing={3} align="stretch" pt={1}>
+                    <Text fontSize="xs" color="gray.400">
+                      Enter the recipient’s encryption public key to generate a
+                      one-time access link. Only they can use it — find the key
+                      in their wallet under Settings → Encryption Public Key.
+                    </Text>
+                    <FormControl>
+                      <FormLabel fontSize="sm">
+                        Recipient’s encryption public key
+                      </FormLabel>
+                      <Input
+                        size="sm"
+                        fontFamily="mono"
+                        fontSize="xs"
+                        value={recipientPubkeyHex}
+                        onChange={(e) => setRecipientPubkeyHex(e.target.value)}
+                        placeholder={t`64-character key from their wallet Settings`}
+                      />
+                    </FormControl>
+                    <Button
+                      size="sm"
+                      colorScheme="teal"
+                      onClick={handleExportCEK}
+                      isLoading={isExporting}
+                      isDisabled={
+                        !walletMnemonic ||
+                        recipientPubkeyHex.trim().replace(/^0x/i, "").length !==
+                          64
+                      }
+                      loadingText="Creating link…"
+                      leftIcon={<Icon as={MdShare} />}
+                    >
+                      Create access link
+                    </Button>
+                    {exportedShareUrl && (
+                      <VStack spacing={2} align="stretch">
+                        <Text fontSize="xs" color="gray.400">
+                          Send this link to the recipient — it works only with
+                          their wallet key:
+                        </Text>
+                        <Code
+                          fontSize="xs"
+                          p={2}
+                          borderRadius="md"
+                          whiteSpace="pre-wrap"
+                          wordBreak="break-all"
+                          display="block"
+                          bg="bg.200"
+                        >
+                          {exportedShareUrl}
+                        </Code>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={onCopyExport}
+                          leftIcon={
+                            <Icon
+                              as={hasCopiedExport ? MdCheck : MdContentCopy}
+                            />
+                          }
+                        >
+                          {hasCopiedExport ? "Copied!" : "Copy link"}
+                        </Button>
+                      </VStack>
+                    )}
+                  </VStack>
+                </Collapse>
+              </VStack>
+            </>
+          )}
+
+          {/* ── Publish Reveal (owner-only, after timelock expires) ── */}
+          {timelockExpired &&
+            savedReveal &&
+            tokenRef &&
+            !revealAlreadyBroadcast && (
+              <>
+                <Divider />
+                <VStack spacing={3} align="stretch">
+                  <HStack>
+                    <Icon as={MdPublic} color="purple.400" fontSize="lg" />
+                    <Text fontWeight="bold" fontSize="sm">
+                      Publish Reveal (owner)
+                    </Text>
+                  </HStack>
+                  <Text fontSize="xs" color="gray.400">
+                    You hold the saved CEK for this timelocked content.
+                    Publishing a reveal transaction broadcasts the key on-chain
+                    so anyone can decrypt it. This action is permanent.
+                  </Text>
+                  <Button
+                    size="sm"
+                    colorScheme="purple"
+                    variant="outline"
+                    onClick={handlePublishReveal}
+                    isLoading={isRevealing}
+                    loadingText="Broadcasting…"
+                    isDisabled={wallet.value.locked || !wallet.value.wif}
+                    leftIcon={<Icon as={MdPublic} />}
+                  >
+                    Publish Reveal Transaction
+                  </Button>
+                </VStack>
+              </>
+            )}
+        </VStack>
+      </Box>
+
+      {/* R16: confirmation dialog for #share= URL fragments. The token is
+        useless without the recipient's private key, but the user should
+        consciously opt in before the wallet touches it. */}
+      <AlertDialog
+        isOpen={shareConfirmDisclosure.isOpen}
+        leastDestructiveRef={shareCancelRef}
+        onClose={dismissPendingShare}
+        isCentered
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Shared decryption key detected
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              <Text mb={2}>
+                This URL contains an encrypted-content sharing token. The sender
+                has wrapped a content-encryption key (CEK) so that only you can
+                unwrap it with your wallet's private key.
+              </Text>
+              <Text mb={2}>
+                Only continue if you trust the sender. Anyone with the link now
+                has the wrapped CEK — they can verify which NFT it belongs to
+                but cannot decrypt the content themselves.
+              </Text>
+              {pendingShareToken && (
+                <Text fontSize="sm" color="gray.400">
+                  Token ref: <Code fontSize="xs">{pendingShareToken.ref}</Code>
+                </Text>
+              )}
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={shareCancelRef} onClick={dismissPendingShare}>
+                Discard
+              </Button>
+              <Button colorScheme="blue" onClick={acceptPendingShare} ml={3}>
+                Review &amp; import
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+    </>
   );
 }

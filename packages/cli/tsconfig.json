@@ -2,5 +2,6 @@
   "extends": "@photonic/typescript-config/cli.json",
   "compilerOptions": {
     "rootDir": "."
-  }
+  },
+  "include": ["src", "../lib/src/types/**/*.d.ts"]
 }

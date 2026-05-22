@@ -15,7 +15,6 @@ import {
   Box,
   useToast,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { useLiveQuery } from "dexie-react-hooks";
 import ContractName from "./ContractName";
 import { p2pkhScript, p2pkhScriptSigSize, txSize } from "@lib/script";
@@ -129,7 +128,7 @@ async function consolidateUtxos(
 
     const total = inputs.reduce((sum, cur) => sum + cur.value, 0);
 
-    const privKey = PrivateKey.fromString(wallet.value.wif as string);
+    const privKey = PrivateKey.fromString(wallet.value.wif!.toString());
     const outputs = [];
 
     let fund;
@@ -274,7 +273,9 @@ export default function ConsolidationModal() {
         <ModalHeader>{"Consolidation required"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          {"Your wallet contains many unspent outputs that will cause long sync times. Output consolidation is required."}
+          {
+            "Your wallet contains many unspent outputs that will cause long sync times. Output consolidation is required."
+          }
           <Box mt={2}>{disclosure.isOpen && <OutputCounts />}</Box>
         </ModalBody>
 

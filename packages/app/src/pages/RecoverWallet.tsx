@@ -17,7 +17,6 @@ import {
   Textarea,
   useBreakpointValue,
 } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import { recoverKeys, LEGACY_COIN_TYPE } from "@app/keys";
 import Card from "@app/components/Card";
 import { NetworkKey } from "@lib/types";
@@ -72,8 +71,8 @@ export default function RecoverWallet() {
         if (!result) {
           return;
         }
-        const { address, wif, net } = result;
-        initWallet({ net, wif, address });
+        const { address, wif, net, coinType } = result;
+        initWallet({ net, wif, address, coinType });
         navigate(isMobile ? "/home" : "/objects");
       } catch (error) {
         console.log(error);
@@ -161,11 +160,9 @@ export default function RecoverWallet() {
             {"Submit"}
           </Button>
           <Center mt={4}>
-            <Button
-              variant="ghost"
-              as={Link}
-              to="/create-wallet"
-            >{"Create a new wallet"}</Button>
+            <Button variant="ghost" as={Link} to="/create-wallet">
+              {"Create a new wallet"}
+            </Button>
           </Center>
         </form>
       </Card>

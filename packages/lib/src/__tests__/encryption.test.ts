@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { sha256 } from "@noble/hashes/sha256";
 import {
   encryptXChaCha20Poly1305,
   decryptXChaCha20Poly1305,
@@ -31,25 +32,6 @@ import {
   XCHACHA20_KEY_SIZE,
 } from "../encryption";
 
-// Generate random bytes in chunks to avoid quota limits
-function randomBytesLarge(size: number): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  const CHUNK = 65536;
-  while (size > 0) {
-    const chunkSize = Math.min(size, CHUNK);
-    chunks.push(crypto.getRandomValues(new Uint8Array(chunkSize)));
-    size -= chunkSize;
-  }
-  if (chunks.length === 1) return chunks[0];
-  const result = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
-}
-
 // ============================================================================
 // XChaCha20-Poly1305 Tests
 // ============================================================================
@@ -65,7 +47,9 @@ describe("XChaCha20-Poly1305", () => {
     expect(nonce.length).toBe(24);
 
     const decrypted = decryptXChaCha20Poly1305(ciphertext, key, nonce);
-    expect(new TextDecoder().decode(decrypted)).toBe("Hello, Glyph Encryption!");
+    expect(new TextDecoder().decode(decrypted)).toBe(
+      "Hello, Glyph Encryption!"
+    );
   });
 
   it("should use random nonce when not provided", () => {
@@ -179,8 +163,16 @@ describe("Chunked AEAD", () => {
     expect(result1.ciphertext).not.toEqual(result2.ciphertext);
 
     // But both decrypt to same plaintext
-    const dec1 = decryptXChaCha20Poly1305(result1.ciphertext, key, result1.nonce);
-    const dec2 = decryptXChaCha20Poly1305(result2.ciphertext, key, result2.nonce);
+    const dec1 = decryptXChaCha20Poly1305(
+      result1.ciphertext,
+      key,
+      result1.nonce
+    );
+    const dec2 = decryptXChaCha20Poly1305(
+      result2.ciphertext,
+      key,
+      result2.nonce
+    );
     expect(dec1).toEqual(dec2);
     expect(dec1).toEqual(plaintext);
   });
@@ -240,8 +232,18 @@ describe("HKDF-SHA256", () => {
     const ikm = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(32));
 
-    const key1 = deriveKeyHKDF(ikm, salt, new TextEncoder().encode("info1"), 32);
-    const key2 = deriveKeyHKDF(ikm, salt, new TextEncoder().encode("info2"), 32);
+    const key1 = deriveKeyHKDF(
+      ikm,
+      salt,
+      new TextEncoder().encode("info1"),
+      32
+    );
+    const key2 = deriveKeyHKDF(
+      ikm,
+      salt,
+      new TextEncoder().encode("info2"),
+      32
+    );
 
     expect(key1).not.toEqual(key2);
   });
@@ -524,7 +526,11 @@ describe("Hybrid X25519 + ML-KEM-768", () => {
       numChunks: 1,
     });
 
-    const withRecipient = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
+    const withRecipient = addRecipientToMetadata(
+      metadata,
+      wrappedCEK,
+      ephemeral
+    );
 
     expect(withRecipient.crypto.recipients?.[0].kid).toBe("x25519mlkem768");
     expect(withRecipient.crypto.recipients?.[0].mlkem_ct).toBeDefined();
@@ -548,7 +554,11 @@ describe("Hybrid X25519 + ML-KEM-768", () => {
       numChunks: 1,
     });
 
-    const withRecipient = addRecipientToMetadata(metadata, wrappedCEK, ephemeral);
+    const withRecipient = addRecipientToMetadata(
+      metadata,
+      wrappedCEK,
+      ephemeral
+    );
 
     expect(withRecipient.crypto.recipients?.[0].kid).toBe("x25519");
     expect(withRecipient.crypto.recipients?.[0].mlkem_ct).toBeUndefined();
@@ -612,14 +622,18 @@ describe("Metadata Builders", () => {
     expect(metadata.type).toBe("image/png");
     expect(metadata.name).toBe("Encrypted Artwork");
     expect(metadata.main.type).toBe("image/png");
-    expect(metadata.main.hash).toBe(`sha256:${Buffer.from(plaintextHash).toString("hex")}`);
+    expect(metadata.main.hash).toBe(
+      `sha256:${Buffer.from(plaintextHash).toString("hex")}`
+    );
     expect(metadata.main.enc).toBe("xchacha20poly1305");
     expect(metadata.main.size).toBe(1048576);
     expect(metadata.main.chunks).toBe(16);
     expect(metadata.main.scheme).toBe("chunked-aead-v1");
     expect(metadata.crypto.mode).toBe("encrypted");
     expect(metadata.crypto.key_format).toBe("wrapped");
-    expect(metadata.crypto.cek_hash).toBe(`sha256:${Buffer.from(cekHash).toString("hex")}`);
+    expect(metadata.crypto.cek_hash).toBe(
+      `sha256:${Buffer.from(cekHash).toString("hex")}`
+    );
   });
 
   it("should support custom encryption scheme", () => {
@@ -687,7 +701,11 @@ describe("Metadata Builders", () => {
       x25519: recipient1.x25519PublicKey,
       mlkem: new Uint8Array(0),
     });
-    metadata = addRecipientToMetadata(metadata, result1.wrappedCEK, result1.ephemeral);
+    metadata = addRecipientToMetadata(
+      metadata,
+      result1.wrappedCEK,
+      result1.ephemeral
+    );
 
     // Add second recipient
     const recipient2 = generateHybridKeyPair();
@@ -695,7 +713,11 @@ describe("Metadata Builders", () => {
       x25519: recipient2.x25519PublicKey,
       mlkem: new Uint8Array(0),
     });
-    metadata = addRecipientToMetadata(metadata, result2.wrappedCEK, result2.ephemeral);
+    metadata = addRecipientToMetadata(
+      metadata,
+      result2.wrappedCEK,
+      result2.ephemeral
+    );
 
     expect(metadata.crypto.recipients).toHaveLength(2);
   });
@@ -719,10 +741,13 @@ describe("Full Encryption Flow", () => {
 
     // Manual encryption without AAD for test stability
     const cekNonce = crypto.getRandomValues(new Uint8Array(24));
-    const { ciphertext, nonce } = encryptXChaCha20Poly1305(plaintext, cek, cekNonce);
+    const { ciphertext, nonce } = encryptXChaCha20Poly1305(
+      plaintext,
+      cek,
+      cekNonce
+    );
 
     // 4. Hash CEK
-    const { sha256 } = require("@noble/hashes/sha256");
     const cekHash = sha256(cek);
 
     // 5. Build metadata

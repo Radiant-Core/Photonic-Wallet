@@ -49,9 +49,7 @@ export default function Identifier({
           <IconButton
             display="inline"
             onClick={onCopy}
-            icon={
-              hasCopied ? <CheckIcon color="green.400" /> : <CopyIcon />
-            }
+            icon={hasCopied ? <CheckIcon color="green.400" /> : <CopyIcon />}
             variant="ghost"
             aria-label={label}
             size="xs"

@@ -1,7 +1,6 @@
 import { PropsWithChildren } from "react";
 import { Scanner } from "@yudiel/react-qr-scanner";
 import { Box, Button, ModalBody, ModalFooter } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 
 export default function AddressInput({
   onScan,

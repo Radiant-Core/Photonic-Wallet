@@ -18,7 +18,6 @@ import {
   Divider,
 } from "@chakra-ui/react";
 import { AddIcon, DeleteIcon } from "@chakra-ui/icons";
-import { Trans, t } from "@lingui/macro";
 import { GlyphV2Royalty } from "@lib/v2metadata";
 
 type RoyaltyConfigProps = {
@@ -67,7 +66,11 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
     setSplits(splits.filter((_, i) => i !== index));
   };
 
-  const updateSplit = (index: number, field: "address" | "bps", value: string | number) => {
+  const updateSplit = (
+    index: number,
+    field: "address" | "bps",
+    value: string | number
+  ) => {
     const newSplits = [...splits];
     if (field === "address") {
       newSplits[index].address = value as string;
@@ -87,9 +90,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
   return (
     <VStack spacing={4} align="stretch">
       <FormControl display="flex" alignItems="center">
-        <FormLabel mb={0}>
-          Enable Royalties
-        </FormLabel>
+        <FormLabel mb={0}>Enable Royalties</FormLabel>
         <Switch
           isChecked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
@@ -99,9 +100,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
       {enabled && (
         <>
           <FormControl display="flex" alignItems="center">
-            <FormLabel mb={0}>
-              Enforce On-Chain
-            </FormLabel>
+            <FormLabel mb={0}>Enforce On-Chain</FormLabel>
             <Switch
               isChecked={enforced}
               onChange={(e) => setEnforced(e.target.checked)}
@@ -114,9 +113,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
           </FormControl>
 
           <FormControl>
-            <FormLabel>
-              Royalty Percentage
-            </FormLabel>
+            <FormLabel>Royalty Percentage</FormLabel>
             <NumberInput
               value={bps / 100}
               onChange={(_, value) => setBps(value * 100)}
@@ -137,9 +134,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
           </FormControl>
 
           <FormControl>
-            <FormLabel>
-              Royalty Recipient Address
-            </FormLabel>
+            <FormLabel>Royalty Recipient Address</FormLabel>
             <Input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -148,9 +143,7 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
           </FormControl>
 
           <FormControl>
-            <FormLabel>
-              Minimum Royalty (photons)
-            </FormLabel>
+            <FormLabel>Minimum Royalty (photons)</FormLabel>
             <NumberInput
               value={minimum}
               onChange={(_, value) => setMinimum(value)}
@@ -162,18 +155,14 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
                 <NumberDecrementStepper />
               </NumberInputStepper>
             </NumberInput>
-            <FormHelperText>
-              Optional minimum royalty amount
-            </FormHelperText>
+            <FormHelperText>Optional minimum royalty amount</FormHelperText>
           </FormControl>
 
           <Divider />
 
           <VStack align="stretch" spacing={3}>
             <HStack justify="space-between">
-              <Text fontWeight="bold">
-                Royalty Splits (Optional)
-              </Text>
+              <Text fontWeight="bold">Royalty Splits (Optional)</Text>
               <Button
                 size="sm"
                 leftIcon={<AddIcon />}
@@ -189,12 +178,16 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
                 <Input
                   placeholder={"Address"}
                   value={split.address}
-                  onChange={(e) => updateSplit(index, "address", e.target.value)}
+                  onChange={(e) =>
+                    updateSplit(index, "address", e.target.value)
+                  }
                   flex={2}
                 />
                 <NumberInput
                   value={split.bps / 100}
-                  onChange={(_, value) => updateSplit(index, "bps", value * 100)}
+                  onChange={(_, value) =>
+                    updateSplit(index, "bps", value * 100)
+                  }
                   min={0}
                   max={100}
                   step={0.1}

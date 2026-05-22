@@ -14,6 +14,10 @@
     "deploy": {
       "dependsOn": ["lint", "build"]
     },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "prettier": {},
     "prettier:fix": {},
     "dev": {

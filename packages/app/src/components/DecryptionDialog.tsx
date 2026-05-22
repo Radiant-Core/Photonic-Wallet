@@ -6,6 +6,7 @@
  */
 
 import { useState } from "react";
+import { t, Trans } from "@lingui/macro";
 import { EncryptionProgress } from "./EncryptionProgress";
 import type { EncryptionMode } from "../encryptionService";
 
@@ -41,7 +42,7 @@ export function DecryptionDialog({
 
   const handleDecrypt = async () => {
     if (!key.trim()) {
-      setError("Please enter the required key");
+      setError(t`Please enter the required key`);
       return;
     }
 
@@ -53,7 +54,7 @@ export function DecryptionDialog({
       setKey("");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Decryption failed");
+      setError(err instanceof Error ? err.message : t`Decryption failed`);
     } finally {
       setIsDecrypting(false);
     }
@@ -72,12 +73,14 @@ export function DecryptionDialog({
       <div className="decryption-dialog">
         <div className="dialog-header">
           <span className="header-icon">🔓</span>
-          <h3>Decrypt Content</h3>
+          <h3>
+            <Trans>Decrypt Content</Trans>
+          </h3>
           <button
             className="close-btn"
             onClick={handleClose}
             disabled={isDecrypting}
-            aria-label="Close dialog"
+            aria-label={t`Close dialog`}
           >
             ✕
           </button>
@@ -87,14 +90,18 @@ export function DecryptionDialog({
           <div className="content-info">
             <p className="content-name">{contentName}</p>
             <p className="security-notice">
-              🔒 <strong>Local Decryption</strong> - Your key never leaves this device
+              🔒{" "}
+              <strong>
+                <Trans>Local Decryption</Trans>
+              </strong>{" "}
+              <Trans>- Your key never leaves this device</Trans>
             </p>
           </div>
 
           {mode === "passphrase" ? (
             <div className="input-section">
               <label className="input-label">
-                Enter Passphrase
+                <Trans>Enter Passphrase</Trans>
                 <span className="required">*</span>
               </label>
               <div className="key-input-row">
@@ -102,7 +109,7 @@ export function DecryptionDialog({
                   type={showKey ? "text" : "password"}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
-                  placeholder="Enter the encryption passphrase..."
+                  placeholder={t`Enter the encryption passphrase...`}
                   disabled={isDecrypting}
                   className="key-input"
                   onKeyDown={(e) => {
@@ -114,19 +121,22 @@ export function DecryptionDialog({
                   onClick={() => setShowKey(!showKey)}
                   type="button"
                   disabled={isDecrypting}
-                  aria-label={showKey ? "Hide passphrase" : "Show passphrase"}
+                  aria-label={showKey ? t`Hide passphrase` : t`Show passphrase`}
                 >
                   {showKey ? "🙈" : "👁️"}
                 </button>
               </div>
               <p className="input-hint">
-                This is the same passphrase used when the content was encrypted.
+                <Trans>
+                  This is the same passphrase used when the content was
+                  encrypted.
+                </Trans>
               </p>
             </div>
           ) : (
             <div className="input-section">
               <label className="input-label">
-                Private Key
+                <Trans>Private Key</Trans>
                 <span className="required">*</span>
               </label>
               <div className="key-input-row">
@@ -134,13 +144,16 @@ export function DecryptionDialog({
                   type="password"
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
-                  placeholder="Enter your private key..."
+                  placeholder={t`Enter your private key...`}
                   disabled={isDecrypting}
                   className="key-input"
                 />
               </div>
               <p className="input-hint">
-                Your private key is required to unwrap the content encryption key.
+                <Trans>
+                  Your private key is required to unwrap the content encryption
+                  key.
+                </Trans>
               </p>
             </div>
           )}
@@ -167,7 +180,7 @@ export function DecryptionDialog({
             disabled={isDecrypting}
             type="button"
           >
-            Cancel
+            <Trans>Cancel</Trans>
           </button>
           <button
             className="btn-decrypt"
@@ -177,10 +190,12 @@ export function DecryptionDialog({
           >
             {isDecrypting ? (
               <>
-                <span className="spinner" /> Decrypting...
+                <span className="spinner" /> <Trans>Decrypting...</Trans>
               </>
             ) : (
-              <>🔓 Decrypt</>
+              <>
+                🔓 <Trans>Decrypt</Trans>
+              </>
             )}
           </button>
         </div>

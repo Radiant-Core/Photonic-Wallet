@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import { useDisclosure, useToast } from "@chakra-ui/react";
-import { t } from "@lingui/macro";
 import PasswordModal from "./PasswordModal";
 import { openModal, wallet } from "@app/signals";
 import useModalSignal from "@app/hooks/useModalSignal";
@@ -17,20 +16,25 @@ export default function Unlock() {
       onCloseCallback.current = onClose;
       disclosure.onOpen();
     } else {
-      onClose && onClose(false);
+      if (onClose) onClose(false);
     }
   };
 
   useModalSignal(openModal, "unlock", open);
 
-  const onSuccess = (mnemonic: string, wif: string, swapWif: string) => {
+  const onSuccess = (
+    mnemonic: string,
+    wif: string,
+    swapWif: string,
+    coinType?: number
+  ) => {
     toast({
       title: "Wallet unlocked",
       status: "success",
     });
 
     if (wif) {
-      unlockWallet(mnemonic, wif, swapWif);
+      unlockWallet(mnemonic, wif, swapWif, coinType);
     }
 
     disclosure.onClose();

@@ -24,7 +24,13 @@ import {
   Box,
   Collapse,
 } from "@chakra-ui/react";
-import { MdKey, MdContentCopy, MdCheck, MdQrCode, MdShare } from "react-icons/md";
+import {
+  MdKey,
+  MdContentCopy,
+  MdCheck,
+  MdQrCode,
+  MdShare,
+} from "react-icons/md";
 import { QRCodeSVG } from "qrcode.react";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { bytesToHex } from "@noble/hashes/utils";
@@ -38,6 +44,14 @@ import config from "@app/config.json";
 import { useLiveQuery } from "dexie-react-hooks";
 import { PromiseExtended } from "dexie";
 import { electrumWorker } from "@app/electrum/Electrum";
+import {
+  autoLockMs,
+  clampAutoLockMs,
+  DEFAULT_AUTO_LOCK_MS,
+  MIN_AUTO_LOCK_MS,
+  MAX_AUTO_LOCK_MS,
+  saveAutoLockMs,
+} from "@app/autoLock";
 
 const MIN_FEE_RATE = 10000;
 
@@ -64,16 +78,21 @@ export default function WalletSettings() {
     const m = wallet.value.mnemonic;
     if (!m) return "";
     try {
-      const kp = deriveEncryptionKeypair(m);
+      // R26: derive on the same coin type the wallet spends from so the
+      // public key shown here matches what a recipient-mode mint would
+      // produce.
+      const kp = deriveEncryptionKeypair(m.toString(), wallet.value.coinType);
       return bytesToHex(kp.x25519PublicKey);
     } catch {
       return "";
     }
   })();
 
-  const { onCopy: onCopyEncKey, hasCopied: hasCopiedEncKey } = useClipboard(encPubkeyHex);
+  const { onCopy: onCopyEncKey, hasCopied: hasCopiedEncKey } =
+    useClipboard(encPubkeyHex);
   const languageRef = useRef<HTMLSelectElement>(null);
   const feeRateRef = useRef<HTMLInputElement>(null);
+  const autoLockRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   const keys = ["language", "feeRate"];
@@ -83,6 +102,13 @@ export default function WalletSettings() {
     const feeRateNum = normalizeFeeRate(feeRateRef.current?.value || "");
 
     db.kvp.bulkPut([languageRef.current?.value, feeRateNum], keys);
+
+    // R4: persist idle auto-lock duration (input is minutes; stored as ms).
+    const lockMinutes = parseFloat(autoLockRef.current?.value || "");
+    if (Number.isFinite(lockMinutes) && lockMinutes > 0) {
+      await saveAutoLockMs(clampAutoLockMs(lockMinutes * 60 * 1000));
+    }
+
     toast({
       title: "Saved",
       status: "success",
@@ -149,7 +175,9 @@ export default function WalletSettings() {
               <Button
                 size="xs"
                 variant="outline"
-                leftIcon={<Icon as={hasCopiedEncKey ? MdCheck : MdContentCopy} />}
+                leftIcon={
+                  <Icon as={hasCopiedEncKey ? MdCheck : MdContentCopy} />
+                }
                 onClick={onCopyEncKey}
               >
                 {hasCopiedEncKey ? "Copied!" : "Copy"}
@@ -244,7 +272,9 @@ export default function WalletSettings() {
 
       <FormSection>
         <FormControl>
-          <FormLabel id="language-label" htmlFor="language-select">Language</FormLabel>
+          <FormLabel id="language-label" htmlFor="language-select">
+            Language
+          </FormLabel>
           <Select
             ref={languageRef}
             id="language-select"
@@ -273,6 +303,23 @@ export default function WalletSettings() {
           />
           <FormHelperText>
             {`Photons per byte (minimum ${MIN_FEE_RATE})`}
+          </FormHelperText>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Auto-Lock (minutes)</FormLabel>
+          <Input
+            ref={autoLockRef}
+            type="number"
+            min={Math.ceil(MIN_AUTO_LOCK_MS / 60_000)}
+            max={Math.floor(MAX_AUTO_LOCK_MS / 60_000)}
+            step={1}
+            placeholder={`${Math.round(DEFAULT_AUTO_LOCK_MS / 60_000)}`}
+            defaultValue={Math.round(autoLockMs.value / 60_000)}
+          />
+          <FormHelperText>
+            {`Idle minutes before the wallet locks and secrets are wiped (default ${Math.round(
+              DEFAULT_AUTO_LOCK_MS / 60_000
+            )}).`}
           </FormHelperText>
         </FormControl>
       </FormSection>

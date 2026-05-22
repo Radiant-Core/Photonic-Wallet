@@ -15,7 +15,6 @@ import {
   Switch,
   Badge,
 } from "@chakra-ui/react";
-import { Trans, t } from "@lingui/macro";
 import RoyaltyConfig from "./RoyaltyConfig";
 import PolicyConfig from "./PolicyConfig";
 import { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
@@ -23,7 +22,11 @@ import { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
 type MintV2FieldsProps = {
   onRoyaltyChange: (royalty: GlyphV2Royalty | undefined) => void;
   onPolicyChange: (policy: GlyphV2Policy) => void;
-  onRightsChange: (rights: { license?: string; terms?: string; attribution?: string }) => void;
+  onRightsChange: (rights: {
+    license?: string;
+    terms?: string;
+    attribution?: string;
+  }) => void;
   onCreatorSignChange: (enabled: boolean) => void;
 };
 
@@ -59,9 +62,7 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">
-              Royalty Settings
-            </Text>
+            <Text fontWeight="bold">Royalty Settings</Text>
             <Text fontSize="sm" color="gray.400">
               Configure on-chain or advisory royalties
             </Text>
@@ -79,9 +80,7 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">
-              Policy Settings
-            </Text>
+            <Text fontWeight="bold">Policy Settings</Text>
             <Text fontSize="sm" color="gray.400">
               Renderable, transferable, NSFW flags
             </Text>
@@ -99,9 +98,7 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">
-              Rights & Licensing
-            </Text>
+            <Text fontWeight="bold">Rights & Licensing</Text>
             <Text fontSize="sm" color="gray.400">
               License, terms, and attribution
             </Text>
@@ -114,9 +111,7 @@ export default function MintV2Fields({
         <AccordionPanel pb={4}>
           <VStack spacing={4} align="stretch">
             <FormControl>
-              <FormLabel>
-                License
-              </FormLabel>
+              <FormLabel>License</FormLabel>
               <Input
                 value={license}
                 onChange={(e) => setLicense(e.target.value)}
@@ -125,9 +120,7 @@ export default function MintV2Fields({
             </FormControl>
 
             <FormControl>
-              <FormLabel>
-                Terms
-              </FormLabel>
+              <FormLabel>Terms</FormLabel>
               <Textarea
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
@@ -137,9 +130,7 @@ export default function MintV2Fields({
             </FormControl>
 
             <FormControl>
-              <FormLabel>
-                Attribution
-              </FormLabel>
+              <FormLabel>Attribution</FormLabel>
               <Input
                 value={attribution}
                 onChange={(e) => setAttribution(e.target.value)}
@@ -153,9 +144,7 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">
-              Creator Signature
-            </Text>
+            <Text fontWeight="bold">Creator Signature</Text>
             <Text fontSize="sm" color="gray.400">
               Cryptographically sign this token
             </Text>
@@ -176,8 +165,8 @@ export default function MintV2Fields({
             />
           </FormControl>
           <Text fontSize="sm" color="gray.400" mt={2}>
-            Adds a cryptographic signature proving you created this token.
-            This provides verifiable provenance.
+            Adds a cryptographic signature proving you created this token. This
+            provides verifiable provenance.
           </Text>
         </AccordionPanel>
       </AccordionItem>

@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { t } from "@lingui/macro";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -24,6 +23,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { PromiseExtended } from "dexie";
 import { wallet as walletSignal } from "@app/signals";
+import { initWallet } from "@app/wallet";
 import config from "@app/config.json";
 
 const networkKeys = Object.entries(config.networks)
@@ -89,15 +89,13 @@ export default function CreateWallet() {
         }
         setPhrase(created.mnemonic);
         setStep(1);
-        const { address, wif, net } = created;
-        walletSignal.value = {
-          ...walletSignal.value,
-          locked: false,
-          exists: true,
-          net,
-          wif,
-          address,
-        };
+        const { address, wif, net, coinType } = created;
+        // Route through initWallet so the WIF lands in `wallet.value` as
+        // zeroable bytes (R4) rather than a raw JS string. coinType
+        // tracked for R26 — encryption-key derivation matches spending
+        // path on legacy (coinType 0) wallets.
+        initWallet({ net, wif, address, coinType });
+        void walletSignal;
       } catch (error) {
         if (error instanceof Error) {
           console.log(error.message);
@@ -184,7 +182,9 @@ export default function CreateWallet() {
                   {"Wallet created"}
                 </Heading>
                 <Box mb={4}>
-                  {"Your wallet has been created. Please record your recovery phrase below."}
+                  {
+                    "Your wallet has been created. Please record your recovery phrase below."
+                  }
                 </Box>
                 <RecoveryPhrase phrase={phrase} />
                 <Button

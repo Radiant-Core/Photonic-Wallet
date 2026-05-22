@@ -1,6 +1,8 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-// @ts-ignore
-import bsvCoinSelect from "bsv-coinselect";
+import {
+  radiantCoinSelect,
+  type CoinSelectInput,
+  type CoinSelectResult,
+} from "./radiantCoinSelect";
 import { UnfinalizedInput, UnfinalizedOutput, Utxo } from "./types";
 import { normalizeFeeRate } from "./feePolicy";
 
@@ -37,40 +39,63 @@ export function coinSelect(
   remaining: SelectableInput[];
 } {
   const safeFeeRate = normalizeFeeRate(feeRate);
-  const inputs = utxos.map((u) => ({
+
+  // Shape rows for the selector: it estimates size from `script` (hex).
+  // We feed scriptSig as `script` for input-byte sizing, and stash the original
+  // scriptPubKey under a separate key so we can restore it after selection.
+  type Row = CoinSelectInput & {
+    address: string;
+    txid: string;
+    vout: number;
+    scriptPubKey: string;
+    utxo: SelectableInput;
+  };
+  const inputs: Row[] = utxos.map((u) => ({
     address,
     txid: u.txid,
     vout: u.vout,
     value: u.value,
-    // height:  // FIXME
     required: u.required || false,
-    // Coinselect uses script as scriptSig, but for Utxo it's scriptPubKey
+    // The selector uses `script` for size estimation only — it does not
+    // interpret semantics, so feeding scriptSig (the unlocking script that
+    // affects input size) is correct.
     script: u.scriptSig,
-    // scriptPubKey is not used by coinselect, but will be swapped back to the script property later
     scriptPubKey: u.script,
-    // Store the original UTXO so properties such as id can be preseved
     utxo: u,
   }));
 
-  const selected = bsvCoinSelect(inputs, target, safeFeeRate, changeScript);
+  const selected: CoinSelectResult<Row, { script: string; value: number }> =
+    radiantCoinSelect(inputs, target, safeFeeRate, changeScript);
+
+  // Failure path: caller contract is { inputs: undefined, fee } — surface that
+  // shape so call sites can branch on `!selected.inputs?.length`.
   if (!selected.inputs?.length) {
-    return selected;
+    return {
+      inputs: [] as SelectableInput[],
+      outputs: (selected.outputs ?? []) as UnfinalizedInput[],
+      fee: selected.fee,
+      remaining: utxos,
+    };
   }
-  selected.inputs = (selected.inputs as { scriptPubKey: string }[]).map(
-    ({ scriptPubKey, ...rest }) => ({
-      ...rest,
-      script: scriptPubKey,
-    })
-  );
-  // Remove spent UTXOs
-  const remaining = utxos.filter(
-    ({ utxo }) =>
-      !(selected.inputs as SelectableInput[]).some(
-        (input) => input.utxo === utxo
-      )
-  );
-  selected.remaining = remaining;
-  return selected;
+
+  // Re-shape: swap scriptPubKey back into `script`, the field downstream
+  // transaction builders read.
+  const finalInputs: SelectableInput[] = selected.inputs.map((row) => {
+    const { scriptPubKey, script: _scriptSig, ...rest } = row;
+    void _scriptSig;
+    return { ...rest, script: scriptPubKey } as unknown as SelectableInput;
+  });
+
+  // Remove spent UTXOs by identity (the row carries the original through `utxo`).
+  const spent = new Set(selected.inputs.map((r) => r.utxo));
+  const remaining = utxos.filter((u) => !spent.has(u));
+
+  return {
+    inputs: finalInputs,
+    outputs: (selected.outputs ?? []) as UnfinalizedInput[],
+    fee: selected.fee,
+    remaining,
+  };
 }
 
 /**
@@ -92,22 +117,27 @@ export function fundTx(
 ) {
   const safeFeeRate = normalizeFeeRate(feeRate);
   const required = requiredInputs.map((i) => ({ ...i, required: true }));
-  const inputs = ([...required, ...utxos] as SelectableInput[]).map((u) => ({
-    address,
-    txid: u.txid,
-    vout: u.vout,
-    value: u.value,
-    // height:  // FIXME
-    required: u.required || false,
-    script: u.scriptSigSize ? "00".repeat(u.scriptSigSize) : "", // Create dummy script sig. If empty, coinselect will default to p2pkh
-    utxo: u,
-  }));
 
-  const selected: {
-    inputs: SelectableInput[];
-    outputs: { script: string; value: number }[];
-    fee: number;
-  } = bsvCoinSelect(inputs, target, safeFeeRate, changeScript);
+  type Row = CoinSelectInput & {
+    address: string;
+    txid: string;
+    vout: number;
+    utxo: UnfinalizedInput;
+  };
+  const inputs: Row[] = ([...required, ...utxos] as SelectableInput[]).map(
+    (u) => ({
+      address,
+      txid: u.txid,
+      vout: u.vout,
+      value: u.value,
+      required: u.required || false,
+      // Dummy scriptSig sized to scriptSigSize (or empty → P2PKH default).
+      script: u.scriptSigSize ? "00".repeat(u.scriptSigSize) : "",
+      utxo: u,
+    })
+  );
+
+  const selected = radiantCoinSelect(inputs, target, safeFeeRate, changeScript);
 
   if (!selected.inputs) {
     return {
@@ -119,7 +149,7 @@ export function fundTx(
     };
   }
 
-  // Find funding inputs
+  // Find funding inputs (non-required entries actually used).
   const remaining = [...utxos];
   const funding = selected.inputs
     .filter((input) => !input.required)
@@ -132,14 +162,12 @@ export function fundTx(
         throw Error("Coin selection failed");
       }
 
-      // Remove from remaining UTXOs
       remaining.splice(remaining.indexOf(found), 1);
-
       return found;
     });
 
-  // Find change outputs
-  const change = selected.outputs.slice(target.length);
+  // Change outputs are anything beyond the caller-supplied targets.
+  const change = (selected.outputs ?? []).slice(target.length);
 
   return { funded: true, funding, remaining, change, fee: selected.fee };
 }
