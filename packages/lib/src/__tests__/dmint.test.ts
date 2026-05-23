@@ -422,6 +422,37 @@ describe("dMint Token Creation (Glyph v2)", () => {
       expect(indexWindow).toContain("OP_13 OP_PICK OP_13 OP_PICK");
       expect(indexWindow).toContain("OP_14 OP_ROLL");
     });
+
+    // Regression: Part A must emit OP_INPUTINDEX OP_OUTPOINTTXHASH (c0 c8), not
+    // OP_1 OP_DROP OP_OUTPOINTTXHASH (51 75 c8). OP_OUTPOINTTXHASH is UNARY in
+    // Radiant-Core — it pops the input index from the stack. The 51 75 variant
+    // leaves `target` on top and c8 consumes it as an index, causing
+    // SCRIPT_ERR_INVALID_TX_INPUT_INDEX at broadcast time.
+    it("Part A prefix before OP_OUTPOINTTXHASH is exactly OP_INPUTINDEX — not OP_1 OP_DROP (c0c8 regression)", () => {
+      for (const algo of ["sha256d", "blake3", "k12"] as const) {
+        const script = dMintScript(
+          0,
+          contractRef,
+          tokenRef,
+          100,
+          10,
+          target,
+          algo,
+          "asert",
+          { targetBlockTime: 60, halfLife: 1000 }
+        );
+        const asm = Script.fromHex(script).toASM();
+        const sepIdx = asm.indexOf("OP_STATESEPARATOR");
+        const txhashIdx = asm.indexOf("OP_OUTPOINTTXHASH", sepIdx);
+        expect(sepIdx).toBeGreaterThan(-1);
+        expect(txhashIdx).toBeGreaterThan(sepIdx);
+        // The token immediately before OP_OUTPOINTTXHASH must be OP_INPUTINDEX
+        const tokens = asm.slice(sepIdx + "OP_STATESEPARATOR".length, txhashIdx).trim().split(/\s+/);
+        expect(tokens.at(-1)).toBe("OP_INPUTINDEX");
+        // And there must be no OP_DROP between state separator and OP_OUTPOINTTXHASH
+        expect(tokens).not.toContain("OP_DROP");
+      }
+    });
   });
 
   describe("ASERT DAA bytecode", () => {
