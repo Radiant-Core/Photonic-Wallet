@@ -651,9 +651,20 @@ const V2_BYTECODE_PART_B1 = "bc01147f77587f040000000088817600a269";
 const V2_BYTECODE_PART_B2 = "51797ca269";
 // Part B.4: Stack cleanup — drop 5 V2 extras (target, lastTime, targetTime, daaMode, algoId)
 const V2_BYTECODE_PART_B4 = "7575757575";
-// Part C: Output validation (same as V1 — code script continuity, token reward, height checks)
+// Part C: Output validation (same as V1 — code script continuity, token reward, height checks).
+//
+// The earlier draft of this constant prefixed it with `a269` (an OP_GREATERTHANOREQUAL
+// OP_VERIFY "maxHeight >= reward" sanity check). That prefix consumed two items (mh, r)
+// that the V1 PartC body immediately needed for its first OP_ROLL 7 / OP_CODESCRIPTHASH…
+// pair, causing every V2 contract to stack-underflow at `577a e5` before reaching any
+// EQUALVERIFY (rejection class SCRIPT_ERR_INVALID_STACK_OPERATION; reproduced via
+// `testmempoolaccept` on the B3T2 broadcast, b3t-forensics/captured-b3t2.json).
+//
+// Removing the leading `a269` makes V2's PartC entry stack identical to V1's
+// (8 items: ih, oh, oi, h, cRef, tRef, mh, r) so the verbatim V1 PartC body works.
+// The mh>=r sanity check is also redundant with deploy-time validation.
 const V2_BYTECODE_PART_C =
-  "a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
+  "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
 
 // V1 legacy BYTECODE_PART_B kept as a reference for any future
 // backward-compatible parser. Prefixed with `_` to opt out of

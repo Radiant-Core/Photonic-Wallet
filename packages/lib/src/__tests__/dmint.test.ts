@@ -453,6 +453,35 @@ describe("dMint Token Creation (Glyph v2)", () => {
         expect(tokens).not.toContain("OP_DROP");
       }
     });
+
+    // Regression: V2 PartC must NOT begin with OP_GREATERTHANOREQUAL OP_VERIFY (`a269`).
+    // That prefix consumes mh and r — items the V1-style PartC body that follows immediately
+    // needs for its first `OP_7 OP_ROLL OP_CODESCRIPTHASHOUTPUTCOUNT_UTXOS` pair.
+    // With the prefix in place, V2 contracts stack-underflow at the ROLL (rejected at broadcast
+    // with SCRIPT_ERR_INVALID_STACK_OPERATION). The B3T (374b92…) and B3T2 (bc41a1…) contracts
+    // deployed before this fix are permanently un-mineable. See
+    // b3t-forensics/b3t2-root-cause.md.
+    it("V2 PartC starts at the V1-equivalent boundary (no `a269` after the 5 OP_DROPs)", () => {
+      for (const algo of ["sha256d", "blake3", "k12"] as const) {
+        for (const daa of ["fixed", "asert", "lwma"] as const) {
+          const script = dMintScript(
+            0,
+            contractRef,
+            tokenRef,
+            100,
+            10,
+            target,
+            algo,
+            daa,
+            daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 }
+          );
+          // PartB4 = 5×OP_DROP (`7575757575`). The byte immediately after must
+          // begin the V1-style PartC body, which starts with `577a` (OP_7 OP_ROLL).
+          expect(script).not.toMatch(/7575757575a269/);
+          expect(script).toMatch(/7575757575577a/);
+        }
+      }
+    });
   });
 
   describe("ASERT DAA bytecode", () => {
