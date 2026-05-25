@@ -463,8 +463,26 @@ describe("dMint Token Creation (Glyph v2)", () => {
     // deployed before this fix are permanently un-mineable. See
     // b3t-forensics/b3t2-root-cause.md.
     it("V2 PartC starts at the V1-equivalent boundary (no `a269` after the 5 OP_DROPs)", () => {
+      const daaParamsByMode = {
+        fixed: null,
+        asert: { targetBlockTime: 60, halfLife: 1000 },
+        lwma: { targetBlockTime: 60 },
+        epoch: { targetBlockTime: 60, epochLength: 2016, maxAdjustmentLog2: 2 },
+        schedule: {
+          schedule: [
+            { height: 0, target: 100000n },
+            { height: 1000, target: 50000n },
+          ],
+        },
+      } as const;
       for (const algo of ["sha256d", "blake3", "k12"] as const) {
-        for (const daa of ["fixed", "asert", "lwma"] as const) {
+        for (const daa of [
+          "fixed",
+          "asert",
+          "lwma",
+          "epoch",
+          "schedule",
+        ] as const) {
           const script = dMintScript(
             0,
             contractRef,
@@ -474,7 +492,7 @@ describe("dMint Token Creation (Glyph v2)", () => {
             target,
             algo,
             daa,
-            daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 }
+            daaParamsByMode[daa] as never
           );
           // PartB4 = 5×OP_DROP (`7575757575`). The byte immediately after must
           // begin the V1-style PartC body, which starts with `577a` (OP_7 OP_ROLL).
@@ -583,8 +601,26 @@ describe("dMint Token Creation (Glyph v2)", () => {
       // For each (algo, daa) combo: walk the FULL deploy-output script bytes
       // (state || bd || code), starting with empty stack and pushing each
       // state item. Then walk the code script and assert depth stays ≥ 0.
+      const daaParamsByMode = {
+        fixed: null,
+        asert: { targetBlockTime: 60, halfLife: 1000 },
+        lwma: { targetBlockTime: 60 },
+        epoch: { targetBlockTime: 60, epochLength: 2016, maxAdjustmentLog2: 2 },
+        schedule: {
+          schedule: [
+            { height: 0, target: 100000n },
+            { height: 1000, target: 50000n },
+          ],
+        },
+      } as const;
       for (const algo of ["sha256d", "blake3", "k12"] as const) {
-        for (const daa of ["fixed", "asert", "lwma"] as const) {
+        for (const daa of [
+          "fixed",
+          "asert",
+          "lwma",
+          "epoch",
+          "schedule",
+        ] as const) {
           const script = dMintScript(
             0,
             contractRef,
@@ -594,7 +630,7 @@ describe("dMint Token Creation (Glyph v2)", () => {
             target,
             algo,
             daa,
-            daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 }
+            daaParamsByMode[daa] as never
           );
 
           // Initial depth: 4 scriptSig pushes (nonce, ih, oh, oi) + 10 V2 state items.
@@ -696,9 +732,28 @@ describe("dMint Token Creation (Glyph v2)", () => {
     // SIZE-14-SUB-SPLIT-DROP and explicit push-byte builders. These tests
     // validate the structural invariants of the V3 emission.
     describe("V3 contract emission", () => {
+      const v3DaaParamsByMode = {
+        fixed: null,
+        asert: { targetBlockTime: 60, halfLife: 1000 },
+        lwma: { targetBlockTime: 60 },
+        epoch: { targetBlockTime: 60, epochLength: 2016, maxAdjustmentLog2: 2 },
+        schedule: {
+          schedule: [
+            { height: 0, target: 100000n },
+            { height: 1000, target: 50000n },
+          ],
+        },
+      } as const;
+
       it("V3 state script tail is exactly `04 [lt4] 08 [tgt8]` (14 bytes)", () => {
         for (const algo of ["sha256d", "blake3", "k12"] as const) {
-          for (const daa of ["fixed", "asert", "lwma"] as const) {
+          for (const daa of [
+            "fixed",
+            "asert",
+            "lwma",
+            "epoch",
+            "schedule",
+          ] as const) {
             const script = dMintScript(
               0,
               contractRef,
@@ -708,7 +763,7 @@ describe("dMint Token Creation (Glyph v2)", () => {
               target,
               algo,
               daa,
-              daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 },
+              v3DaaParamsByMode[daa] as never,
               0,
               "v3",
             );
