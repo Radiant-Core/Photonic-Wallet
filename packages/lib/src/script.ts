@@ -470,6 +470,30 @@ export function pushMinimalAsm(n: bigint | number) {
   return Script.fromHex(pushMinimal(n)).toASM();
 }
 
+/**
+ * Push a target as exactly `08 [8-byte LE]` — 9 bytes total, regardless of
+ * the target's magnitude. Required by V3 dMint contracts so PartC can locate
+ * the lastTime+target suffix at a fixed offset (= state-script-length − 14)
+ * and substitute new values without parsing variable-length pushes on-chain.
+ *
+ * The 8-byte representation is unsigned little-endian. `target ≤ MAX_TARGET`
+ * (0x7fff_ffff_ffff_ffff) so the sign bit is always clear; OP_BIN2NUM on this
+ * value reads it back as the original positive integer.
+ */
+export function pushTarget9Bytes(target: bigint | number): string {
+  const value = BigInt(target);
+  if (value < 0n || value > 0x7fffffffffffffffn) {
+    throw new Error(`V3 target out of range (0 ≤ target ≤ MAX_TARGET): ${value}`);
+  }
+  const bytes = new Uint8Array(8);
+  let v = value;
+  for (let i = 0; i < 8; i++) {
+    bytes[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return "08" + bytesToHex(bytes);
+}
+
 const MAX_TARGET = 0x7fffffffffffffffn; // Doesn't include starting 00000000
 export function dMintDiffToTarget(difficulty: number) {
   return MAX_TARGET / BigInt(difficulty);
@@ -651,6 +675,17 @@ const V2_BYTECODE_PART_B1 = "bc01147f77587f040000000088817600a269";
 const V2_BYTECODE_PART_B2 = "51797ca269";
 // Part B.4: Stack cleanup — drop 5 V2 extras (target, lastTime, targetTime, daaMode, algoId)
 const V2_BYTECODE_PART_B4 = "7575757575";
+
+// V3 BYTECODE constants (see b3t-forensics/v3-daa-propagation-design.md)
+// V3 differs from V2 only in PartB4 + PartC: it preserves the DAA-computed
+// newTarget on the altstack and PartC's expected-next-state builder splices
+// in OP_TXLOCKTIME for new lastTime and the alt-stack newTarget for new target.
+// Result: ASERT/LWMA difficulty actually adjusts on-chain in V3 contracts.
+//
+// PartB1, PartB2, and the DAA bytecode constants are unchanged across V2↔V3.
+//
+// V3 PartB4: TOALTSTACK newTarget, then drop 4 (lastTime, targetTime, daaMode, algoId).
+const V3_BYTECODE_PART_B4 = "6b75757575";
 // Part C: Output validation (same as V1 — code script continuity, token reward, height checks).
 //
 // The earlier draft of this constant prefixed it with `a269` (an OP_GREATERTHANOREQUAL
@@ -665,6 +700,29 @@ const V2_BYTECODE_PART_B4 = "7575757575";
 // The mh>=r sanity check is also redundant with deploy-time validation.
 const V2_BYTECODE_PART_C =
   "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
+
+// V3 PartC: same as V2 PartC up through the height-check/IF, but:
+//   - IF branch (final-mint) is prepended with `6c 75` (FROMALTSTACK DROP)
+//     to consume the alt-stack newTarget left by V3 PartB4.
+//   - ELSE branch (continue-mining) inserts three new segments after the
+//     existing `55 7f 77` (strip first 5 of old state):
+//       1. `82 5e 94 7f 75`  SIZE push14 SUB SPLIT DROP — strip last 14
+//          bytes (= old lastTime push + old target push, both fixed-length).
+//       2. `c5 54 80 01 04 7c 7e 7e`  TXLOCKTIME push4 NUM2BIN push 0x04
+//          SWAP CAT CAT — append `04 [newLastTime LE4]` to expected_state.
+//       3. `6c 58 80 01 08 7c 7e 7e`  FROMALTSTACK push8 NUM2BIN push 0x08
+//          SWAP CAT CAT — append `08 [newTarget LE8]` to expected_state.
+//     Total ELSE branch grows by 21 bytes; whole PartC grows by 23 bytes
+//     vs V2 (101 → 124 bytes plus the leading `bd` separator).
+//
+// V3 contracts thus enforce a next state where `height`, `lastTime`, and
+// `target` ALL update; middle slots (cRef, tRef, maxHeight, reward, algoId,
+// daaMode, targetTime) stay byte-identical via the SIZE/SPLIT/DROP middle
+// extraction. The DAA bytecode's `newTarget` (preserved on alt via the
+// `6b` in V3_BYTECODE_PART_B4) propagates into the on-chain enforced
+// state, making ASERT/LWMA actually adjust difficulty per spec.
+const V3_BYTECODE_PART_C =
+  "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d636c755279cd01d853797e016a7e886778de519d547854807ec0eb557f77825e947f757ec5548001047c7e7e6c588001087c7e7e5379ec78885379eac0e9885379cc519d75686d7551";
 
 // V1 legacy BYTECODE_PART_B kept as a reference for any future
 // backward-compatible parser. Prefixed with `_` to opt out of
@@ -994,9 +1052,24 @@ export type DaaParams = {
   [key: string]: unknown;
 };
 
-function buildV2BytecodePartB(
+/**
+ * dMint contract bytecode version. V2 (post-7f19cbb) is mineable but its
+ * DAA bytecode result is dropped — difficulty never adjusts on-chain. V3
+ * preserves the DAA newTarget on the altstack and Part C splices it into
+ * the enforced next state, so ASERT/LWMA actually adjust difficulty.
+ *
+ * V2 contracts are retained for parser compatibility with already-deployed
+ * tokens (B3T3, K12T, and any V2 SHA256d/BLAKE3/K12 deploy from before
+ * 2026-05-25). New deploys should use V3.
+ *
+ * See b3t-forensics/v3-daa-propagation-design.md for the full rationale.
+ */
+export type DmintContractVersion = "v2" | "v3";
+
+function buildBytecodePartB(
   daaMode: string,
-  daaParams: DaaParams | null
+  daaParams: DaaParams | null,
+  version: DmintContractVersion,
 ): string {
   let daaBytecode = "";
   switch (daaMode) {
@@ -1025,7 +1098,17 @@ function buildV2BytecodePartB(
       daaBytecode = "";
       break;
   }
-  return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${V2_BYTECODE_PART_B4}`;
+  const partB4 = version === "v3" ? V3_BYTECODE_PART_B4 : V2_BYTECODE_PART_B4;
+  return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${partB4}`;
+}
+
+// Backward-compat alias for the V2-only callers; new callers should use the
+// version-aware `buildBytecodePartB` directly.
+function buildV2BytecodePartB(
+  daaMode: string,
+  daaParams: DaaParams | null
+): string {
+  return buildBytecodePartB(daaMode, daaParams, "v2");
 }
 
 export {
@@ -1045,7 +1128,21 @@ export function dMintScript(
   algorithm: string = "sha256d",
   daaMode: string = "fixed",
   daaParams: DaaParams | null = null,
-  lastTime: number = 0
+  lastTime: number = 0,
+  /**
+   * Contract bytecode version. Defaults to "v2" for backward compatibility
+   * with already-deployed contracts; new deploys should pass "v3" to get
+   * actual on-chain DAA propagation. See
+   * b3t-forensics/v3-daa-propagation-design.md.
+   *
+   * Differences:
+   * - V2: target pushed via pushMinimal (variable length). PartB4 drops
+   *   newTarget. PartC enforces height-only state change. DAA is cosmetic.
+   * - V3: target pushed via pushTarget9Bytes (fixed 9 bytes). PartB4 moves
+   *   newTarget to altstack. PartC splices new lastTime + new target into
+   *   the expected next state. DAA actually adjusts difficulty.
+   */
+  version: DmintContractVersion = "v2",
 ) {
   const algorithmIds: Record<string, number> = {
     sha256d: 0,
@@ -1078,6 +1175,12 @@ export function dMintScript(
   // algoId | daaMode | targetTime | lastTime | target
   const V2_STATE_ITEM_COUNT = 10;
 
+  // V3 enforces a fixed 9-byte target push so PartC's SIZE-14-SUB-SPLIT-DROP
+  // can locate the lastTime+target suffix at a fixed offset on-chain.
+  // V2 keeps the legacy minimal-encoding push (variable length).
+  const targetPush =
+    version === "v3" ? pushTarget9Bytes(target) : pushMinimal(target);
+
   const stateScript = [
     push4bytes(height),
     `d8${contractRef}`,
@@ -1088,13 +1191,14 @@ export function dMintScript(
     pushMinimal(daaId),
     pushMinimal(targetTime),
     push4bytes(lastTime),
-    pushMinimal(target),
+    targetPush,
   ].join("");
 
   const bytecodePartA = buildDmintPreimageBytecodePartA(V2_STATE_ITEM_COUNT);
   assertDmintPreimageLayout(bytecodePartA, V2_STATE_ITEM_COUNT);
-  const bytecodePartB = buildV2BytecodePartB(daaMode, daaParams);
-  const contractBytecode = `${bytecodePartA}${powHashOp}${bytecodePartB}${V2_BYTECODE_PART_C}`;
+  const bytecodePartB = buildBytecodePartB(daaMode, daaParams, version);
+  const partC = version === "v3" ? V3_BYTECODE_PART_C : V2_BYTECODE_PART_C;
+  const contractBytecode = `${bytecodePartA}${powHashOp}${bytecodePartB}${partC}`;
 
   return `${stateScript}bd${contractBytecode}`;
 }

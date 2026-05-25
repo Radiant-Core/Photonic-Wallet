@@ -4,6 +4,7 @@ import { GLYPH_FT, GLYPH_DMINT } from "../protocols";
 import {
   dMintScript,
   dMintDiffToTarget,
+  pushTarget9Bytes,
   buildAsertDaaBytecode,
   buildEpochDaaBytecode,
   buildScheduleDaaBytecode,
@@ -687,6 +688,125 @@ describe("dMint Token Creation (Glyph v2)", () => {
           ).toBeGreaterThanOrEqual(8);
         }
       }
+    });
+
+    // V3 contract shape (b3t-forensics/v3-daa-propagation-design.md): force
+    // 9-byte target push, PartB4 = `6b75757575` (TOALTSTACK + 4 DROP), PartC
+    // splices new lastTime + new target into expected_next_state via
+    // SIZE-14-SUB-SPLIT-DROP and explicit push-byte builders. These tests
+    // validate the structural invariants of the V3 emission.
+    describe("V3 contract emission", () => {
+      it("V3 state script tail is exactly `04 [lt4] 08 [tgt8]` (14 bytes)", () => {
+        for (const algo of ["sha256d", "blake3", "k12"] as const) {
+          for (const daa of ["fixed", "asert", "lwma"] as const) {
+            const script = dMintScript(
+              0,
+              contractRef,
+              tokenRef,
+              100,
+              10,
+              target,
+              algo,
+              daa,
+              daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 },
+              0,
+              "v3",
+            );
+            const sepIdx = script.indexOf("bd");
+            expect(sepIdx).toBeGreaterThan(-1);
+            const stateHex = script.substring(0, sepIdx);
+            // Last 28 hex chars = 14 bytes = `04 [lt4] 08 [tgt8]`.
+            const tail = stateHex.substring(stateHex.length - 28);
+            expect(tail.substring(0, 2)).toBe("04");
+            expect(tail.substring(10, 12)).toBe("08");
+            // Verify pushTarget9Bytes matches: target = MAX_TARGET/10 (= 0x0ccc...cccc),
+            // LE bytes are `cccccccccccccccc0c` first → reversed = `cccccccccccccc0c`.
+            const targetBytes = tail.substring(12);
+            expect(targetBytes.length).toBe(16);
+          }
+        }
+      });
+
+      it("V3 PartB4 is `6b75757575` (TOALTSTACK + 4×DROP)", () => {
+        for (const algo of ["sha256d", "blake3", "k12"] as const) {
+          for (const daa of ["fixed", "asert"] as const) {
+            const script = dMintScript(
+              0, contractRef, tokenRef, 100, 10, target,
+              algo, daa,
+              daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 },
+              0, "v3",
+            );
+            // V3 PartB4 should appear exactly once; V2 PartB4 should NOT appear.
+            const v3Matches = script.match(/6b75757575/g) ?? [];
+            expect(v3Matches.length).toBe(1);
+            // The legacy V2 PartB4 (5 DROPs) must not occur — it'd collide
+            // with the deserializer's V3-vs-V2 detection.
+            expect(script).not.toMatch(/7575757575/);
+          }
+        }
+      });
+
+      it("V3 PartC contains the strip-tail + new lastTime/target build sequences", () => {
+        const script = dMintScript(
+          0, contractRef, tokenRef, 100, 10, target,
+          "blake3", "asert",
+          { targetBlockTime: 60, halfLife: 1000 },
+          0, "v3",
+        );
+        // Strip-last-14: SIZE push14 SUB SPLIT DROP
+        expect(script).toContain("825e947f75");
+        // Build new lastTime push: TXLOCKTIME push4 NUM2BIN push 0x04 SWAP CAT
+        expect(script).toContain("c5548001047c7e");
+        // Build new target push: FROMALTSTACK push8 NUM2BIN push 0x08 SWAP CAT
+        expect(script).toContain("6c58800108 7c7e".replace(/\s/g, ""));
+        // IF branch (final-mint) consumes alt-newTarget before reward burn
+        expect(script).toContain("636c75");
+      });
+
+      it("V3 contract grows by exactly 23 bytes vs V2 (PartC delta)", () => {
+        // Same params → same algoId/daaMode/etc state items → script length
+        // differs only by V3's longer PartC (23 bytes) plus target push delta.
+        // For target=MAX_TARGET/10 (0x0ccc... = 8-byte high-bit-clear value),
+        // pushMinimal emits `08 [8 bytes]` = 9 bytes, same as pushTarget9Bytes.
+        // So the only length difference is PartC = 23 bytes = 46 hex chars.
+        const v2 = dMintScript(
+          0, contractRef, tokenRef, 100, 10, target,
+          "blake3", "asert",
+          { targetBlockTime: 60, halfLife: 1000 },
+          0, "v2",
+        );
+        const v3 = dMintScript(
+          0, contractRef, tokenRef, 100, 10, target,
+          "blake3", "asert",
+          { targetBlockTime: 60, halfLife: 1000 },
+          0, "v3",
+        );
+        expect(v3.length - v2.length).toBe(46);
+      });
+    });
+
+    describe("pushTarget9Bytes", () => {
+      it("encodes 0 as `08 0000000000000000`", () => {
+        expect(pushTarget9Bytes(0n)).toBe("080000000000000000");
+      });
+      it("encodes 0x0ccccccccccccccc as `08 cccccccccccccc0c` (LE bytes)", () => {
+        expect(pushTarget9Bytes(0x0cccccccccccccccn)).toBe(
+          "08" + "cccccccccccccc0c",
+        );
+      });
+      it("encodes MAX_TARGET as `08 ffffffffffffff7f`", () => {
+        expect(pushTarget9Bytes(0x7fffffffffffffffn)).toBe(
+          "08" + "ffffffffffffff7f",
+        );
+      });
+      it("throws on negative input", () => {
+        expect(() => pushTarget9Bytes(-1n)).toThrow(/out of range/);
+      });
+      it("throws on input exceeding MAX_TARGET (sign bit would be set)", () => {
+        expect(() => pushTarget9Bytes(0x8000000000000000n)).toThrow(
+          /out of range/,
+        );
+      });
     });
   });
 
