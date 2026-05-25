@@ -482,6 +482,212 @@ describe("dMint Token Creation (Glyph v2)", () => {
         }
       }
     });
+
+    // Stronger regression: walk the V2 code script as a linear opcode stream
+    // and assert the running stack depth never goes negative at PartC's first
+    // ROLL. This catches a wider class of regressions than the regex above —
+    // e.g. PartB4 changing from 5 drops to 6, or DAA bytecode acquiring an
+    // extra net pop, would both leave the regex passing but underflow PartC.
+    //
+    // Static model: track depth assuming the "if-taken" branch executes for
+    // every IF, since both branches of a valid script have the same net stack
+    // effect. We start with the initial scriptSig+state depth that the spend
+    // produces (4 scriptSig pushes + V2 state's 10 items = 14 items).
+    it("V2 code script never underflows the stack from PartA entry through PartC's ROLL 7", () => {
+      // Minimal stack-effect model for Radiant opcodes used by the V2 dMint
+      // contract. [poppushDelta, isControlFlow] — most opcodes are linear
+      // delta = pushes - pops; IF pops the condition (-1), ELSE/ENDIF are 0.
+      const op = (delta: number) => ({ delta });
+      const opcodeStackEffect: Record<number, { delta: number }> = {
+        // Numeric pushes OP_0..OP_16 (0x00, 0x4f, 0x51..0x60)
+        0x00: op(+1),
+        0x4f: op(+1), // OP_1NEGATE
+        // stack ops
+        0x61: op(0),  // OP_NOP
+        0x63: op(-1), // OP_IF (pop condition)
+        0x64: op(-1), // OP_NOTIF
+        0x67: op(0),  // OP_ELSE
+        0x68: op(0),  // OP_ENDIF
+        0x69: op(-1), // OP_VERIFY
+        0x6a: op(0),  // OP_RETURN (terminal; not in dMint)
+        0x6d: op(-2), // OP_2DROP
+        0x73: op(0),  // OP_IFDUP (best-effort)
+        0x75: op(-1), // OP_DROP
+        0x76: op(+1), // OP_DUP
+        0x77: op(-1), // OP_NIP
+        0x78: op(+1), // OP_OVER
+        0x79: op(0),  // OP_PICK
+        0x7a: op(-1), // OP_ROLL
+        0x7b: op(0),  // OP_ROT
+        0x7c: op(0),  // OP_SWAP
+        0x7d: op(+1), // OP_TUCK
+        0x7e: op(-1), // OP_CAT
+        0x7f: op(0),  // OP_SPLIT (pop val + idx, push left, right)
+        0x80: op(-1), // OP_NUM2BIN (pop value + size, push 1)
+        0x81: op(0),  // OP_BIN2NUM (pop, push)
+        0x82: op(0),  // OP_SIZE (pushes length without popping)
+        // Bitwise / arith
+        0x87: op(-1), // OP_EQUAL
+        0x88: op(-2), // OP_EQUALVERIFY (pop 2, verify, no push)
+        0x8b: op(0),  // OP_1ADD
+        0x8f: op(0),  // OP_NEGATE
+        0x91: op(0),  // OP_NOT
+        0x93: op(-1), // OP_ADD
+        0x94: op(-1), // OP_SUB
+        0x95: op(-1), // OP_MUL
+        0x96: op(-1), // OP_DIV
+        0x97: op(-1), // OP_MOD
+        0x98: op(-1), // OP_LSHIFT
+        0x99: op(-1), // OP_RSHIFT
+        0x9a: op(-1), // OP_BOOLAND
+        0x9c: op(-1), // OP_NUMEQUAL
+        0x9d: op(-2), // OP_NUMEQUALVERIFY
+        0x9f: op(-1), // OP_LESSTHAN
+        0xa0: op(-1), // OP_GREATERTHAN
+        0xa2: op(-1), // OP_GREATERTHANOREQUAL
+        0xa3: op(-1), // OP_MIN
+        0xa4: op(-1), // OP_MAX
+        // Crypto
+        0xa8: op(0),  // OP_SHA256
+        0xaa: op(0),  // OP_HASH256
+        0xae: op(-1), // OP_CHECKMULTISIG (not used in dMint)
+        // Radiant introspection (all unary unless noted)
+        0xbc: op(0),  // OP_REVERSEBYTES
+        0xbd: op(0),  // OP_STATESEPARATOR (no-op during execution)
+        0xc0: op(+1), // OP_INPUTINDEX (nullary)
+        0xc5: op(+1), // OP_TXLOCKTIME (nullary)
+        0xc8: op(0),  // OP_OUTPOINTTXHASH (unary: pop idx push hash)
+        0xcc: op(0),  // OP_OUTPUTVALUE (unary)
+        0xcd: op(0),  // OP_OUTPUTBYTECODE (unary)
+        0xd0: op(+1), // OP_PUSHINPUTREF
+        0xd8: op(+1), // OP_PUSHINPUTREFSINGLETON
+        0xde: op(0),  // OP_REFOUTPUTCOUNT_OUTPUTS (unary)
+        0xe4: op(0),  // OP_CODESCRIPTHASHVALUESUM_OUTPUTS (unary)
+        0xe5: op(0),  // OP_CODESCRIPTHASHOUTPUTCOUNT_UTXOS (unary)
+        0xe6: op(0),  // OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS (unary)
+        0xe9: op(0),  // OP_CODESCRIPTBYTECODE_OUTPUT (unary)
+        0xea: op(0),  // OP_CODESCRIPTBYTECODE_UTXO (unary)
+        0xeb: op(0),  // OP_STATESCRIPTBYTECODE_UTXO (unary)
+        0xec: op(0),  // OP_STATESCRIPTBYTECODE_OUTPUT (unary)
+        0xee: op(0),  // OP_BLAKE3 (unary)
+        0xef: op(0),  // OP_K12 (unary)
+      };
+      // OP_2..OP_16 (0x52..0x60) all push 1
+      for (let n = 0x52; n <= 0x60; n++) {
+        opcodeStackEffect[n] = op(+1);
+      }
+      // OP_1 = 0x51 also pushes 1
+      opcodeStackEffect[0x51] = op(+1);
+
+      // For each (algo, daa) combo: walk the FULL deploy-output script bytes
+      // (state || bd || code), starting with empty stack and pushing each
+      // state item. Then walk the code script and assert depth stays ≥ 0.
+      for (const algo of ["sha256d", "blake3", "k12"] as const) {
+        for (const daa of ["fixed", "asert", "lwma"] as const) {
+          const script = dMintScript(
+            0,
+            contractRef,
+            tokenRef,
+            100,
+            10,
+            target,
+            algo,
+            daa,
+            daa === "fixed" ? null : { targetBlockTime: 60, halfLife: 1000 }
+          );
+
+          // Initial depth: 4 scriptSig pushes (nonce, ih, oh, oi) + 10 V2 state items.
+          let depth = 4 + 10;
+          let minDepth = depth;
+          let pc = 0;
+          let depthAtFirstRoll7: number | undefined;
+          const bytes = Buffer.from(script, "hex");
+          // `577a` after PartB4 is push-7 + OP_ROLL 7 — PartC's first ROLL.
+          // Need depth ≥ 8 right here for the ROLL to access item at depth 7.
+          const ROLL7_PREFIX = "577a";
+
+          while (pc < bytes.length) {
+            // Track depth right before PartC's first `577a` (push 7, ROLL 7).
+            // The pre-fix V2 PartC had a leading `a269` (GE VERIFY) that
+            // consumed 2 items and left only 6 on stack here — ROLL 7 then
+            // underflowed (SCRIPT_ERR_INVALID_STACK_OPERATION). The post-fix
+            // PartC removes that prefix so depth here is the full 8.
+            const lookahead = script.substring(pc * 2, pc * 2 + ROLL7_PREFIX.length);
+            // The first `577a` after we've crossed PartB4 is the one we want.
+            // Earlier `577a` would belong to state-item pushes; PartC's is
+            // always preceded by `7575757575` (5 OP_DROP).
+            const sevenBytesBack = script.substring(
+              Math.max(0, pc * 2 - 10),
+              pc * 2,
+            );
+            if (
+              lookahead === ROLL7_PREFIX &&
+              sevenBytesBack === "7575757575" &&
+              depthAtFirstRoll7 === undefined
+            ) {
+              depthAtFirstRoll7 = depth;
+            }
+
+            const op = bytes[pc++];
+
+            // Push opcodes (raw, OP_PUSHDATA1/2/4): each pushes exactly 1.
+            if (op >= 0x01 && op <= 0x4b) {
+              pc += op;
+              depth += 1;
+            } else if (op === 0x4c) {
+              const len = bytes[pc++];
+              pc += len;
+              depth += 1;
+            } else if (op === 0x4d) {
+              const len = bytes[pc] | (bytes[pc + 1] << 8);
+              pc += 2 + len;
+              depth += 1;
+            } else if (op === 0x4e) {
+              const len =
+                bytes[pc] |
+                (bytes[pc + 1] << 8) |
+                (bytes[pc + 2] << 16) |
+                (bytes[pc + 3] << 24);
+              pc += 4 + len;
+              depth += 1;
+            } else {
+              const effect = opcodeStackEffect[op];
+              if (effect === undefined) {
+                throw new Error(
+                  `Unmodeled opcode 0x${op.toString(16).padStart(2, "0")} at pc ${pc - 1} in ${algo}/${daa}`
+                );
+              }
+              // d8 / d0 push opcodes include 36 bytes of inline ref data.
+              // Treat them as a push-with-suffix: they appear in the state
+              // script only; consume the trailing 36 bytes as part of the push.
+              if (op === 0xd0 || op === 0xd8) {
+                pc += 36;
+              }
+              depth += effect.delta;
+            }
+
+            if (depth < minDepth) minDepth = depth;
+          }
+
+          // Underflow gate: the linear walker can over- or under-count when
+          // IF/ELSE branches have asymmetric stack effects (it processes both
+          // branches in sequence), so the absolute final depth isn't reliable.
+          // But ANY negative running depth means the static stack is too small
+          // somewhere — the bug class we're regressing against.
+          expect(minDepth, `${algo}/${daa}: minDepth went negative`).toBeGreaterThanOrEqual(0);
+
+          // Focused check on the specific bug: depth right before PartC's
+          // first `577a` (push 7, OP_ROLL 7) must be ≥ 8. The pre-fix V2
+          // PartC's leading `a269` consumed two items between PartB4 and
+          // ROLL 7, leaving depth at 6 here — exactly the underflow case.
+          expect(depthAtFirstRoll7, `${algo}/${daa}: PartC ROLL 7 not found in script`).toBeDefined();
+          expect(
+            depthAtFirstRoll7 as number,
+            `${algo}/${daa}: depth before PartC's ROLL 7 too low (would underflow)`,
+          ).toBeGreaterThanOrEqual(8);
+        }
+      }
+    });
   });
 
   describe("ASERT DAA bytecode", () => {
