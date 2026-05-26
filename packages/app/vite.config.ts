@@ -83,7 +83,10 @@ export default defineConfig({
     // basicSsl serves a self-signed cert so Safari (which force-upgrades
     // http://localhost) can load the preview server. Cert prompts once
     // per session; click "Show Details → Visit Website" to accept.
-    basicSsl(),
+    // Set HTTP_DEV=1 to skip basicSsl when driving the dev server via
+    // automation that can't bypass the cert page (e.g. Chrome DevTools
+    // Protocol attachment is blocked on cert-error frames).
+    ...(process.env.HTTP_DEV === "1" ? [] : [basicSsl()]),
   ],
   define: {
     APP_VERSION: JSON.stringify(process.env.npm_package_version),
