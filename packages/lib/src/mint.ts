@@ -419,6 +419,9 @@ export function createRevealOutputs(
           .reverse()
           .ref();
 
+        // The 2026-05-26 redesign unified V2 + V3 into a single working V2
+        // shape with on-chain DAA propagation + MINIMALDATA-compliant pushes.
+        // No version selection needed.
         outputs.push({
           script: dMintScript(
             0,

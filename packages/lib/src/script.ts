@@ -668,61 +668,154 @@ function assertDmintPreimageLayout(partAHex: string, stateItemCount: number) {
   }
 }
 
-// V2 BYTECODE constants (Design Spec §4.3)
-// Part B.1: PoW hash extraction (reverse, split, zeros check, bin2num, dup, >=0 verify)
+// V2 BYTECODE constants (Design Spec §4.3, post-2026-05-26 redesign)
+//
+// The original "V2" shape (cf. b3t-forensics/V2_CONTRACT_AUDIT_REMEDIATION.md
+// §§7-8) had two showstoppers for mainnet adaptive-DAA mining:
+//   1. PartB4's `7575757575` (5×OP_DROP) discarded the DAA-computed newTarget,
+//      so difficulty never adjusted on-chain.
+//   2. PartC reconstructed the next state via fixed-width NUM2BIN pushes
+//      (`04 [LE4]` height, `08 [LE8]` target). Those pushes are non-minimal
+//      for typical values (e.g. `04 00000000` at height 0), and radiantd's
+//      MINIMALDATA mempool policy rejects them on mainnet.
+//
+// This redesign collapses the old V2 + "V3 fix" branches into a single new
+// V2 shape. All pre-existing on-chain "v2" deploys (B3T2, K12T, DEEZ, apple,
+// VRT, etc.) are test tokens and considered disposable — they will no longer
+// parse under the new shape. The new V2 IS the public launch contract.
+//
+// Differences vs the old V2:
+//   - PartB4: `6b75757575` (TOALTSTACK newTarget + 4×OP_DROP) instead of
+//     5×OP_DROP. Preserves newTarget on altstack for PartC.
+//   - PartC: variable-length (deploy-parameterized). Reconstructs expected
+//     next state from scratch using a runtime MINIMAL_PUSH primitive for
+//     height and target, plus a deploy-time literal blob for items 2-8
+//     (cRef, tRef, maxHeight, reward, algoId, daaMode, targetTime).
+//   - State script: height and target now use pushMinimal (variable width)
+//     instead of fixed `04 [LE4]` / `08 [LE8]`. lastTime stays push4bytes
+//     (Unix timestamps are always 4-byte minimal for any realistic date).
+//   - No height bias needed.
+
+// PartB.1: PoW hash extraction (reverse, split, zeros check, bin2num, dup, >=0 verify).
 const V2_BYTECODE_PART_B1 = "bc01147f77587f040000000088817600a269";
-// Part B.2: Target comparison with preservation (OP_1 PICK target, SWAP, >=, VERIFY)
+// PartB.2: Target comparison with preservation (OP_1 PICK target, SWAP, >=, VERIFY).
 const V2_BYTECODE_PART_B2 = "51797ca269";
-// Part B.4: Stack cleanup — drop 5 V2 extras (target, lastTime, targetTime, daaMode, algoId)
-const V2_BYTECODE_PART_B4 = "7575757575";
+// PartB.4: TOALTSTACK newTarget + 4×OP_DROP (lastTime, targetTime, daaMode, algoId).
+// Net main-stack delta: −5 (1 TOALTSTACK + 4 DROP). Net alt-stack delta: +1.
+const V2_BYTECODE_PART_B4 = "6b75757575";
 
-// V3 BYTECODE constants (see b3t-forensics/v3-daa-propagation-design.md)
-// V3 differs from V2 only in PartB4 + PartC: it preserves the DAA-computed
-// newTarget on the altstack and PartC's expected-next-state builder splices
-// in OP_TXLOCKTIME for new lastTime and the alt-stack newTarget for new target.
-// Result: ASERT/LWMA difficulty actually adjusts on-chain in V3 contracts.
+// MINIMAL_PUSH primitive.
 //
-// PartB1, PartB2, and the DAA bytecode constants are unchanged across V2↔V3.
+// Input:  script-number `n` on the top of the main stack (n >= 0).
+// Output: bytestring that, when interpreted as script, would minimal-push n.
 //
-// V3 PartB4: TOALTSTACK newTarget, then drop 4 (lastTime, targetTime, daaMode, algoId).
-const V3_BYTECODE_PART_B4 = "6b75757575";
-// Part C: Output validation (same as V1 — code script continuity, token reward, height checks).
+// Three branches:
+//   n == 0       → emit single byte 0x00 (OP_0 opcode)
+//   n in [1..16] → emit single byte (0x50 + n) (OP_1..OP_16 opcode)
+//   n >  16      → emit `<L> <L bytes of n>` where L is the script-num byte length
 //
-// The earlier draft of this constant prefixed it with `a269` (an OP_GREATERTHANOREQUAL
-// OP_VERIFY "maxHeight >= reward" sanity check). That prefix consumed two items (mh, r)
-// that the V1 PartC body immediately needed for its first OP_ROLL 7 / OP_CODESCRIPTHASH…
-// pair, causing every V2 contract to stack-underflow at `577a e5` before reaching any
-// EQUALVERIFY (rejection class SCRIPT_ERR_INVALID_STACK_OPERATION; reproduced via
-// `testmempoolaccept` on the B3T2 broadcast, b3t-forensics/captured-b3t2.json).
+// The n > 16 branch uses the fact that a script-num's stack representation is
+// already minimal LE, so `OP_SIZE` gives the correct push length and
+// `OP_SWAP OP_CAT` glues `L || n_bytes`. OP_SIZE returns the length as a
+// script-num, which for L in [1..75] is a single byte equal to L — exactly
+// the direct-push opcode byte.
 //
-// Removing the leading `a269` makes V2's PartC entry stack identical to V1's
-// (8 items: ih, oh, oi, h, cRef, tRef, mh, r) so the verbatim V1 PartC body works.
-// The mh>=r sanity check is also redundant with deploy-time validation.
-const V2_BYTECODE_PART_C =
-  "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
+// Caveat: the routine assumes n >= 0. dMint heights and targets are never
+// negative, so no OP_1NEGATE branch is needed.
+//
+// 21 bytes total. Inlined twice in PartC (once for height, once for target).
+const MINIMAL_PUSH_BYTECODE = [
+  "76",     // OP_DUP            [..., n, n]
+  "00",     // OP_0              [..., n, n, 0]
+  "9c",     // OP_NUMEQUAL       [..., n, n==0]
+  "63",     // OP_IF
+    "75",   //   OP_DROP         [..., ]     drop the n
+    "0100", //   PUSH(1) 0x00    [..., "00"] single OP_0 byte
+  "67",     // OP_ELSE
+    "76",   //   OP_DUP          [..., n, n]
+    "60",   //   OP_16           [..., n, n, 16]
+    "a1",   //   OP_LESSTHANOREQUAL [..., n, n<=16]
+    "63",   //   OP_IF
+      "0150", //   PUSH(1) 0x50  [..., n, 80]
+      "93",   //   OP_ADD        [..., (n+80)]
+      "51",   //   OP_1          [..., (n+80), 1]
+      "80",   //   OP_NUM2BIN    [..., single_byte_OP_N]
+    "67",   //   OP_ELSE
+      "82", //     OP_SIZE       [..., n, L]
+      "7c", //     OP_SWAP       [..., L, n]
+      "7e", //     OP_CAT        [..., L||n_bytes]
+    "68",   //   OP_ENDIF
+  "68",     // OP_ENDIF
+].join("");
 
-// V3 PartC: same as V2 PartC up through the height-check/IF, but:
-//   - IF branch (final-mint) is prepended with `6c 75` (FROMALTSTACK DROP)
-//     to consume the alt-stack newTarget left by V3 PartB4.
-//   - ELSE branch (continue-mining) inserts three new segments after the
-//     existing `55 7f 77` (strip first 5 of old state):
-//       1. `82 5e 94 7f 75`  SIZE push14 SUB SPLIT DROP — strip last 14
-//          bytes (= old lastTime push + old target push, both fixed-length).
-//       2. `c5 54 80 01 04 7c 7e 7e`  TXLOCKTIME push4 NUM2BIN push 0x04
-//          SWAP CAT CAT — append `04 [newLastTime LE4]` to expected_state.
-//       3. `6c 58 80 01 08 7c 7e 7e`  FROMALTSTACK push8 NUM2BIN push 0x08
-//          SWAP CAT CAT — append `08 [newTarget LE8]` to expected_state.
-//     Total ELSE branch grows by 21 bytes; whole PartC grows by 23 bytes
-//     vs V2 (101 → 124 bytes plus the leading `bd` separator).
+// Build PartC for the new V2 launch shape.
 //
-// V3 contracts thus enforce a next state where `height`, `lastTime`, and
-// `target` ALL update; middle slots (cRef, tRef, maxHeight, reward, algoId,
-// daaMode, targetTime) stay byte-identical via the SIZE/SPLIT/DROP middle
-// extraction. The DAA bytecode's `newTarget` (preserved on alt via the
-// `6b` in V3_BYTECODE_PART_B4) propagates into the on-chain enforced
-// state, making ASERT/LWMA actually adjust difficulty per spec.
-const V3_BYTECODE_PART_C =
-  "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d636c755279cd01d853797e016a7e886778de519d547854807ec0eb557f77825e947f757ec5548001047c7e7e6c588001087c7e7e5379ec78885379eac0e9885379cc519d75686d7551";
+// PartC is now deploy-parameterized: it embeds the deploy's items 2-8 (cRef,
+// tRef, mh, r, algoId, daaId, targetTime) as a single literal blob, since
+// those slots never change between mints. At runtime PartC reconstructs
+// expected_next_state from scratch as:
+//
+//   MINIMAL_PUSH(new_height) || <middle_literal> || "04" || NUM2BIN(4, locktime) ||
+//   MINIMAL_PUSH(new_target_from_altstack)
+//
+// then OP_EQUALVERIFY against the actual next output's state script.
+//
+// The first ~75 bytes (input/output script-ref check, height increment,
+// height==maxHeight branch) and the trailing continuation-verify epilogue
+// (codescript continuity, output value == reward) are byte-identical to the
+// pre-redesign V2/V3 PartC. Only the "build expected_state" middle stretch
+// is rewritten.
+//
+// `middleLiteralHex` is the concatenated push bytes for state items 2-8 (i.e.
+// what the wallet emits between the height push and the lastTime push in the
+// state script). It is wrapped with the appropriate direct/PUSHDATA1
+// opcode prefix via `encodeDataPush`.
+export function buildV2PartC(middleLiteralHex: string): string {
+  const middleLiteralBytes = hexToBytes(middleLiteralHex);
+  const middlePushBytes = bytesToHex(encodeDataPush(middleLiteralBytes));
+
+  // PartC prologue: verify input/output script refs (unchanged from V2/V3).
+  const PROLOGUE =
+    "577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7e" +
+    "aa76e47b9d547a818b76537a9c537ade789181547ae6939d63";
+
+  // IF branch (final-mint, newHeight == maxHeight): consume alt-stack
+  // newTarget (so alt stack ends clean), then run the V2 final-mint check
+  // (OUTPUTBYTECODE == d8 [tokenRef] 6a, i.e. the token burn output).
+  const IF_BRANCH = "6c75" + "5279cd01d853797e016a7e88";
+
+  // ELSE branch (continue-mining): rebuild expected_state from scratch using
+  // MINIMAL_PUSH for the variable height/target pushes plus the literal
+  // middle blob for the fixed deploy-time slots.
+  const ELSE_BRANCH = [
+    "78de519d",                  // OVER CODESCRIPTBYTECODE_UTXO 1 NUMEQUALVERIFY
+                                 //   → asserts code script has exactly 1 ref
+    "78", MINIMAL_PUSH_BYTECODE, // OVER newHeight → top, MINIMAL_PUSH → newHeightPush
+    middlePushBytes, "7e",       // push literal middle blob, CAT
+    "c55480547c7e7e",            // TXLOCKTIME 4 NUM2BIN OP_4 SWAP CAT CAT
+                                 //   → append "04" || NUM2BIN(4, locktime).
+                                 //   OP_4 (54) replaces a literal `01 04` push
+                                 //   here because `01 04` triggers MINIMALDATA
+                                 //   (data byte 0x04 ∈ [1..16] must use OP_4).
+                                 //   The pre-redesign V3 PartC had this latent
+                                 //   bug — hidden behind the height-0 state-
+                                 //   script issue at the miner pre-check; would
+                                 //   have failed in radiantd interpreter once
+                                 //   that was bypassed.
+    "6c", MINIMAL_PUSH_BYTECODE, // FROMALTSTACK newTarget, MINIMAL_PUSH
+    "7e",                        // CAT — append newTargetPush
+    // Continuation-verify epilogue (byte-identical to old V3 PartC tail):
+    "5379ec7888",                // 3 PICK STATESCRIPTBYTECODE_OUTPUT_NOSEP OVER EQUALVERIFY
+    "5379eac0e988",              // 3 PICK OUTPUTCODESCRIPTBYTECODE INPUTINDEX 0xe9 EQUALVERIFY
+    "5379cc519d",                // 3 PICK OUTPUTVALUE 1 NUMEQUALVERIFY
+    "75",                        // DROP
+  ].join("");
+
+  // PartC closing (ENDIF, 2DROP, DROP, push 1) — unchanged from V2/V3.
+  const EPILOGUE = "686d7551";
+
+  return PROLOGUE + IF_BRANCH + "67" + ELSE_BRANCH + EPILOGUE;
+}
 
 // V1 legacy BYTECODE_PART_B kept as a reference for any future
 // backward-compatible parser. Prefixed with `_` to opt out of
@@ -731,15 +824,72 @@ const _V1_BYTECODE_PART_B =
   "bc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
 void _V1_BYTECODE_PART_B;
 
+// Push of MAX_TARGET = 0x7FFF_FFFF_FFFF_FFFF as 8-byte LE script number.
+// Encoded as `08 [8 bytes]`. Used to cap newTarget so OP_NUM2BIN(8) in V3 PartC
+// never returns IMPOSSIBLE_ENCODING.
+const PUSH_MAX_TARGET = "08ffffffffffffff7f";
+// Push of MAX_TARGET/2 = 0x3FFF_FFFF_FFFF_FFFF, also as `08 [8 bytes]`. Used as
+// the pre-OP_2MUL ceiling: if target > MAX_TARGET/2 then OP_2MUL would overflow
+// int64 and abort the script with INVALID_NUMBER_RANGE_64_BIT.
+const PUSH_HALF_MAX_TARGET = "08ffffffffffffff3f";
+
+// One unrolled step of the positive-drift loop. Entry stack: [drift_rem, target, ...].
+// If drift_rem > 0:
+//   if target > MAX_TARGET/2: target = MAX_TARGET   (would overflow OP_2MUL)
+//   else:                     target = target * 2
+//   drift_rem -= 1
+// Mirrors miner: `newTarget = oldTarget << drift; if (newTarget > MAX) newTarget = MAX`.
+// Naive pre-MIN-then-2MUL gives `MAX - 1` for input `MAX_TARGET/2 < t ≤ MAX`,
+// which disagrees with the miner's clamp-at-MAX semantics — hence the explicit
+// conditional cap.
+const ASERT_2MUL_STEP = [
+  "7600a0", // DUP 0 GT  — drift_rem > 0?
+  "63", // IF
+  "8c", //   OP_1SUB drift_rem
+  "7c", //   SWAP → [target, drift_rem-1, ...]
+  "76", //   DUP target
+  PUSH_HALF_MAX_TARGET, //   push MAX_TARGET/2
+  "a0", //   OP_GREATERTHAN → [would_overflow, target, drift_rem-1, ...]
+  "63", //   IF (target > MAX_TARGET/2)
+  "75", //     DROP target
+  PUSH_MAX_TARGET, //     push MAX_TARGET
+  "67", //   ELSE
+  "8d", //     OP_2MUL → target * 2  (safe, target ≤ MAX_TARGET/2)
+  "68", //   ENDIF
+  "7c", //   SWAP back → [drift_rem-1, target_new, ...]
+  "68", // ENDIF
+].join("");
+
+// One unrolled step of the negative-drift loop. Entry stack: [|drift|_rem, target, ...].
+// If |drift|_rem > 0: target = target / 2; |drift|_rem -= 1.
+// OP_2DIV uses C++ int64 division (truncates toward zero); for target ≥ 1 this
+// matches bigint right-shift on positive values.
+const ASERT_2DIV_STEP = [
+  "7600a0", // DUP 0 GT  — |drift|_rem > 0?
+  "63", // IF
+  "8c", //   OP_1SUB
+  "7c", //   SWAP
+  "8e", //   OP_2DIV
+  "7c", //   SWAP back
+  "68", // ENDIF
+].join("");
+
 function buildAsertDaaBytecode(halfLife: number): string {
   // ASERT-lite DAA (Design Spec §4.5)
   // Entry stack: [target, lastTime, targetTime, daaMode, ...]
   //
-  // History note: prior to 2026-05-19 the three NEGATE sites in this function
-  // emitted hex byte 0x81 (OP_BIN2NUM) instead of 0x8f (OP_NEGATE) — see
-  // task #10. The bug rendered the negative-drift clamp identical to a
-  // second positive check and made the RSHIFT path receive a negative
-  // shift count. New deployments after the fix use the correct opcode.
+  // History:
+  // - Prior to 2026-05-19, three NEGATE sites emitted 0x81 (BIN2NUM) instead of
+  //   0x8f (NEGATE) — see task #10. Fixed; new deployments use 0x8f.
+  // - Prior to 2026-05-25, the shift step used OP_LSHIFT/OP_RSHIFT (0x98/0x99).
+  //   Radiant Core's LShift/RShift treat the buffer as a big-endian bit string,
+  //   so on the 8-byte LE target encoding cross-byte carries flow the wrong
+  //   direction — every nonzero drift produced a result that disagreed with
+  //   the miner's bigint shift. Now uses an unrolled OP_2MUL/OP_2DIV loop
+  //   (option (a) from V2_CONTRACT_AUDIT_REPORT.md §S-CRIT-2) which operates
+  //   correctly on multi-byte LE script numbers. Per-step OP_MIN against
+  //   MAX_TARGET/2 caps the result at MAX_TARGET instead of aborting via
+  //   INVALID_NUMBER_RANGE_64_BIT on OP_2MUL overflow.
   const halfLifePush = pushMinimal(halfLife);
   return [
     "c5", // OP_TXLOCKTIME → currentTime
@@ -759,16 +909,27 @@ function buildAsertDaaBytecode(halfLife: number): string {
     "63", // IF
     "75548f", //   DROP, push -4
     "68", // ENDIF
-    // Apply shift: drift>0 → LSHIFT, drift<0 → RSHIFT(|drift|), drift==0 → unchanged
+    // Apply shift: drift>0 → 4×conditional 2MUL with cap,
+    //              drift<0 → NEGATE then 4×conditional 2DIV,
+    //              drift==0 → DROP drift (target unchanged).
     "7600a0", // DUP 0 GT
-    "63", // IF (positive)
-    "98", //   LSHIFT
+    "63", // IF (positive direction)
+    ASERT_2MUL_STEP,
+    ASERT_2MUL_STEP,
+    ASERT_2MUL_STEP,
+    ASERT_2MUL_STEP,
+    "75", //   DROP drift_remaining (= 0)
     "67", // ELSE
     "76009f", //   DUP 0 LT
-    "63", //   IF (negative)
-    "8f99", //     NEGATE RSHIFT
+    "63", //   IF (negative direction)
+    "8f", //     NEGATE → |drift|
+    ASERT_2DIV_STEP,
+    ASERT_2DIV_STEP,
+    ASERT_2DIV_STEP,
+    ASERT_2DIV_STEP,
+    "75", //     DROP |drift|_remaining
     "67", //   ELSE (zero)
-    "75", //     DROP (drift=0, target unchanged)
+    "75", //     DROP drift (= 0)
     "68", //   ENDIF
     "68", // ENDIF
     // Clamp target to minimum 1
@@ -779,22 +940,63 @@ function buildAsertDaaBytecode(halfLife: number): string {
   ].join("");
 }
 
+// Push of MAX_TARGET/4 = 0x1FFF_FFFF_FFFF_FFFF as 8-byte LE. Used as the LWMA
+// target pre-cap so `(target / targetTime) × (4 × targetTime)` ≤ MAX_TARGET
+// regardless of targetTime value (algebraically: ≤ 4 × target ≤ MAX_TARGET).
+const PUSH_QUARTER_MAX_TARGET = "08ffffffffffffff1f";
+
 function buildLinearDaaBytecode(): string {
-  // Linear DAA (Design Spec §4.6)
-  // new_target = old_target * time_delta / targetTime
+  // LWMA / Linear DAA (Design Spec §4.6)
+  // Logical formula: new_target = old_target * time_delta / targetTime
+  //
+  // Naive bytecode `target * timeDelta / targetTime` overflows int64 at default
+  // difficulty (V2_CONTRACT_AUDIT_REPORT.md §2.2):
+  //   oldTarget ≈ MAX_TARGET/10 ≈ 9.22e17,  targetTime=60s
+  //   → 9.22e17 × 60 = 5.5e19 > 2^63-1 → OP_MUL aborts the script.
+  //
+  // Fix (audit §S-CRIT-3) has three parts:
+  //   1. Cap timeDelta to 4 × targetTime. Matches ASERT's ±4 drift clamp
+  //      semantics; LWMA cannot react to a single-block outlier beyond 4×
+  //      the target block time.
+  //   2. Cap target to MAX_TARGET/4 so the algebraic upper bound of
+  //      (target / targetTime) × (4 × targetTime) ≈ 4 × target stays ≤
+  //      MAX_TARGET regardless of targetTime. Practical impact:
+  //      LWMA-mode contracts cannot have a difficulty floor below 4
+  //      (dMintDiffToTarget(d) ≤ MAX_TARGET/4 ⇒ d ≥ 4).
+  //   3. Reorder to divide-first: (target_capped / targetTime) × cappedDelta.
+  //      Necessary even after caps to keep the intermediate inside int64.
+  //
+  // After these caps the on-chain `OP_MUL` is overflow-free for every input
+  // tuple the wallet can build, and `OP_NUM2BIN(8)` in V3 PartC always
+  // succeeds.
   return [
     "c5", // OP_TXLOCKTIME → currentTime
     "5279", // OP_2 PICK lastTime
-    "94", // OP_SUB → time_delta
-    "7c", // SWAP → [target, time_delta, ...]
-    "95", // MUL → [target*time_delta, ...]
+    "94", // OP_SUB → timeDelta
+    // Cap timeDelta to 4 × targetTime. targetTime is at depth 3 (timeDelta on
+    // top, then target, lastTime, targetTime).
     "5379", // OP_3 PICK targetTime
-    "96", // DIV → [new_target, ...]
-    // Clamp target to minimum 1
-    "76519f",
-    "63",
-    "7551",
-    "68",
+    "54", // OP_4
+    "95", // OP_MUL → 4 × targetTime
+    "a3", // OP_MIN → timeDelta_capped
+    // Pre-cap target to MAX_TARGET/4 before the divide. See header comment.
+    "7c", // SWAP → [target, timeDelta_capped, lastTime, targetTime, ...]
+    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
+    "a3", // OP_MIN → target_capped
+    // Divide-first reorder.
+    "5379", // OP_3 PICK targetTime
+    "96", // OP_DIV → target_capped / targetTime
+    "95", // OP_MUL → (target_capped / targetTime) × timeDelta_capped = newTarget
+    // Defensive: cap newTarget at MAX_TARGET so NUM2BIN(8) in PartC succeeds.
+    // With caps above this is mathematically guaranteed but the OP_MIN costs
+    // 10 bytes and removes a class of future-bug-by-edit.
+    PUSH_MAX_TARGET, // push MAX_TARGET
+    "a3", // OP_MIN
+    // Clamp newTarget to minimum 1.
+    "76519f", // DUP 1 LT
+    "63", // IF
+    "7551", //   DROP 1
+    "68", // ENDIF
   ].join("");
 }
 
@@ -858,7 +1060,14 @@ function buildEpochDaaBytecode(
     );
   }
   const epochLengthPush = pushMinimal(epochLength);
-  const nPush = pushMinimal(maxAdjustmentLog2);
+  // N is a deploy-time constant in {1,2,3,4}. Emit the shift as literal
+  // N×OP_2MUL / N×OP_2DIV instead of OP_LSHIFT N / OP_RSHIFT N: the latter
+  // operate byte-buffer-wise (big-endian bit order) and don't match bigint
+  // shift on multi-byte LE script numbers (V2_CONTRACT_AUDIT_REPORT.md §2.3).
+  // OP_2MUL on `targetTime` is overflow-safe in practice (targetTime is seconds,
+  // far below 2^59 ≈ 5.76e17 even with N=4).
+  const lshiftN = "8d".repeat(maxAdjustmentLog2); // N × OP_2MUL
+  const rshiftN = "8e".repeat(maxAdjustmentLog2); // N × OP_2DIV
   return [
     // ── Boundary check: (height > 0) AND (height % epochLength == 0) ──
     "5979", // OP_9 OP_PICK       — copy height (state pos 9)
@@ -874,20 +1083,23 @@ function buildEpochDaaBytecode(
     "c5", //   OP_TXLOCKTIME    — currentTime
     "5279", //   OP_2 OP_PICK     — copy lastTime
     "94", //   OP_SUB           — delta
-    // ── clamp delta to [targetTime>>N, targetTime<<N] ──
+    // ── clamp delta to [targetTime/2^N, targetTime×2^N] ──
     "5379", //   OP_3 OP_PICK     — copy targetTime
-    nPush, //   push N
-    "98", //   OP_LSHIFT        — upperBound = targetTime << N
+    lshiftN, //   N × OP_2MUL      — upperBound = targetTime × 2^N
     "a3", //   OP_MIN           — delta = min(delta, upperBound)
     "5379", //   OP_3 OP_PICK     — copy targetTime
-    nPush, //   push N
-    "99", //   OP_RSHIFT        — lowerBound = targetTime >> N
+    rshiftN, //   N × OP_2DIV      — lowerBound = targetTime / 2^N
     "a4", //   OP_MAX           — delta = max(delta, lowerBound)
     // ── newTarget = target * clampedDelta / targetTime ──
     "7c", //   OP_SWAP          — [target, clampedDelta, ...]
     "95", //   OP_MUL           — target * clampedDelta
     "5279", //   OP_2 OP_PICK     — copy targetTime
     "96", //   OP_DIV           — newTarget
+    // Defensive MAX_TARGET cap so NUM2BIN(8) in V3 PartC never trips
+    // IMPOSSIBLE_ENCODING. EPOCH_MAX_SAFE_TARGET (2^48) already bounds
+    // target, so this is belt-and-braces.
+    PUSH_MAX_TARGET, //   push MAX_TARGET
+    "a3", //   OP_MIN
     // ── clamp newTarget to ≥1 ──
     "76519f", //   OP_DUP OP_1 OP_LESSTHAN
     "63", //   OP_IF
@@ -1053,23 +1265,21 @@ export type DaaParams = {
 };
 
 /**
- * dMint contract bytecode version. V2 (post-7f19cbb) is mineable but its
- * DAA bytecode result is dropped — difficulty never adjusts on-chain. V3
- * preserves the DAA newTarget on the altstack and Part C splices it into
- * the enforced next state, so ASERT/LWMA actually adjust difficulty.
+ * dMint contract bytecode version. Kept as a single-member union for parser
+ * dispatch + forward compatibility (future versions will widen this).
  *
- * V2 contracts are retained for parser compatibility with already-deployed
- * tokens (B3T3, K12T, and any V2 SHA256d/BLAKE3/K12 deploy from before
- * 2026-05-25). New deploys should use V3.
- *
- * See b3t-forensics/v3-daa-propagation-design.md for the full rationale.
+ * The 2026-05-26 redesign collapsed the old V2/V3 split — see
+ * b3t-forensics/V2_CONTRACT_AUDIT_REMEDIATION.md §§7-8. The new V2 shape
+ * propagates DAA on-chain AND uses minimal-encoded pushes throughout, so
+ * adaptive-DAA dMint is mainnet-mineable under standard MINIMALDATA policy.
+ * The pre-redesign V2/V3 deploys (B3T2, K12T, DEEZ, apple, VRT, etc.) were
+ * test tokens and do not parse under the new shape.
  */
-export type DmintContractVersion = "v2" | "v3";
+export type DmintContractVersion = "v2";
 
 function buildBytecodePartB(
   daaMode: string,
-  daaParams: DaaParams | null,
-  version: DmintContractVersion,
+  daaParams: DaaParams | null
 ): string {
   let daaBytecode = "";
   switch (daaMode) {
@@ -1098,17 +1308,7 @@ function buildBytecodePartB(
       daaBytecode = "";
       break;
   }
-  const partB4 = version === "v3" ? V3_BYTECODE_PART_B4 : V2_BYTECODE_PART_B4;
-  return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${partB4}`;
-}
-
-// Backward-compat alias for the V2-only callers; new callers should use the
-// version-aware `buildBytecodePartB` directly.
-function buildV2BytecodePartB(
-  daaMode: string,
-  daaParams: DaaParams | null
-): string {
-  return buildBytecodePartB(daaMode, daaParams, "v2");
+  return `${V2_BYTECODE_PART_B1}${V2_BYTECODE_PART_B2}${daaBytecode}${V2_BYTECODE_PART_B4}`;
 }
 
 export {
@@ -1129,20 +1329,6 @@ export function dMintScript(
   daaMode: string = "fixed",
   daaParams: DaaParams | null = null,
   lastTime: number = 0,
-  /**
-   * Contract bytecode version. Defaults to "v2" for backward compatibility
-   * with already-deployed contracts; new deploys should pass "v3" to get
-   * actual on-chain DAA propagation. See
-   * b3t-forensics/v3-daa-propagation-design.md.
-   *
-   * Differences:
-   * - V2: target pushed via pushMinimal (variable length). PartB4 drops
-   *   newTarget. PartC enforces height-only state change. DAA is cosmetic.
-   * - V3: target pushed via pushTarget9Bytes (fixed 9 bytes). PartB4 moves
-   *   newTarget to altstack. PartC splices new lastTime + new target into
-   *   the expected next state. DAA actually adjusts difficulty.
-   */
-  version: DmintContractVersion = "v2",
 ) {
   const algorithmIds: Record<string, number> = {
     sha256d: 0,
@@ -1170,34 +1356,44 @@ export function dMintScript(
   };
   const powHashOp = powHashOpcodes[algorithm] || "aa";
 
-  // V2 state layout (10 items, Design Spec §4.2):
-  // height | d8:contractRef | d0:tokenRef | maxHeight | reward |
-  // algoId | daaMode | targetTime | lastTime | target
-  const V2_STATE_ITEM_COUNT = 10;
+  // dMint state layout (10 items, Design Spec §4.2):
+  //   height | d8:contractRef | d0:tokenRef | maxHeight | reward |
+  //   algoId | daaMode | targetTime | lastTime | target
+  const STATE_ITEM_COUNT = 10;
 
-  // V3 enforces a fixed 9-byte target push so PartC's SIZE-14-SUB-SPLIT-DROP
-  // can locate the lastTime+target suffix at a fixed offset on-chain.
-  // V2 keeps the legacy minimal-encoding push (variable length).
-  const targetPush =
-    version === "v3" ? pushTarget9Bytes(target) : pushMinimal(target);
+  // All variable-magnitude items use pushMinimal so the state script is
+  // MINIMALDATA-compliant from height 0 / target MAX_TARGET onwards. lastTime
+  // stays push4bytes — Unix timestamps in [2^28, 2^31) are always 4-byte
+  // minimal (since 1989-01-15), so the fixed 4-byte width simplifies PartC's
+  // newLastTimePush reconstruction (`04 || NUM2BIN(4, locktime)`).
+  const heightPush = pushMinimal(height);
+  const maxHeightPush = pushMinimal(maxHeight);
+  const targetPush = pushMinimal(target);
+  const lastTimePush = push4bytes(lastTime);
 
-  const stateScript = [
-    push4bytes(height),
+  // PartC embeds items 2-8 as a single literal (they never change between
+  // mints). Build that literal blob now and bake it into PartC.
+  const middleLiteralHex = [
     `d8${contractRef}`,
     `d0${tokenRef}`,
-    pushMinimal(maxHeight),
+    maxHeightPush,
     pushMinimal(reward),
     pushMinimal(algoId),
     pushMinimal(daaId),
     pushMinimal(targetTime),
-    push4bytes(lastTime),
+  ].join("");
+
+  const stateScript = [
+    heightPush,
+    middleLiteralHex,
+    lastTimePush,
     targetPush,
   ].join("");
 
-  const bytecodePartA = buildDmintPreimageBytecodePartA(V2_STATE_ITEM_COUNT);
-  assertDmintPreimageLayout(bytecodePartA, V2_STATE_ITEM_COUNT);
-  const bytecodePartB = buildBytecodePartB(daaMode, daaParams, version);
-  const partC = version === "v3" ? V3_BYTECODE_PART_C : V2_BYTECODE_PART_C;
+  const bytecodePartA = buildDmintPreimageBytecodePartA(STATE_ITEM_COUNT);
+  assertDmintPreimageLayout(bytecodePartA, STATE_ITEM_COUNT);
+  const bytecodePartB = buildBytecodePartB(daaMode, daaParams);
+  const partC = buildV2PartC(middleLiteralHex);
   const contractBytecode = `${bytecodePartA}${powHashOp}${bytecodePartB}${partC}`;
 
   return `${stateScript}bd${contractBytecode}`;
