@@ -21,13 +21,33 @@ import path from "path";
  */
 import { SECURITY_HEADERS } from "./src/config/csp";
 
+// When driving the dev server over HTTP (HTTP_DEV=1), drop the Content-
+// Security-Policy header entirely. The production CSP (canonical in
+// src/config/csp.ts) is unchanged — this only affects the local dev/preview
+// servers. Two reasons we drop it rather than soften it:
+//   1. `upgrade-insecure-requests` forces every asset to https://127.0.0.1,
+//      which fails (no cert) and silently white-screens the app.
+//   2. `script-src 'self'` blocks Vite's React Fast Refresh inline preamble,
+//      which the React plugin requires — without it you get
+//      "@vitejs/plugin-react can't detect preamble" and the app aborts.
+// The other security headers (X-Frame-Options etc.) stay on for parity with
+// production.
+const DEV_SERVER_HEADERS: Record<string, string> =
+  process.env.HTTP_DEV === "1"
+    ? Object.fromEntries(
+        Object.entries(SECURITY_HEADERS).filter(
+          ([k]) => k !== "Content-Security-Policy",
+        ),
+      )
+    : SECURITY_HEADERS;
+
 export default defineConfig({
   base: "./",
   server: {
-    headers: SECURITY_HEADERS,
+    headers: DEV_SERVER_HEADERS,
   },
   preview: {
-    headers: SECURITY_HEADERS,
+    headers: DEV_SERVER_HEADERS,
   },
   plugins: [
     react({

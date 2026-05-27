@@ -788,9 +788,28 @@ export function buildV2PartC(middleLiteralHex: string): string {
   // MINIMAL_PUSH for the variable height/target pushes plus the literal
   // middle blob for the fixed deploy-time slots.
   const ELSE_BRANCH = [
-    "78de519d",                  // OVER CODESCRIPTBYTECODE_UTXO 1 NUMEQUALVERIFY
-                                 //   → asserts code script has exactly 1 ref
-    "78", MINIMAL_PUSH_BYTECODE, // OVER newHeight → top, MINIMAL_PUSH → newHeightPush
+    "78de519d",                  // OVER REFOUTPUTCOUNT_OUTPUTS 1 NUMEQUALVERIFY
+                                 //   → asserts cRef (depth-1) appears in exactly 1
+                                 //   output (singleton preservation). After this,
+                                 //   stack is [outputIndex, cRef, newHeight] with
+                                 //   newHeight on top — confirmed by walking the
+                                 //   prologue against Radiant-Core interpreter.cpp
+                                 //   (OP_REFOUTPUTCOUNT_OUTPUTS at line 2058,
+                                 //   OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS at the
+                                 //   earlier prologue ops).
+    "76", MINIMAL_PUSH_BYTECODE, // DUP newHeight on top, MINIMAL_PUSH → newHeightPush.
+                                 //   MUST be DUP (0x76), not OVER (0x78). The
+                                 //   pre-2026-05-27 emit used OVER, which dups
+                                 //   depth-1 (cRef, 36 bytes). MINIMAL_PUSH's
+                                 //   first op (OP_NUMEQUAL) caps script-nums at
+                                 //   8 bytes (Radiant-Core script.h:568,639),
+                                 //   so a 36-byte buffer trips
+                                 //   INVALID_NUMBER_RANGE_64_BIT and the mint
+                                 //   tx is rejected as
+                                 //   `mandatory-script-verify-flag-failed
+                                 //   (unknown error)`. Every V2-launch contract
+                                 //   deployed before this fix is permanently
+                                 //   un-mineable.
     middlePushBytes, "7e",       // push literal middle blob, CAT
     "c55480547c7e7e",            // TXLOCKTIME 4 NUM2BIN OP_4 SWAP CAT CAT
                                  //   → append "04" || NUM2BIN(4, locktime).

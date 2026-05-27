@@ -2331,6 +2331,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       <FormControl>
                         <FormLabel>{"Premine"}</FormLabel>
                         <Input
+                          defaultValue={formData.premine}
                           placeholder=""
                           name="premine"
                           type="number"
