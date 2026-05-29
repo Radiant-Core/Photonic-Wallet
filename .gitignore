@@ -7,4 +7,4 @@ dist-ssr
 .env
 .cache
 server/dist
-public/dist
+public/dist.DS_Store
