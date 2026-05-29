@@ -40,7 +40,7 @@
     "@noble/curves": "1.9.7",
     "@noble/hashes": "1.8.0",
     "@noble/post-quantum": "0.4.1",
-    "@radiant-core/radiantjs": "2.0.3",
+    "@radiant-core/radiantjs": "2.0.5",
     "@scure/base": "1.2.6",
     "@scure/bip32": "1.7.0",
     "@scure/bip39": "1.6.0",

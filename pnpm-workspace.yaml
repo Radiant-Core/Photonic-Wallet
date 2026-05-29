@@ -11,5 +11,6 @@ minimumReleaseAgeExclude:
   - '@radiant-core/radiantjs@2.0.1'
   - '@radiant-core/radiantjs@2.0.2'
   - '@radiant-core/radiantjs@2.0.3'
+  - '@radiant-core/radiantjs@2.0.5'
 overrides:
   protobufjs: ^7.5.5
