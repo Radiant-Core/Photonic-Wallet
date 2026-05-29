@@ -7,10 +7,11 @@ allowBuilds:
   protobufjs: true
   sharp: true
 minimumReleaseAgeExclude:
-  - '@radiant-core/radiantjs@2.0.0'
-  - '@radiant-core/radiantjs@2.0.1'
-  - '@radiant-core/radiantjs@2.0.2'
-  - '@radiant-core/radiantjs@2.0.3'
+  # Recent radiantjs releases the pnpm supply-chain policy briefly flags as
+  # "too new" (within minimumReleaseAge). Kept here for stable installs
+  # until the policy window naturally clears each one. Older versions are
+  # pruned once they're well past the window — no point listing exclusions
+  # the policy already accepts on its own.
   - '@radiant-core/radiantjs@2.0.5'
 overrides:
   protobufjs: ^7.5.5
