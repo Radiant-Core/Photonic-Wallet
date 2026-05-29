@@ -58,6 +58,41 @@ export class VaultWorker implements Subscription {
   }
 
   /**
+   * Issue an Electrum JSON-RPC request with a single retry after `backoffMs`.
+   *
+   * Used for `listunspent` / `get_mempool` calls where the cold-cache latency
+   * on the public ElectrumX server can exceed the WS client's slow-method
+   * timeout for heavy addresses. The first attempt warms the server-side
+   * cache; the retry then typically returns in a few seconds. Returns
+   * `undefined` if both attempts fail rather than throwing, so callers can
+   * leave existing DB state untouched instead of misclassifying the vault.
+   */
+  private async requestWithRetry(
+    method: string,
+    params: (string | number)[],
+    contextTag: string,
+    backoffMs = 500
+  ): Promise<unknown> {
+    try {
+      return await this.electrum.client?.request(method, ...params);
+    } catch (firstErr) {
+      await new Promise((r) => setTimeout(r, backoffMs));
+      try {
+        return await this.electrum.client?.request(method, ...params);
+      } catch (secondErr) {
+        console.warn(
+          `[Vault] ${method} failed twice for ${contextTag}:`,
+          secondErr,
+          "(first error:",
+          firstErr,
+          ")"
+        );
+        return undefined;
+      }
+    }
+  }
+
+  /**
    * Scan ALL claimed vaults and un-claim any whose P2SH UTXO is still
    * present on-chain. Repairs false positives from the old updateTxos bug.
    */
@@ -72,22 +107,31 @@ export class VaultWorker implements Subscription {
       try {
         const scriptHash = vaultScriptHash(vault.redeemScriptHex);
 
-        // Check confirmed UTXOs
-        const utxos = (await this.electrum.client?.request(
+        // Check confirmed UTXOs. `listunspent` on a cold ElectrumX cache for
+        // a heavy address can take 10s+ on the first call but typically
+        // returns in 2-5s on retry once the server has the result warm. So
+        // we give it one retry with a short backoff before giving up — the
+        // alternative (silent warn) leaves a confirmed-spent vault stuck in
+        // "claimed=1 but maybe still unspent" purgatory across sessions.
+        const utxos = (await this.requestWithRetry(
           "blockchain.scripthash.listunspent",
-          scriptHash
-        )) as ElectrumUtxo[];
+          [scriptHash],
+          `${vault.txid}:${vault.vout}`
+        )) as ElectrumUtxo[] | undefined;
 
-        const isConfirmedUnspent = utxos?.some(
+        if (utxos === undefined) continue; // Both attempts failed — leave as-is
+
+        const isConfirmedUnspent = utxos.some(
           (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
         );
 
         // Also check mempool — vault tx may be unconfirmed
         let isInMempool = false;
         try {
-          const mempoolEntries = (await this.electrum.client?.request(
+          const mempoolEntries = (await this.requestWithRetry(
             "blockchain.scripthash.get_mempool",
-            scriptHash
+            [scriptHash],
+            `${vault.txid}:${vault.vout}`
           )) as { tx_hash: string; fee: number; height: number }[] | undefined;
           isInMempool =
             mempoolEntries?.some((e) => e.tx_hash === vault.txid) ?? false;

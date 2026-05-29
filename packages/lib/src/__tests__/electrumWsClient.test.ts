@@ -264,7 +264,14 @@ describe("ElectrumWS — reconnect / resubscribe", () => {
   });
 
   it("tears down the socket when a resubscribe fails", async () => {
-    const client = makeClient({ reconnect: true, requestTimeoutMs: 50 });
+    // `blockchain.scripthash.subscribe` lives in the slow-method set so it
+    // resolves to `slowMethodTimeoutMs`, not `requestTimeoutMs`. Set both so
+    // the resubscribe RPC actually times out within the test's tick budget.
+    const client = makeClient({
+      reconnect: true,
+      requestTimeoutMs: 50,
+      slowMethodTimeoutMs: 50,
+    });
     const sock1 = MockSocket.last();
 
     void client.subscribe("blockchain.scripthash", () => {}, "abc");

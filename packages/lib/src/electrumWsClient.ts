@@ -6,7 +6,11 @@
 //
 // Differences from the (now-removed) upstream patch:
 //   - Request timeout defaults to 10s (the upstream patch had bumped it to 120s,
-//     which hid dead sockets for two minutes).
+//     which hid dead sockets for two minutes). A small set of known-slow
+//     methods (scripthash listunspent/subscribe/get_history/get_mempool) use a
+//     30s ceiling instead — measured against the public ElectrumX, cold-cache
+//     `listunspent` on a heavy address can take 11-19s while server.ping stays
+//     sub-100ms, so the two need separate ceilings.
 //   - Resubscribe failures tear the socket down (CLOSE_CODE) so a higher layer
 //     can react. The patch turned this into a silent console.warn, which masked
 //     auth/desync failures.
@@ -77,6 +81,19 @@ export type ElectrumWSOptions = {
   verbose: boolean;
   /** Request timeout in ms. Defaults to 10s. */
   requestTimeoutMs: number;
+  /**
+   * Request timeout in ms for methods listed in `slowMethods`. Defaults to 30s.
+   * Lets fast control RPCs (ping/version/headers) keep a tight dead-socket
+   * detection window while giving scripthash queries enough headroom for a
+   * cold ElectrumX cache.
+   */
+  slowMethodTimeoutMs: number;
+  /**
+   * Methods that should use `slowMethodTimeoutMs` instead of `requestTimeoutMs`.
+   * Defaults to the scripthash query family, which can take 10s+ on cold cache
+   * for heavy addresses even against a healthy server.
+   */
+  slowMethods: ReadonlySet<string>;
   /** Override the WebSocket constructor. Defaults to isomorphic-ws. */
   WebSocketCtor?: WebSocketCtor;
 };
@@ -94,6 +111,17 @@ export enum ElectrumWSEvent {
 const RECONNECT_TIMEOUT = 1000;
 const CONNECTED_TIMEOUT = 500;
 const DEFAULT_REQUEST_TIMEOUT = 1000 * 10;
+const DEFAULT_SLOW_METHOD_TIMEOUT = 1000 * 30;
+const DEFAULT_SLOW_METHODS: ReadonlySet<string> = new Set([
+  "blockchain.scripthash.listunspent",
+  "blockchain.scripthash.subscribe",
+  "blockchain.scripthash.unsubscribe",
+  "blockchain.scripthash.get_history",
+  "blockchain.scripthash.get_mempool",
+  "blockchain.scripthash.get_balance",
+  // Whole-tx fetches can also stall on cold cache for large txs.
+  "blockchain.transaction.get",
+]);
 const CLOSE_CODE = 1000;
 
 type PendingRequest = {
@@ -195,6 +223,8 @@ export class ElectrumWS extends Observable {
     reconnect: true,
     verbose: false,
     requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT,
+    slowMethodTimeoutMs: DEFAULT_SLOW_METHOD_TIMEOUT,
+    slowMethods: DEFAULT_SLOW_METHODS,
   };
 
   private options: ElectrumWSOptions;
@@ -276,14 +306,27 @@ export class ElectrumWS extends Observable {
     return id;
   }
 
+  /**
+   * Pick the per-request timeout. `subscribe`/`unsubscribe` come in as the
+   * bare method name (`blockchain.scripthash`) so we also match the `.subscribe`
+   * / `.unsubscribe` variants the actual JSON-RPC call uses.
+   */
+  private resolveTimeoutMs(method: string): number {
+    if (this.options.slowMethods.has(method)) {
+      return this.options.slowMethodTimeoutMs;
+    }
+    return this.options.requestTimeoutMs;
+  }
+
   private createRequestPromise(id: number, method: string): Promise<unknown> {
+    const timeoutMs = this.resolveTimeoutMs(method);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.requests.delete(id);
         reject(
           new Error(`ElectrumWS request timeout. request ID: ${id} (${method})`)
         );
-      }, this.options.requestTimeoutMs);
+      }, timeoutMs);
       this.requests.set(id, { resolve, reject, method, timeout });
     });
   }
