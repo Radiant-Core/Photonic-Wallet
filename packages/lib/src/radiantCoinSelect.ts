@@ -22,6 +22,24 @@
 import { MAX_REASONABLE_FEE_RATE } from "./feePolicy";
 
 // --- Size constants -------------------------------------------------------
+//
+// R9 sign-off (verified against Radiant Core source 2026): every constant
+// below matches Radiant Core's transaction serialization / policy, or is
+// strictly more conservative. References:
+//   - TX_EMPTY_SIZE  = 8   → CTransaction: 4-byte int32 nVersion + 4-byte
+//                            uint32 nLockTime.
+//   - TX_INPUT_BASE  = 40  → CTxIn: 32-byte prevout txid + 4-byte vout +
+//                            4-byte nSequence (scriptSig length/bytes added
+//                            separately by inputBytes()).
+//   - TX_INPUT_PUBKEYHASH  = 107 → standard P2PKH unlocking script
+//                            (push ~71/72-byte sig + push 33-byte pubkey).
+//   - TX_OUTPUT_BASE = 8   → CTxOut nValue is an 8-byte int64 Amount.
+//   - TX_OUTPUT_PUBKEYHASH = 25 → standard P2PKH scriptPubKey
+//                            (OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG).
+//   - TX_DUST_THRESHOLD = 1 → matches Radiant Core policy.cpp: IsDust() is
+//                            true only for nValue <= 0; GetDustThreshold()
+//                            returns 1 satoshi. (Radiant removed BSV's 546
+//                            dust rule.) A 1-photon floor is safe + minimal.
 
 export const TX_EMPTY_SIZE = 4 + 4; // version + locktime
 export const TX_INPUT_BASE = 32 + 4 + 4; // prev_txid + prev_vout + sequence
@@ -34,6 +52,9 @@ export const TX_DUST_THRESHOLD = 1; // Radiant: no enforced dust, keep >0 floor
  * Emergency cap on total fee. Catches unit-confusion bugs (e.g. paying
  * sats/kB as photons/byte) before they spend the wallet. 100 RXD is enough
  * for 20 MB at 0.5 sat/byte — far above any legitimate single tx.
+ *
+ * R9 sign-off: safe relative to Radiant Core (MAX_STANDARD_TX_SIZE = 20 MB;
+ * 100 RXD over 20 MB ≈ 5 photons/byte, well under any reasonable rate).
  */
 export const MAX_TX_FEE_PHOTONS = 100 * 100_000_000;
 

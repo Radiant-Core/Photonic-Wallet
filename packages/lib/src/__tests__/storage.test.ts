@@ -238,20 +238,24 @@ describe("Backend Adapter", () => {
 // ============================================================================
 
 describe("IPFS Adapter", () => {
-  it("should check availability with API key", () => {
-    const adapter = new IPFSAdapter({
-      apiKey: "test-key",
-    });
-
-    expect(adapter.isAvailable()).toBe(true);
+  // R21: nft.storage removed. Upload is unsupported until a maintained
+  // pinning client is wired, so the adapter always reports unavailable and
+  // upload() throws. Download (gateway-based) is unaffected.
+  it("reports unavailable even with an API key (upload disabled)", () => {
+    const adapter = new IPFSAdapter({ apiKey: "test-key" });
+    expect(adapter.isAvailable()).toBe(false);
   });
 
-  it("should check availability without API key", () => {
-    const adapter = new IPFSAdapter({
-      apiKey: "",
-    });
-
+  it("reports unavailable without an API key", () => {
+    const adapter = new IPFSAdapter({ apiKey: "" });
     expect(adapter.isAvailable()).toBe(false);
+  });
+
+  it("upload() throws a clear 'not available' error", async () => {
+    const adapter = new IPFSAdapter({ apiKey: "test-key" });
+    await expect(
+      adapter.upload(new Uint8Array([1, 2, 3]), new Uint8Array(32))
+    ).rejects.toThrow(/not available|nft\.storage|R21/i);
   });
 });
 

@@ -45,6 +45,21 @@ export * from "./encryption";
 export * from "./timelock";
 export * from "./reveal";
 
+// SPV (transaction-inclusion verification). Named exports — `dsha256` is
+// already surfaced via ./crypto, so we exclude it here to avoid a duplicate.
+export {
+  extractMerkleRoot,
+  hashBlockHeader,
+  readNBits,
+  verifyHeaderTarget,
+  verifyMerkleProof,
+  computeMerkleRootFromProof,
+  verifyTxInclusion,
+  BLOCK_HEADER_SIZE,
+  type MerkleProof,
+  type InclusionResult,
+} from "./spv";
+
 // Storage (Phase 2: Off-Chain Storage)
 export * from "./storage";
 

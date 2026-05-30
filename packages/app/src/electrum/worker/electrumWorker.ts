@@ -4,18 +4,28 @@ import ElectrumManager from "../ElectrumManager";
 import { FTWorker, NFTWorker, RXDWorker, VaultWorker } from "./index";
 import db from "@app/db";
 import { ElectrumStatus, VaultRecord } from "@app/types";
-import { ElectrumRefResponse } from "@lib/types";
+import { ElectrumRefResponse, NetworkKey } from "@lib/types";
+import { network } from "@app/signals";
+import config from "@app/config.json";
 import { findSwaps } from "./findSwaps";
 import { isUtxoUnspent } from "./isUtxoUnspent";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
+import { HeadersSubscription } from "./Headers";
+import {
+  verifyTransactionInclusion,
+  type TxVerification,
+} from "@app/verifier";
 
 type Timer = ReturnType<typeof setTimeout> | null;
 
 declare const self: SharedWorkerGlobalScope;
 
 const electrum = new ElectrumManager();
-// Disable until SPV is implemented
-//const headers = new HeadersWorker(electrum);
+// Block-header chain sync. Downloads + PoW-validates headers from a pinned
+// checkpoint so SPV (transaction-inclusion) verification has a trusted
+// Merkle-root source. Enabled now that SPV verification is implemented
+// (see verifier.ts / @lib/spv, audit R14).
+const headers = new HeadersSubscription(electrum);
 let address = "";
 let servers: string[] = [];
 let serverNum = 0;
@@ -40,6 +50,17 @@ const worker = {
     workerLog("[Worker] setServers called:", newServers);
     serverNum = 0;
     servers = newServers;
+  },
+  /**
+   * Set the worker's network. The SharedWorker has its own module-scoped
+   * copy of the `network` signal (separate from the main thread), so the
+   * main thread must push the active network in. Header validation
+   * (ASERT difficulty anchors in Headers.ts) depends on this being correct;
+   * without it headers would validate against the testnet default and fail
+   * on mainnet. Call before `connect`.
+   */
+  setNetwork(net: NetworkKey) {
+    network.value = config.networks[net];
   },
   connect(_address: string) {
     workerLog("[Worker] connect called", {
@@ -157,6 +178,22 @@ const worker = {
     }
 
     return rawTx;
+  },
+  /**
+   * SPV-verify that a confirmed transaction is actually included in the chain
+   * (audit R14). Fetches a Merkle proof from the server and checks it against
+   * our locally PoW-validated header at the proof's height. Returns an
+   * `unverified` result (never throws) when headers aren't synced yet or the
+   * proof doesn't check out.
+   */
+  async verifyTransaction(
+    txid: string,
+    height?: number
+  ): Promise<TxVerification> {
+    if (!electrum.client || !electrum.connected()) {
+      return { status: "unverified", reason: "error" };
+    }
+    return verifyTransactionInclusion(electrum.client, txid, height);
   },
   isReady() {
     return this.ready;
@@ -506,6 +543,11 @@ electrum.addEvent("connected", () => {
     { status: ElectrumStatus.CONNECTED, server: electrum.endpoint },
     "electrumStatus"
   );
+  // Start header-chain sync independently of the wallet address — SPV needs
+  // headers regardless of which account is loaded.
+  headers.register().catch((err) => {
+    workerLog("[Worker] Header subscription failed:", err);
+  });
   if (address) {
     workerLog("[Worker] Connected, registering address:", address);
     rxd.register(address);

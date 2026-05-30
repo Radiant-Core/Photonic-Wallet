@@ -44,6 +44,7 @@ try {
 
 const wrapped = wrap<{
   setServers: (servers: string[]) => void;
+  setNetwork: (net: "mainnet" | "testnet") => void;
   connect: (address: string) => void;
   isReady: () => boolean;
   reconnect: () => boolean;
@@ -51,6 +52,12 @@ const wrapped = wrap<{
   broadcast: (hex: string) => string;
   getRef: (ref: string) => ElectrumRefResponse;
   getTransaction: (txid: string) => string;
+  verifyTransaction: (
+    txid: string,
+    height?: number
+  ) =>
+    | { status: "verified"; blockHeight: number }
+    | { status: "unverified"; reason: string };
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
   discoverVaults: (wif: string, address: string, swapWif?: string) => number;
@@ -127,6 +134,10 @@ export default function Electrum() {
         "[Electrum] Connecting with servers:",
         stableServers.length
       );
+      // Push the active network into the worker before connecting so header
+      // validation uses the correct ASERT anchors (worker has its own signal
+      // scope — see worker setNetwork / audit R14).
+      electrumWorker.value.setNetwork(wallet.value.net);
       electrumWorker.value.setServers(stableServers);
       electrumWorker.value.connect(wallet.value.address);
     }

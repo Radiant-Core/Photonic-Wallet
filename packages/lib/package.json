@@ -48,7 +48,6 @@
     "buffer": "^6.0.3",
     "cbor-x": "^1.6.0",
     "isomorphic-ws": "^5.0.0",
-    "nft.storage": "^7.2.0",
     "ws": "^8.18.0"
   },
   "description": "",

@@ -26,7 +26,6 @@ import {
   toBase64,
   fromBase64,
 } from "./encryption";
-import { NFTStorage } from "nft.storage";
 
 // ============================================================================
 // Types
@@ -523,19 +522,24 @@ export class BackendAdapter implements StorageAdapter {
 }
 
 // ============================================================================
-// IPFS Adapter (via nft.storage)
+// IPFS Adapter
 // ============================================================================
 
 export type IPFSConfig = {
-  /** NFT.Storage API key */
+  /** Pinning-service API key (reserved for the future maintained client). */
   apiKey: string;
-  /** Whether to actually pin or just encode CID (dry run) */
+  /** Whether to actually pin or just encode CID (dry run). */
   dryRun?: boolean;
 };
 
 /**
- * IPFS adapter using nft.storage
- * Content-addressed storage with integrity verification
+ * IPFS adapter.
+ *
+ * Audit R21: the deprecated `nft.storage` backend was removed. Download still
+ * works against public IPFS gateways (with CID + hash verification), but
+ * UPLOAD is currently unsupported until a maintained pinning client is wired
+ * (see `ipfs.ts` module docs). `isAvailable()` therefore reports false so the
+ * adapter is not offered as an upload target.
  */
 export class IPFSAdapter implements StorageAdapter {
   readonly name = "ipfs";
@@ -547,43 +551,25 @@ export class IPFSAdapter implements StorageAdapter {
   }
 
   isAvailable(): boolean {
-    return !!this.config.apiKey;
+    // Upload is unsupported until a maintained pinning client replaces the
+    // removed nft.storage backend (audit R21). Report unavailable so the
+    // adapter isn't offered as an upload target.
+    return false;
   }
 
   async upload(
-    data: Uint8Array,
-    contentHash: Uint8Array,
-    onProgress?: ProgressCallback
+    _data: Uint8Array,
+    _contentHash: Uint8Array,
+    _onProgress?: ProgressCallback
   ): Promise<string> {
-    const store = new NFTStorage({ token: this.config.apiKey });
-    const blob = new Blob([new Uint8Array(data)]);
-
-    const { car, cid: encodedCid } = await NFTStorage.encodeBlob(blob);
-
-    // Verify CID matches content hash expectation
-    const cid = encodedCid.toString();
-
-    if (this.config.dryRun) {
-      if (onProgress) {
-        onProgress(data.length, data.length, "uploading");
-      }
-      return cid;
-    }
-
-    // Actually store
-    const storedCid = await store.storeCar(car);
-
-    if (storedCid.toString() !== cid) {
-      throw new Error("IPFS CID mismatch after storage");
-    }
-
-    const status = await store.status(storedCid);
-
-    if (onProgress) {
-      onProgress(data.length, data.length, "uploading");
-    }
-
-    return status.cid.toString();
+    void _data;
+    void _contentHash;
+    void _onProgress;
+    throw new Error(
+      "IPFS upload is not available: the deprecated nft.storage backend was " +
+        "removed (audit R21). Wire a maintained pinning client to re-enable. " +
+        "IPFS downloads still work."
+    );
   }
 
   async download(
