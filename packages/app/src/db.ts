@@ -165,6 +165,15 @@ export class Database extends Dexie {
     this.version(14).stores({
       broadcast: "txid, date",
     });
+
+    // Add `mode` index to swap table so MyOffersPanel can query
+    // db.swap.where({ mode: SwapMode.BROADCAST }) without SchemaError.
+    // The `mode` field was added to TokenSwap after version 6 shipped but the
+    // index was never created, causing "KeyPath mode on object store swap is
+    // not indexed" for all users with an existing DB.
+    this.version(15).stores({
+      swap: "++id, status, txid, mode",
+    });
   }
 }
 
