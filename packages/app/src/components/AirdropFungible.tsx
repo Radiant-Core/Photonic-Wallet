@@ -35,7 +35,11 @@ import TokenContent from "./TokenContent";
 import { RiQuestionFill } from "react-icons/ri";
 import { electrumWorker } from "@app/electrum/Electrum";
 import FtBalance from "./FtBalance";
-import { updateFtBalances, updateWalletUtxos } from "@app/utxos";
+import {
+  updateFtBalances,
+  updateRxdBalances,
+  updateWalletUtxos,
+} from "@app/utxos";
 import AddressInput from "./AddressInput";
 import { TransferError, transferFungibleToMany } from "@lib/transfer";
 
@@ -153,6 +157,8 @@ export default function AirdropFungible({
         selected.outputs
       );
       updateFtBalances(new Set([fromScript]));
+      // Airdrop also consumed RXD for the fee — refresh the RXD balance too.
+      await updateRxdBalances(wallet.value.address);
 
       if (onSuccess) onSuccess(txid);
     } catch (error) {

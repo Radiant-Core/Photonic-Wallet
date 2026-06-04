@@ -39,7 +39,7 @@ import { ContractType } from "@app/types";
 import { p2pkhScript, payToScript } from "@lib/script";
 import { feeRate, network, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
-import { updateWalletUtxos } from "@app/utxos";
+import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
 import { UnfinalizedInput } from "@lib/types";
 import Balance from "./Balance";
 import AddressInput from "./AddressInput";
@@ -264,6 +264,8 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
         pendingTx.selected.inputs,
         pendingTx.selected.outputs
       );
+      // Recompute the displayed RXD balance from the now-updated UTXO set.
+      await updateRxdBalances(wallet.value.address);
 
       toast({
         title: `Sent ${photonsToRXD(pendingTx.amount)} ${network.value.ticker}`,

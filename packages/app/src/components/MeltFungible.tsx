@@ -26,6 +26,11 @@ import db from "../db";
 import { feeRate, openModal, wallet } from "@app/signals";
 import { reverseRef } from "@lib/Outpoint";
 import { electrumWorker } from "@app/electrum/Electrum";
+import {
+  updateFtBalances,
+  updateRxdBalances,
+  updateWalletUtxos,
+} from "@app/utxos";
 
 interface Props {
   glyph: SmartToken;
@@ -124,6 +129,19 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
     try {
       const txid = await electrumWorker.value.broadcast(rawTx);
       db.broadcast.put({ txid, date: Date.now(), description: "ft_melt" });
+      // Mark the melted FT and the RXD fee coins spent, record RXD change, and
+      // refresh balances so the melted tokens leave the wallet immediately
+      // instead of lingering until the next background sync.
+      await updateWalletUtxos(
+        ContractType.FT,
+        fromScript, // FT change (none for a full melt)
+        changeScript, // RXD change
+        txid,
+        selected.inputs,
+        selected.outputs
+      );
+      await updateFtBalances(new Set([fromScript]));
+      await updateRxdBalances(wallet.value.address);
       if (onSuccess) onSuccess(txid);
       toast({ status: "success", title: "Tokens melted" });
     } catch {

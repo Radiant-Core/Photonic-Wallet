@@ -25,6 +25,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import db from "../db";
 import { feeRate, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
+import { updateRxdBalances } from "@app/utxos";
 
 interface Props {
   asset: TxO;
@@ -110,6 +111,18 @@ export default function MeltDigitalObject({
       const txid = await electrumWorker.value.broadcast(rawTx);
       console.log("[Melt] Broadcast result txid:", txid, "type:", typeof txid);
       db.broadcast.put({ txid, date: Date.now(), description: "nft_melt" });
+
+      // Melt destroys the NFT — mark its input spent and its glyph row spent
+      // (the wallet grid filters on glyph.spent, see pages/Wallet.tsx) so it
+      // disappears immediately instead of lingering until the next background
+      // sync. Mirrors electrum/worker/NFT.ts.
+      if (asset.id) {
+        await db.txo.update(asset.id, { spent: 1 });
+        await db.glyph.where({ lastTxoId: asset.id }).modify({ spent: 1 });
+      }
+      // Melt burned RXD for the fee — refresh the displayed RXD balance.
+      await updateRxdBalances(wallet.value.address);
+
       if (onSuccess) onSuccess(txid);
       toast({ status: "success", title: "Token melted" });
     } catch {

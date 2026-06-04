@@ -80,7 +80,8 @@ import { updateWaveTarget } from "@app/waveTarget";
 import { photonsToRXD } from "@lib/format";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import Outpoint from "@lib/Outpoint";
-import { isP2pkh } from "@lib/script";
+import { isP2pkh, p2pkhScript } from "@lib/script";
+import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
 import { burnNft } from "@lib/burn";
 import { transferNonFungible, TransferError } from "@lib/transfer";
 import { SelectableInput } from "@lib/coinSelect";
@@ -763,6 +764,8 @@ function WaveNameCard({
         await db.glyph.update(record.id, { spent: 1 });
       }
       await db.txo.update(record.txoId!, { spent: 1 });
+      // The reclaim burned RXD for the fee — refresh the displayed RXD balance.
+      await updateRxdBalances(wallet.value.address);
 
       toast({
         title: "Name Reclaimed",
@@ -910,10 +913,13 @@ function WaveNameCard({
         description: "wave_name_burn",
       });
 
-      // Mark as spent in DB
+      // Mark as spent in DB. Also mark the NFT input spent so it isn't
+      // reselected, and refresh the RXD balance burned for the fee.
       if (record.id) {
         await db.glyph.update(record.id, { spent: 1 });
       }
+      await db.txo.update(record.txoId!, { spent: 1 });
+      await updateRxdBalances(wallet.value.address);
 
       toast({
         title: "WAVE Name Burned",
@@ -992,7 +998,7 @@ function WaveNameCard({
       const ref = Outpoint.fromString(record.ref);
       const refLE = ref.reverse().toString();
 
-      const { tx } = transferNonFungible(
+      const { tx, selected } = transferNonFungible(
         rxdUtxos as SelectableInput[],
         txo,
         refLE,
@@ -1010,10 +1016,24 @@ function WaveNameCard({
         description: "wave_name_transfer",
       });
 
-      // Update ownership in DB
+      // Update ownership in DB. WAVE names are NFTs: the wallet view filters on
+      // the glyph row's `spent` flag, so mark it spent so the name leaves this
+      // wallet immediately. Also mark the NFT input + RXD fee coins spent (and
+      // record RXD change) and refresh the RXD balance, so nothing is
+      // reselected by a later send and the displayed balance is correct.
       if (record.id) {
         await db.glyph.update(record.id, { spent: 1 });
       }
+      const changeScript = p2pkhScript(wallet.value.address);
+      await updateWalletUtxos(
+        ContractType.RXD,
+        changeScript,
+        changeScript,
+        txid,
+        selected.inputs,
+        selected.outputs
+      );
+      await updateRxdBalances(wallet.value.address);
 
       toast({
         title: "WAVE Name Transferred",

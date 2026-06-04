@@ -48,7 +48,11 @@ import TokenContent from "./TokenContent";
 import { RiQuestionFill } from "react-icons/ri";
 import { electrumWorker } from "@app/electrum/Electrum";
 import FtBalance from "./FtBalance";
-import { updateFtBalances, updateWalletUtxos } from "@app/utxos";
+import {
+  updateFtBalances,
+  updateRxdBalances,
+  updateWalletUtxos,
+} from "@app/utxos";
 import AddressInput from "./AddressInput";
 import { BsQrCodeScan } from "react-icons/bs";
 import { TransferError, transferFungible } from "@lib/transfer";
@@ -273,6 +277,9 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
         pendingTx.selected.outputs
       );
       updateFtBalances(new Set([pendingTx.fromScript]));
+      // The send also consumed RXD coins for the fee (and produced RXD change),
+      // so refresh the RXD balance too — otherwise it shows stale until sync.
+      await updateRxdBalances(wallet.value.address);
 
       toast({
         title: `Sent ${pendingTx.tokenAmount}`,

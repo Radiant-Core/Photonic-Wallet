@@ -32,7 +32,12 @@ import Identifier from "./Identifier";
 import Outpoint from "@lib/Outpoint";
 import { feeRate, network, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
-import { updateWalletUtxos, updateNFTOwned } from "@app/utxos";
+import {
+  updateNFTOwned,
+  updateRxdBalances,
+  updateWalletUtxos,
+} from "@app/utxos";
+import { UnfinalizedInput } from "@lib/types";
 import { BsQrCodeScan } from "react-icons/bs";
 import AddressInput from "./AddressInput";
 import { TransferError, transferNonFungible } from "@lib/transfer";
@@ -66,6 +71,7 @@ export default function SendDigitalObject({
     recipientAddress: string;
     fee: number;
     nftName: string;
+    selected: { inputs: SelectableInput[]; outputs: UnfinalizedInput[] };
   } | null>(null);
   // Guards against a double-broadcast if the confirm button is hit twice
   // before the first request resolves.
@@ -151,6 +157,7 @@ export default function SendDigitalObject({
         recipientAddress: toAddress.current?.value || "",
         fee,
         nftName: glyph?.name || "Unknown NFT",
+        selected,
       });
       setConfirmModalOpen(true);
       setLoading(false);
@@ -197,27 +204,13 @@ export default function SendDigitalObject({
       db.broadcast.put({ txid, date: Date.now(), description: "nft_send" });
       console.debug("Result", txid);
 
-      // Mark the NFT input spent so a second submit can't rebuild and
-      // rebroadcast the same transfer.
-      if (txo.id) {
-        await db.txo.update(txo.id, { spent: 1 });
-      }
-
-      toast({
-        title: `Sent NFT: ${pendingTx.nftName}`,
-        status: "success",
-      });
-
-      // Close modals and cleanup
-      setConfirmModalOpen(false);
-      setPendingTx(null);
-
       // Update UTXOs and refresh UI
       const changeScript = p2pkhScript(wallet.value.address);
       const sendToSelf = pendingTx.recipientAddress === wallet.value.address;
 
-      // Update NFT UTXOs if sent to self
       if (sendToSelf) {
+        // Sending to your own address — the NFT stays owned. Keep the existing
+        // approximate handling and let the background sync re-point the glyph.
         await updateWalletUtxos(
           ContractType.NFT,
           p2pkhScript(wallet.value.address), // Will find by outpoint
@@ -233,8 +226,38 @@ export default function SendDigitalObject({
             },
           ]
         );
+      } else {
+        // The NFT leaves the wallet. The grid filters on the glyph row's
+        // `spent` flag (see pages/Wallet.tsx), not the txo, so mark the glyph
+        // spent — otherwise it lingers until the next background sync. Mirrors
+        // electrum/worker/NFT.ts.
+        if (txo.id) {
+          await db.glyph.where({ lastTxoId: txo.id }).modify({ spent: 1 });
+        }
+        // Mark the NFT input and the RXD fee coins spent, and record RXD
+        // change, so none of them are reselected by a later send.
+        await updateWalletUtxos(
+          ContractType.RXD,
+          changeScript,
+          changeScript,
+          txid,
+          pendingTx.selected.inputs,
+          pendingTx.selected.outputs
+        );
       }
+
+      // The send consumed RXD for the fee, so refresh the RXD balance.
+      await updateRxdBalances(wallet.value.address);
       updateNFTOwned(wallet.value.address);
+
+      toast({
+        title: `Sent NFT: ${pendingTx.nftName}`,
+        status: "success",
+      });
+
+      // Close modals and cleanup
+      setConfirmModalOpen(false);
+      setPendingTx(null);
 
       if (onSuccess) onSuccess(txid);
     } catch (error) {
