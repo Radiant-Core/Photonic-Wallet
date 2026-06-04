@@ -9,11 +9,24 @@ import { useEffect, useRef, useCallback } from "react";
 type Timeout = ReturnType<typeof setTimeout>;
 const LOCK_VISIBILITY_GRACE = 30000; // 30 seconds grace period when tab hidden
 
+// Minimum spacing between the syncPending kicked off on reactivate. Safari
+// fires spurious focus/blur (and therefore deactivate/reactivate) far more
+// than Chrome; without this, each flap re-runs a full rxd+ft+nft+vault sync,
+// piling requests onto the socket and sustaining the sync-error storm.
+// setActive(true) still happens every time so processing resumes promptly —
+// only the (expensive) full rescan is rate-limited.
+const MIN_REACTIVATE_SYNC_INTERVAL = 10000;
+let lastReactivateSync = 0;
+
 async function reactivate() {
   if (!(await electrumWorker.value.isActive())) {
     console.debug("Reactivating sync");
     electrumWorker.value.setActive(true);
-    electrumWorker.value.syncPending();
+    const now = Date.now();
+    if (now - lastReactivateSync > MIN_REACTIVATE_SYNC_INTERVAL) {
+      lastReactivateSync = now;
+      electrumWorker.value.syncPending();
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
+import { Badge, Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -26,12 +26,15 @@ export default function TokenRow({
   to,
   size = "md",
   defaultIcon,
+  pending,
 }: {
   glyph: SmartToken;
   value: number;
   to: string;
   size?: "sm" | "md";
   defaultIcon?: IconType;
+  // True while there is an unconfirmed (mempool) balance for this token.
+  pending?: boolean;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isEncrypted = !!glyph?.p?.includes(GLYPH_ENCRYPTED);
@@ -93,6 +96,18 @@ export default function TokenRow({
           <Text as="div" color="gray.400" whiteSpace="nowrap" flexShrink={0}>
             {(glyph.ticker as string) || ""}
           </Text>
+          {pending && (
+            <Tooltip label="Awaiting block confirmation" placement="top">
+              <Badge
+                colorScheme="yellow"
+                variant="subtle"
+                flexShrink={0}
+                alignSelf="center"
+              >
+                {"Pending"}
+              </Badge>
+            </Tooltip>
+          )}
         </Flex>
         <Ref value={glyph.ref} />
       </Box>

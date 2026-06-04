@@ -11,6 +11,10 @@ import { consolidationCheck } from "./consolidationCheck";
 import { updateFtBalances } from "@app/utxos";
 import { arrayChunks } from "@lib/util";
 
+// Delay before re-running a sync that just failed, so a congested/timing-out
+// socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
+const RETRY_BACKOFF_MS = 3000;
+
 export class FTWorker extends NFTWorker {
   protected ready = true;
   protected receivedStatuses: string[] = [];
@@ -47,8 +51,13 @@ export class FTWorker extends NFTWorker {
 
     if (
       !this.ready ||
-      (!manual &&
-        (!this.worker.active || (await db.kvp.get("consolidationRequired"))))
+      // Consolidation is advisory (ConsolidationModal prompts the user) and the
+      // consolidate() routine already pauses syncing via setActive(false). It
+      // must NOT gate normal receive syncing here — otherwise incoming tokens
+      // stay queued/invisible while the wallet holds >20 UTXOs until a manual
+      // sync. Only defer while the worker is inactive (the queue drains on
+      // reactivation via setActive(true) / syncPending).
+      (!manual && !this.worker.active)
     ) {
       this.receivedStatuses.push(status);
       return;
@@ -56,6 +65,7 @@ export class FTWorker extends NFTWorker {
 
     this.ready = false;
     this.lastReceivedStatus = status;
+    let failed = false;
 
     try {
       const { added, spent } = await this.updateTXOs(
@@ -152,6 +162,7 @@ export class FTWorker extends NFTWorker {
       // restore `ready` so the next sync isn't permanently skipped.
       console.warn("[FT] subscription update failed:", error);
       if (status) this.receivedStatuses.push(status);
+      failed = true;
       db.subscriptionStatus.put({
         scriptHash,
         status: "",
@@ -166,9 +177,14 @@ export class FTWorker extends NFTWorker {
       const lastStatus = this.receivedStatuses.pop();
       this.receivedStatuses = [];
       if (lastStatus) {
-        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
-          console.warn("[FT] requeued sync failed:", e)
-        );
+        const retry = () =>
+          this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+            console.warn("[FT] requeued sync failed:", e)
+          );
+        // Back off after a failure; retry immediately when the requeue is just
+        // draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        else retry();
       }
     }
 

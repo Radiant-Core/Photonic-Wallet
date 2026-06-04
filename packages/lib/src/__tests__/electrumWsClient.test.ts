@@ -319,3 +319,87 @@ describe("ElectrumWS — close", () => {
     await expectation;
   });
 });
+
+describe("ElectrumWS — concurrency gate", () => {
+  it("caps in-flight requests and sends parked ones as slots free", async () => {
+    const client = makeClient({ maxConcurrentRequests: 2 });
+    const sock = MockSocket.last();
+    sock.emitOpen();
+    await vi.advanceTimersByTimeAsync(500);
+
+    const p1 = client.request("server.version", "a");
+    const p2 = client.request("server.version", "b");
+    const p3 = client.request("server.version", "c");
+
+    // Fast path is synchronous: the first two frames are already on the wire,
+    // the third is parked behind the cap.
+    expect(sock.sent).toHaveLength(2);
+    const frames = sock.sent.map((s) => JSON.parse(s));
+    expect(frames.map((f) => f.params[0])).toEqual(["a", "b"]);
+
+    // Completing p1 frees a slot → the parked p3 is sent.
+    sock.emitMessageJson({ jsonrpc: "2.0", id: frames[0].id, result: "ra" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sock.sent).toHaveLength(3);
+    const frame3 = JSON.parse(sock.sent[2]);
+    expect(frame3.params[0]).toBe("c");
+
+    sock.emitMessageJson({ jsonrpc: "2.0", id: frames[1].id, result: "rb" });
+    sock.emitMessageJson({ jsonrpc: "2.0", id: frame3.id, result: "rc" });
+    await expect(p1).resolves.toBe("ra");
+    await expect(p2).resolves.toBe("rb");
+    await expect(p3).resolves.toBe("rc");
+    await client.close("done");
+  });
+
+  it("does not start a parked request's timeout until it is actually sent", async () => {
+    const client = makeClient({
+      maxConcurrentRequests: 1,
+      requestTimeoutMs: 100,
+    });
+    const sock = MockSocket.last();
+    sock.emitOpen();
+    await vi.advanceTimersByTimeAsync(500);
+
+    const p1 = client.request("server.version", "a"); // takes the only slot
+    const p2 = client.request("server.version", "b"); // parked
+    expect(sock.sent).toHaveLength(1);
+    const f1 = JSON.parse(sock.sent[0]);
+
+    // Hold p1 open for 90ms. p2 is parked the whole time — its deadline must
+    // not be counting down yet.
+    await vi.advanceTimersByTimeAsync(90);
+    sock.emitMessageJson({ jsonrpc: "2.0", id: f1.id, result: "ra" });
+    await expect(p1).resolves.toBe("ra");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // p2 is sent now; its 100ms window begins here, not at enqueue.
+    expect(sock.sent).toHaveLength(2);
+    const f2 = JSON.parse(sock.sent[1]);
+
+    // 90ms more — 180ms total since p2 was enqueued, which would have timed it
+    // out if the clock had started at enqueue. It was only sent ~90ms ago, so
+    // it survives.
+    await vi.advanceTimersByTimeAsync(90);
+    sock.emitMessageJson({ jsonrpc: "2.0", id: f2.id, result: "rb" });
+    await expect(p2).resolves.toBe("rb");
+    await client.close("done");
+  });
+
+  it("rejects parked requests when the socket closes", async () => {
+    const client = makeClient({ maxConcurrentRequests: 1 });
+    const sock = MockSocket.last();
+    sock.emitOpen();
+    await vi.advanceTimersByTimeAsync(500);
+
+    const p1 = client.request("server.version", "a"); // in-flight
+    const p2 = client.request("server.version", "b"); // parked
+    expect(sock.sent).toHaveLength(1);
+
+    const e1 = expect(p1).rejects.toThrow("manual-close");
+    const e2 = expect(p2).rejects.toThrow("manual-close");
+    void client.close("manual-close");
+    await e1;
+    await e2;
+  });
+});

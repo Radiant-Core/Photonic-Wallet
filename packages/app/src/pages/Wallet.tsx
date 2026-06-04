@@ -336,6 +336,7 @@ function TokenGrid({ open }: { open: boolean }) {
                     page > 0 ? `?p=${page}` : ""
                   }`}
                   size={viewMode === "compact" || open ? "sm" : "md"}
+                  pending={token.txo.height === Infinity}
                 />
               )
           )}

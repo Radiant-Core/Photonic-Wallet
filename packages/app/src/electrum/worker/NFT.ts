@@ -40,6 +40,10 @@ import { consolidationCheck } from "./consolidationCheck";
 // 500KB size limit
 const fileSizeLimit = 500_000;
 
+// Delay before re-running a sync that just failed, so a congested/timing-out
+// socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
+const RETRY_BACKOFF_MS = 3000;
+
 type TxIdHeight = {
   tx_hash: string;
   height: number;
@@ -112,8 +116,13 @@ export class NFTWorker implements Subscription {
 
     if (
       !this.ready ||
-      (!manual &&
-        (!this.worker.active || (await db.kvp.get("consolidationRequired"))))
+      // Consolidation is advisory (ConsolidationModal prompts the user) and the
+      // consolidate() routine already pauses syncing via setActive(false). It
+      // must NOT gate normal receive syncing here — otherwise incoming tokens
+      // stay queued/invisible while the wallet holds >20 UTXOs until a manual
+      // sync. Only defer while the worker is inactive (the queue drains on
+      // reactivation via setActive(true) / syncPending).
+      (!manual && !this.worker.active)
     ) {
       this.receivedStatuses.push(status);
       return;
@@ -121,6 +130,7 @@ export class NFTWorker implements Subscription {
 
     this.ready = false;
     this.lastReceivedStatus = status;
+    let failed = false;
 
     // R10 follow-up: electrum requests reject pending promises on socket
     // close (the heavy-history "excessive resource usage" path drops the
@@ -201,6 +211,7 @@ export class NFTWorker implements Subscription {
       console.warn("[NFT] subscription update failed:", err);
       // Queue the status so a future ready window retries it.
       if (status) this.receivedStatuses.push(status);
+      failed = true;
     } finally {
       this.ready = true;
     }
@@ -209,9 +220,14 @@ export class NFTWorker implements Subscription {
       const lastStatus = this.receivedStatuses.pop();
       this.receivedStatuses = [];
       if (lastStatus) {
-        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
-          console.warn("[NFT] requeued sync failed:", e)
-        );
+        const retry = () =>
+          this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+            console.warn("[NFT] requeued sync failed:", e)
+          );
+        // Back off after a failure; retry immediately when the requeue is just
+        // draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        else retry();
       }
     }
 

@@ -43,60 +43,71 @@ export class HeadersSubscription implements Subscription {
   async catchup() {
     this.catchingUp = true;
     console.debug("Catching up block headers");
-    const fetchFromHeight = this.latestBlock.height;
-    const fetchToHeight =
-      this.pending[0]?.height || this.latestBlock.height + 1000;
+    try {
+      const fetchFromHeight = this.latestBlock.height;
+      const fetchToHeight =
+        this.pending[0]?.height || this.latestBlock.height + 1000;
 
-    const response = (await this.electrum.client?.request(
-      "blockchain.block.headers",
-      fetchFromHeight,
-      fetchToHeight - fetchFromHeight
-    )) as ElectrumHeadersResponse;
+      const response = (await this.electrum.client?.request(
+        "blockchain.block.headers",
+        fetchFromHeight,
+        fetchToHeight - fetchFromHeight
+      )) as ElectrumHeadersResponse;
 
-    // Split 80 byte header hex strings
-    const headers = response.hex.match(/.{160}/g) || [];
+      // Split 80 byte header hex strings
+      const headers = response.hex.match(/.{160}/g) || [];
 
-    // Check the first header returned matches our last header
-    // If not, there must be a reorg
-    const first = headers.shift();
-    if (first) {
-      const firstHeader = RadJSBlockHeader.fromString(first);
-      if (this.latestBlock.hash !== firstHeader.hash) {
-        // FIXME check for infinite loop?
+      // Check the first header returned matches our last header
+      // If not, there must be a reorg
+      const first = headers.shift();
+      if (first) {
+        const firstHeader = RadJSBlockHeader.fromString(first);
+        if (this.latestBlock.hash !== firstHeader.hash) {
+          // FIXME check for infinite loop?
 
-        // Reorg. We need to find where the last good header is.
-        // Go back 10 blocks and reattempt
-        await this.rollback();
+          // Reorg. We need to find where the last good header is.
+          // Go back 10 blocks and reattempt
+          await this.rollback();
+          await this.catchup();
+          return;
+        }
+        console.debug("No reorg found");
+      }
+
+      console.debug("Processing catchup headers");
+
+      headers.forEach((hex, index) => {
+        this.processHeader({
+          height: fetchFromHeight + index + 1, // Add one because first header was shifted
+          hex,
+        });
+      });
+
+      // Check if we have caught up
+      if (
+        this.pending.length &&
+        this.latestBlock.height < this.pending[0].height - 1
+      ) {
+        console.debug("Still not caught up");
         await this.catchup();
         return;
       }
-      console.debug("No reorg found");
+
+      // Process the headers received from the subscription
+      await this.processPending();
+
+      this.catchingUp = false;
+      console.debug("Finished catching up");
+    } catch (error) {
+      // The header fetch can reject when the socket is congested (the request
+      // times out) or drops mid-catchup. Clear the in-progress flag so the
+      // next header notification — or a syncPending — retries, instead of
+      // leaving catchup permanently wedged (catchingUp stuck true) or letting
+      // the rejection escape as an unhandled promise. `pending` is preserved,
+      // so the queued tip heights are picked up on the retry.
+      this.catchingUp = false;
+      console.warn("[Headers] catchup failed, will retry on next header:", error);
     }
-
-    console.debug("Processing catchup headers");
-
-    headers.forEach((hex, index) => {
-      this.processHeader({
-        height: fetchFromHeight + index + 1, // Add one because first header was shifted
-        hex,
-      });
-    });
-
-    // Check if we have caught up
-    if (
-      this.pending.length &&
-      this.latestBlock.height < this.pending[0].height - 1
-    ) {
-      console.debug("Still not caught up");
-      this.catchup();
-      return;
-    }
-
-    // Process the headers received from the subscription
-    await this.processPending();
-
-    this.catchingUp = false;
-    console.debug("Finished catching up");
   }
 
   async syncPending() {}
@@ -131,7 +142,13 @@ export class HeadersSubscription implements Subscription {
       ) {
         this.pending.push(raw);
         if (!this.catchingUp) {
-          this.catchup();
+          // Fire-and-forget, but never let a catchup rejection surface as an
+          // unhandled promise (catchup swallows its own errors; this is belt
+          // and braces).
+          this.catchup().catch((err) => {
+            this.catchingUp = false;
+            console.warn("[Headers] catchup error:", err);
+          });
         }
       } else if (this.latestBlock.hash === header.hash) {
         console.debug("Header already in database");

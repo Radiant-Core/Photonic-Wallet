@@ -94,6 +94,19 @@ export type ElectrumWSOptions = {
    * for heavy addresses even against a healthy server.
    */
   slowMethods: ReadonlySet<string>;
+  /**
+   * Maximum number of requests allowed in flight on the socket at once.
+   * Excess requests queue and are sent as slots free up. Defaults to 4.
+   *
+   * A single ElectrumX connection processes a heavy wallet's `listunspent` /
+   * `ref.get` / header fetches effectively serially; firing the whole sync
+   * fan-out at once backs up the server-side queue until requests blow their
+   * client-side deadline (the Safari "continuous sync error" storm). Capping
+   * concurrency keeps the queue short. Crucially, the per-request timeout
+   * clock only starts once a slot is acquired and the frame is sent — queued
+   * requests don't burn their deadline while waiting.
+   */
+  maxConcurrentRequests: number;
   /** Override the WebSocket constructor. Defaults to isomorphic-ws. */
   WebSocketCtor?: WebSocketCtor;
 };
@@ -112,6 +125,7 @@ const RECONNECT_TIMEOUT = 1000;
 const CONNECTED_TIMEOUT = 500;
 const DEFAULT_REQUEST_TIMEOUT = 1000 * 10;
 const DEFAULT_SLOW_METHOD_TIMEOUT = 1000 * 30;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
 const DEFAULT_SLOW_METHODS: ReadonlySet<string> = new Set([
   "blockchain.scripthash.listunspent",
   "blockchain.scripthash.subscribe",
@@ -121,6 +135,10 @@ const DEFAULT_SLOW_METHODS: ReadonlySet<string> = new Set([
   "blockchain.scripthash.get_balance",
   // Whole-tx fetches can also stall on cold cache for large txs.
   "blockchain.transaction.get",
+  // The chain-catchup header fetch pulls up to 1000 80-byte headers
+  // (~160KB hex) in one response — legitimately >10s on a slow link, so it
+  // needs the slow ceiling rather than the tight dead-socket window.
+  "blockchain.block.headers",
 ]);
 const CLOSE_CODE = 1000;
 
@@ -224,12 +242,17 @@ export class ElectrumWS extends Observable {
     verbose: false,
     requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT,
     slowMethodTimeoutMs: DEFAULT_SLOW_METHOD_TIMEOUT,
+    maxConcurrentRequests: DEFAULT_MAX_CONCURRENT_REQUESTS,
     slowMethods: DEFAULT_SLOW_METHODS,
   };
 
   private options: ElectrumWSOptions;
   private endpoint: string;
   private requests = new Map<number, PendingRequest>();
+  // Concurrency gate: number of requests currently sent-but-not-settled, and
+  // the FIFO queue of callers parked until a slot frees up.
+  private inFlight = 0;
+  private slotWaiters: { grant: () => void; deny: (err: Error) => void }[] = [];
   private subscriptions = new Map<string, Subscription>();
   private connected = false;
   private connectedTimeout?: ReturnType<typeof setTimeout>;
@@ -280,6 +303,23 @@ export class ElectrumWS extends Observable {
     method: string,
     ...params: (boolean | string | number | (string | number)[])[]
   ): Promise<ResponseType> {
+    if (!this.connected) {
+      await new Promise<void>((resolve) =>
+        this.once(ElectrumWSEvent.CONNECTED, () => resolve())
+      );
+    }
+    // Reserve an in-flight slot. Fast path (a slot is free) stays synchronous
+    // so the frame is sent within this call — send ordering is preserved and
+    // callers can read the sent frame straight after request(). Only when the
+    // socket is saturated do we await, parking in FIFO order. Reserving the id
+    // and arming the timeout AFTER the slot — with no await before the send —
+    // keeps id-reservation atomic and makes the deadline count only real
+    // in-flight time, not time spent queued behind other requests.
+    if (this.inFlight < this.options.maxConcurrentRequests) {
+      this.inFlight++;
+    } else {
+      await this.acquireSlot();
+    }
     const id = this.nextId();
     const payload: RpcRequest & { id: number } = {
       jsonrpc: "2.0",
@@ -287,15 +327,22 @@ export class ElectrumWS extends Observable {
       params,
       id,
     };
-    if (!this.connected) {
-      await new Promise<void>((resolve) =>
-        this.once(ElectrumWSEvent.CONNECTED, () => resolve())
-      );
-    }
     const promise = this.createRequestPromise(id, method);
     if (this.verbose) console.debug("ElectrumWS SEND:", method, ...params);
-    this.ws.send(formatRequest(payload));
-    return promise as Promise<ResponseType>;
+    try {
+      this.ws.send(formatRequest(payload));
+    } catch (err) {
+      // Send failed synchronously (e.g. socket already closed). Tear down the
+      // just-armed pending request and free the slot so we don't leak either.
+      const pending = this.requests.get(id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        this.requests.delete(id);
+      }
+      this.releaseSlot();
+      throw err;
+    }
+    return promise.finally(() => this.releaseSlot()) as Promise<ResponseType>;
   }
 
   private nextId(): number {
@@ -316,6 +363,42 @@ export class ElectrumWS extends Observable {
       return this.options.slowMethodTimeoutMs;
     }
     return this.options.requestTimeoutMs;
+  }
+
+  /**
+   * Reserve an in-flight slot, parking the caller in FIFO order if the socket
+   * is already at `maxConcurrentRequests`. Resolves once a slot is held;
+   * rejects if the connection is torn down while parked (see
+   * `drainSlotWaiters`). Single-threaded JS means the check-and-increment in
+   * the fast path is atomic, so the cap is never exceeded.
+   */
+  private acquireSlot(): Promise<void> {
+    if (this.inFlight < this.options.maxConcurrentRequests) {
+      this.inFlight++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      this.slotWaiters.push({
+        grant: () => {
+          this.inFlight++;
+          resolve();
+        },
+        deny: reject,
+      });
+    });
+  }
+
+  private releaseSlot(): void {
+    if (this.inFlight > 0) this.inFlight--;
+    this.slotWaiters.shift()?.grant();
+  }
+
+  /** Reject every parked slot-waiter — used when the socket tears down so
+   * callers fail fast instead of hanging on a connection that's gone. */
+  private drainSlotWaiters(reason: string): void {
+    const waiters = this.slotWaiters;
+    this.slotWaiters = [];
+    for (const w of waiters) w.deny(new Error(reason));
   }
 
   private createRequestPromise(id: number, method: string): Promise<unknown> {
@@ -363,6 +446,7 @@ export class ElectrumWS extends Observable {
       this.requests.delete(id);
       request.reject(new Error(reason));
     }
+    this.drainSlotWaiters(reason);
     if (this.reconnectionTimeout) clearTimeout(this.reconnectionTimeout);
     if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
     if (
@@ -517,6 +601,7 @@ export class ElectrumWS extends Observable {
       this.requests.delete(id);
       request.reject(new Error("connection closed"));
     }
+    this.drainSlotWaiters("connection closed");
     if (this.options.reconnect && this.connected) {
       this.fire(ElectrumWSEvent.RECONNECTING);
       this.reconnectionTimeout = setTimeout(

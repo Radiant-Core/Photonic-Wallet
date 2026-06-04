@@ -217,7 +217,15 @@ const worker = {
     return vault.addVault(record);
   },
   setActive(active: boolean) {
+    const reactivated = active && !this.active;
     this.active = active;
+    // When activity resumes (returning from background, or after the
+    // consolidate() routine's setActive(false)/setActive(true) bracket), drain
+    // any subscription statuses that were queued while inactive instead of
+    // waiting for the next push or the throttled reactivation sync.
+    if (reactivated) {
+      this.syncPending().catch(() => {});
+    }
   },
   isActive() {
     return this.active;

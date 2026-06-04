@@ -215,7 +215,7 @@ function TokenGrid() {
           <NoContent>{"No assets"}</NoContent>
         ) : (
           listed.map(
-            ({ token, value }) =>
+            ({ token, value, unconfirmed }) =>
               value > 0 && (
                 <TokenRow
                   glyph={token}
@@ -224,6 +224,7 @@ function TokenGrid() {
                   to={`/fungible/token/${token.ref}`}
                   size={viewMode === "compact" ? "sm" : "md"}
                   defaultIcon={RiQuestionFill}
+                  pending={unconfirmed > 0}
                 />
               )
           )

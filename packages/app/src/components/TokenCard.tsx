@@ -1,4 +1,4 @@
-import { Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
+import { Badge, Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -18,12 +18,15 @@ export default function TokenCard({
   to,
   size = "md",
   defaultIcon,
+  pending,
 }: {
   glyph?: SmartToken;
   value: number;
   to: string;
   size?: "sm" | "md";
   defaultIcon?: IconType;
+  // True while the holding UTXO is unconfirmed (still in the mempool).
+  pending?: boolean;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isLink = !!glyph?.location;
@@ -65,6 +68,19 @@ export default function TokenCard({
           >
             <Icon as={RiSwap2Line} boxSize={8} />
           </Box>
+        )}
+        {pending && (
+          <Tooltip label="Awaiting block confirmation" placement="top">
+            <Badge
+              position="absolute"
+              bottom={2}
+              left={2}
+              colorScheme="yellow"
+              variant="solid"
+            >
+              {"Pending"}
+            </Badge>
+          </Tooltip>
         )}
         {(isEncrypted || isTimelocked) && (
           <Tooltip

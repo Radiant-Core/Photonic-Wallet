@@ -14,6 +14,11 @@ import { consolidationCheck } from "./consolidationCheck";
 import { updateRxdBalances } from "@app/utxos";
 import { arrayChunks } from "@lib/util";
 
+// Delay before re-running a sync that just failed. Without it a congested or
+// timing-out socket gets retried in a tight loop, piling more requests onto
+// the connection that's already failing (the Safari sync-storm feedback loop).
+const RETRY_BACKOFF_MS = 3000;
+
 export class RXDWorker implements Subscription {
   protected worker: Worker;
   protected updateTXOs: ElectrumStatusUpdate;
@@ -62,8 +67,13 @@ export class RXDWorker implements Subscription {
 
     if (
       !this.ready ||
-      (!manual &&
-        (!this.worker.active || (await db.kvp.get("consolidationRequired"))))
+      // Consolidation is advisory (ConsolidationModal prompts the user) and the
+      // consolidate() routine already pauses syncing via setActive(false). It
+      // must NOT gate normal receive syncing here — otherwise incoming tokens
+      // stay queued/invisible while the wallet holds >20 UTXOs until a manual
+      // sync. Only defer while the worker is inactive (the queue drains on
+      // reactivation via setActive(true) / syncPending).
+      (!manual && !this.worker.active)
     ) {
       this.receivedStatuses.push(status);
       return;
@@ -71,6 +81,7 @@ export class RXDWorker implements Subscription {
 
     this.ready = false;
     this.lastReceivedStatus = status;
+    let failed = false;
 
     // R10 follow-up: electrum requests reject pending promises when the
     // socket closes mid-flight (heavy-history accounts trigger this when
@@ -97,6 +108,7 @@ export class RXDWorker implements Subscription {
       console.warn("[RXD] subscription update failed:", err);
       // Queue this status so the next ready window retries it.
       if (status) this.receivedStatuses.push(status);
+      failed = true;
     } finally {
       this.ready = true;
     }
@@ -105,9 +117,14 @@ export class RXDWorker implements Subscription {
       const lastStatus = this.receivedStatuses.pop();
       this.receivedStatuses = [];
       if (lastStatus) {
-        this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
-          console.warn("[RXD] requeued sync failed:", e)
-        );
+        const retry = () =>
+          this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
+            console.warn("[RXD] requeued sync failed:", e)
+          );
+        // Back off after a failure; retry immediately when the requeue is just
+        // draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        else retry();
       }
     }
 
