@@ -36,9 +36,11 @@ import { photonsToRXD } from "@lib/format";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { ContractType } from "@app/types";
-import { payToScript } from "@lib/script";
-import { feeRate, network, wallet } from "@app/signals";
+import { p2pkhScript, payToScript } from "@lib/script";
+import { feeRate, network, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
+import { updateWalletUtxos } from "@app/utxos";
+import { UnfinalizedInput } from "@lib/types";
 import Balance from "./Balance";
 import AddressInput from "./AddressInput";
 import { BsQrCodeScan } from "react-icons/bs";
@@ -76,7 +78,11 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     recipientAddress: string;
     amount: number;
     fee: number;
+    selected: { inputs: SelectableInput[]; outputs: UnfinalizedInput[] };
   } | null>(null);
+  // Guards against a double-broadcast if the confirm button is hit twice
+  // before the first request resolves.
+  const broadcasting = useRef(false);
 
   const setFailure = (reason: string) => {
     setErrorMessage(reason);
@@ -116,10 +122,14 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     waveResolver.clear();
     setRecipientInput("");
     setFinalAddress(null);
+    // Never carry a built-but-unbroadcast tx across an open/close.
+    setConfirmModalOpen(false);
+    setPendingTx(null);
   }, [isOpen]);
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Build + sign the transaction and show the approval modal. Broadcast and
+  // UTXO updates happen only after the user confirms (see confirmBroadcast).
+  const buildAndConfirm = async () => {
     setSuccess(true);
     setLoading(true);
 
@@ -143,6 +153,20 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     const value = Number(amountBig.times(100000000).round(0, 0).toString());
     if (!Number.isSafeInteger(value) || value <= 0) {
       return setFailure("Invalid amount");
+    }
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the send, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) buildAndConfirm();
+        },
+      };
+      return;
     }
 
     const coins: SelectableInput[] = rxd.slice();
@@ -170,13 +194,15 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       );
       const fee = inputTotal - outputTotal;
 
-      // SECURITY FIX (C4): Show confirmation modal before broadcasting
+      // SECURITY FIX (C4): Show confirmation modal before broadcasting. Carry
+      // the selected coins so the UTXO set can be updated after broadcast.
       setPendingTx({
         rawTx,
         txid,
         recipientAddress,
         amount: value,
         fee,
+        selected,
       });
       setConfirmModalOpen(true);
       setLoading(false);
@@ -194,6 +220,11 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       console.error(error);
     }
   };
+
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    buildAndConfirm();
+  };
   const [scan, setScan] = useState(false);
   const onScan = (value: string) => {
     setScan(false);
@@ -204,16 +235,35 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
     }
   };
 
-  // SECURITY FIX (C4): Function to broadcast after user confirms in modal
+  // SECURITY FIX (C4): Broadcast only after the user confirms in the modal.
   const confirmBroadcast = async () => {
-    if (!pendingTx) return;
+    if (!pendingTx || broadcasting.current) return;
+    broadcasting.current = true;
 
     setLoading(true);
     try {
       console.debug("Broadcasting", pendingTx.rawTx);
-      const txid = await electrumWorker.value.broadcast(pendingTx.rawTx);
+      const broadcastTxid = await electrumWorker.value.broadcast(
+        pendingTx.rawTx
+      );
+      // broadcast() returns "" when the server already has the tx in a block;
+      // fall back to the locally computed txid so records stay correct.
+      const txid = broadcastTxid || pendingTx.txid;
       db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
       console.debug("Result", txid);
+
+      // Mark the spent coins and record change now that the tx is on the
+      // network. Without this the same coins stayed selectable and a second
+      // submit rebuilt and rebroadcast an identical transaction.
+      const changeScript = p2pkhScript(wallet.value.address);
+      await updateWalletUtxos(
+        ContractType.RXD,
+        changeScript,
+        changeScript,
+        txid,
+        pendingTx.selected.inputs,
+        pendingTx.selected.outputs
+      );
 
       toast({
         title: `Sent ${photonsToRXD(pendingTx.amount)} ${network.value.ticker}`,
@@ -233,6 +283,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
         status: "error",
       });
     } finally {
+      broadcasting.current = false;
       setLoading(false);
     }
   };

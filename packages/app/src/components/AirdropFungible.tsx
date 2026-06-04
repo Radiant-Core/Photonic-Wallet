@@ -29,7 +29,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { SmartToken, ContractType } from "@app/types";
 import { ftScript, isP2pkh, p2pkhScript } from "@lib/script";
-import { feeRate, network, wallet } from "@app/signals";
+import { feeRate, network, openModal, wallet } from "@app/signals";
 import { reverseRef } from "@lib/Outpoint";
 import TokenContent from "./TokenContent";
 import { RiQuestionFill } from "react-icons/ri";
@@ -81,8 +81,8 @@ export default function AirdropFungible({
 
   const ticker = (glyph.ticker as string) || glyph.name || "???";
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submit = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     setSuccess(true);
     setLoading(true);
 
@@ -96,6 +96,20 @@ export default function AirdropFungible({
 
     if (!addresses.length || invalid) {
       return setFailure("Invalid address" + (invalid ? ` "${invalid}"` : ""));
+    }
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the airdrop, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) submit();
+        },
+      };
+      return;
     }
 
     const value = parseInt(amount.current?.value, 10);

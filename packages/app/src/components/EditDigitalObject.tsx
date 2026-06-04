@@ -30,7 +30,7 @@ import { AddIcon } from "@chakra-ui/icons";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { ContractType, SmartToken, TxO } from "@app/types";
-import { feeRate, wallet } from "@app/signals";
+import { feeRate, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import Outpoint from "@lib/Outpoint";
 import { encodeGlyphMutable } from "@lib/token";
@@ -113,15 +113,22 @@ export default function EditDigitalObject({
     });
   };
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submit = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     setHasError(false);
     setLoading(true);
 
-    if (!wallet.value.wif) {
-      setErrorMessage("Wallet is locked");
-      setHasError(true);
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the edit, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
       setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) submit();
+        },
+      };
       return;
     }
 
@@ -163,11 +170,13 @@ export default function EditDigitalObject({
         attrs: attrsFiltered,
       };
 
-      // contractOutputIndex=0 (mutable contract in output 0)
+      // outputs = [nftOutput (0), mutContractOutput (1)] — the indices below
+      // must match that ordering:
+      // contractOutputIndex=1 (mutable contract is output 1)
       // refHashIndex=1 (skip the state separator, ref+hash starts at byte 1 in state script; value from script layout)
       // refIndex=0 (first ref in refdatasummary of token output)
-      // tokenOutputIndex=1 (NFT token is output 1)
-      const glyph = encodeGlyphMutable("mod", payload, 0, 1, 0, 1);
+      // tokenOutputIndex=0 (NFT token is output 0)
+      const glyph = encodeGlyphMutable("mod", payload, 1, 1, 0, 0);
       const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
       const nftOutputScript = nftAuthScript(wallet.value.address, nftRefLE, [
         { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },

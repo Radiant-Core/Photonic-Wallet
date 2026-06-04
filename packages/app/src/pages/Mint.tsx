@@ -518,7 +518,10 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       return;
     }
 
-    if (wallet.value.locked) {
+    // Inline unlock: the wallet may have idle-locked while the form was open.
+    // Prompt for the password in place and resume the mint, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
       openModal.value = {
         modal: "unlock",
         onClose: (success) => success && handleErrors(submit(dryRun)),

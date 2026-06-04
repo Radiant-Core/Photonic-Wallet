@@ -18,9 +18,14 @@ import dayjs from "dayjs";
 import { useLiveQuery } from "dexie-react-hooks";
 import { MdOutlineSwapHoriz } from "react-icons/md";
 import TokenContent from "./TokenContent";
+import WaveAssetLabel from "./WaveAssetLabel";
+import { isWaveNameGlyph } from "@lib/wave";
 import rxdIcon from "/rxd.png";
 
 function TokenIcon({ glyph }: { glyph: SmartToken }) {
+  if (isWaveNameGlyph(glyph)) {
+    return <WaveAssetLabel glyph={glyph} size="xs" />;
+  }
   return (
     <Box w={6} h={6}>
       <TokenContent glyph={glyph} thumbnail />

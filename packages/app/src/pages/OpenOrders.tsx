@@ -36,7 +36,12 @@ import {
   Tag,
   TagLabel,
 } from "@chakra-ui/react";
-import { SearchIcon, CopyIcon, TimeIcon, ExternalLinkIcon } from "@chakra-ui/icons";
+import {
+  SearchIcon,
+  CopyIcon,
+  TimeIcon,
+  ExternalLinkIcon,
+} from "@chakra-ui/icons";
 import {
   MdOutlineSwapHoriz,
   MdRefresh,
@@ -47,6 +52,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
 import TokenContent from "@app/components/TokenContent";
+import { WaveExpiryBadge } from "@app/components/WaveAssetLabel";
+import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
+import { HiOutlineAtSymbol } from "react-icons/hi";
+import { useNavigate } from "react-router-dom";
 import {
   SmartToken,
   ContractType,
@@ -212,7 +221,7 @@ interface ParsedOrder {
 type SortField = "block" | "name" | "value" | "price";
 type SortDirection = "asc" | "desc";
 type ViewMode = "table" | "grid";
-type FilterType = "all" | "ft" | "nft" | "rxd-in" | "rxd-out";
+type FilterType = "all" | "ft" | "nft" | "names" | "rxd-in" | "rxd-out";
 
 function formatRxd(satoshis: number): string {
   return `${(satoshis / 100000000).toFixed(8)} RXD`;
@@ -313,6 +322,9 @@ function TokenIcon({ glyph, size = 6 }: { glyph?: SmartToken; size?: number }) {
   if (!glyph) {
     return <Image src={rxdIcon} width={size} height={size} />;
   }
+  if (isWaveNameGlyph(glyph)) {
+    return <Icon as={HiOutlineAtSymbol} color="brand.400" boxSize={size} />;
+  }
   return (
     <Box w={size} h={size}>
       <TokenContent glyph={glyph} thumbnail />
@@ -349,14 +361,17 @@ function OrderCard({
 
         {/* Token names */}
         <Box>
-          <Text fontWeight="bold" fontSize="md">
-            {offeredGlyph?.name || "RXD"}
-            {offeredGlyph?.ticker && (
-              <Text as="span" fontSize="sm" color="gray.500" ml={2}>
-                ${offeredGlyph.ticker}
-              </Text>
-            )}
-          </Text>
+          <HStack spacing={2}>
+            <Text fontWeight="bold" fontSize="md">
+              {offeredGlyph?.name || "RXD"}
+              {offeredGlyph?.ticker && (
+                <Text as="span" fontSize="sm" color="gray.500" ml={2}>
+                  ${offeredGlyph.ticker}
+                </Text>
+              )}
+            </Text>
+            <WaveExpiryBadge glyph={offeredGlyph} />
+          </HStack>
           <Text fontSize="sm" color="gray.400">
             for{" "}
             <Text as="span" fontWeight="medium" color="gray.300">
@@ -452,6 +467,7 @@ function OrderRow({
           <Text fontSize="xs" color="gray.500">
             {offeredGlyph?.ticker || ""}
           </Text>
+          <WaveExpiryBadge glyph={offeredGlyph} />
           {priceRatio && (
             <Tag size="sm" colorScheme="green" variant="subtle" mt={1}>
               <TagLabel fontSize="10px">{priceRatio}</TagLabel>
@@ -464,6 +480,7 @@ function OrderRow({
           <Text fontSize="sm" fontWeight="medium">
             {wantGlyph?.name || formatCompactRxd(wantValue || 0)}
           </Text>
+          <WaveExpiryBadge glyph={wantGlyph} />
           {wantValue && !wantGlyph && (
             <Text fontSize="xs" color="gray.500">
               {formatRxd(wantValue)}
@@ -663,9 +680,7 @@ function MyOffersPanel() {
       toast({
         status: "error",
         title:
-          error instanceof SwapError
-            ? error.message
-            : "Failed to cancel swap",
+          error instanceof SwapError ? error.message : "Failed to cancel swap",
       });
     } finally {
       setCancellingId(null);
@@ -709,11 +724,23 @@ function MyOffersPanel() {
   );
 }
 
-export default function OpenOrders() {
+export default function OpenOrders({
+  defaultFilter = "all",
+}: {
+  defaultFilter?: FilterType;
+} = {}) {
   const toast = useToast();
+  const navigate = useNavigate();
   const copyToClipboard = useCopyToClipboard();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<ParsedOrder[]>([]);
+  // Glyphs resolved from an offer's prevout for offered NFTs not in local db
+  // (the swap advertisement only carries a one-way hash of the ref, so the
+  // recoverable identifier is the offered UTXO). Keyed by `${txid}:${vout}`.
+  // `null` marks an attempt that found no glyph, so we don't retry it.
+  const [resolvedGlyphs, setResolvedGlyphs] = useState<
+    Map<string, SmartToken | null>
+  >(new Map());
   const [searchRef, setSearchRef] = useState("");
   const [indexAvailable, setIndexAvailable] = useState<boolean | null>(null);
   const [rpcUrl, setRpcUrl] = useState(getSwapRpcConfig().url);
@@ -722,7 +749,7 @@ export default function OpenOrders() {
   // Sorting and filtering state
   const [sortField, setSortField] = useState<SortField>("block");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [filterType, setFilterType] = useState<FilterType>("all");
+  const [filterType, setFilterType] = useState<FilterType>(defaultFilter);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [displayCount, setDisplayCount] = useState(20);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -871,9 +898,82 @@ export default function OpenOrders() {
     return () => clearInterval(interval);
   }, [autoRefreshEnabled, fetchOrders, loading, searchRef]);
 
+  // Stable key for an offer's prevout
+  const offerKey = (o: ParsedOrder) =>
+    `${o.offer.utxo.txid}:${o.offer.utxo.vout}`;
+
+  // Merge any prevout-resolved glyphs into the orders so display and the
+  // "names" filter can see offered NFTs (incl. WAVE names) the wallet doesn't
+  // own locally.
+  const mergedOrders = useMemo(() => {
+    if (resolvedGlyphs.size === 0) return orders;
+    return orders.map((order) => {
+      if (order.offeredGlyph) return order;
+      const resolved = resolvedGlyphs.get(offerKey(order));
+      return resolved ? { ...order, offeredGlyph: resolved } : order;
+    });
+  }, [orders, resolvedGlyphs]);
+
+  // Resolve offered NFTs not in local db so the names market can identify and
+  // display them. Only runs for the "names" filter to avoid extra network
+  // calls elsewhere. The swap index has no "is-a-WAVE-name" predicate, so this
+  // resolution is client-side and bounded per round — names beyond the cap
+  // surface as you Load More or search by ref.
+  const RESOLVE_CAP = 30;
+  useEffect(() => {
+    if (filterType !== "names") return;
+    const pending = orders.filter(
+      (o) =>
+        !o.offeredGlyph &&
+        o.offer.offered_type === ContractType.NFT &&
+        !resolvedGlyphs.has(offerKey(o))
+    );
+    if (pending.length === 0) return;
+    const batch = pending.slice(0, RESOLVE_CAP);
+    if (pending.length > RESOLVE_CAP) {
+      console.warn(
+        `Names market: resolving ${RESOLVE_CAP} of ${pending.length} unknown NFT offers this round; Load More or search by ref for the rest.`
+      );
+    }
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        batch.map(async (o) => {
+          const hex = await electrumWorker.value.getTransaction(
+            o.offer.utxo.txid
+          );
+          if (!hex) return [offerKey(o), null] as const;
+          const prevTx = new Transaction(hex);
+          const out = prevTx.outputs[o.offer.utxo.vout];
+          const refLE = out ? parseNftScript(out.script.toHex()).ref : "";
+          if (!refLE) return [offerKey(o), null] as const;
+          const glyph = await electrumWorker.value.fetchGlyph(
+            reverseRef(refLE)
+          );
+          return [offerKey(o), glyph || null] as const;
+        })
+      );
+      if (cancelled) return;
+      setResolvedGlyphs((prev) => {
+        const next = new Map(prev);
+        // Mark every attempted offer (even failures) so we don't retry it.
+        for (const o of batch) {
+          if (!next.has(offerKey(o))) next.set(offerKey(o), null);
+        }
+        for (const r of results) {
+          if (r.status === "fulfilled") next.set(r.value[0], r.value[1]);
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filterType, orders, resolvedGlyphs]);
+
   // Filter and sort orders
   const filteredAndSortedOrders = useMemo(() => {
-    let result = [...orders];
+    let result = [...mergedOrders];
 
     // Apply filter
     if (filterType !== "all") {
@@ -892,6 +992,11 @@ export default function OpenOrders() {
           case "nft":
             return (
               offeredIsNft || order.wantGlyph?.tokenType === SmartTokenType.NFT
+            );
+          case "names":
+            return (
+              isWaveNameGlyph(order.offeredGlyph) ||
+              isWaveNameGlyph(order.wantGlyph)
             );
           case "rxd-in":
             return offeredIsRxd; // Offering RXD
@@ -942,7 +1047,7 @@ export default function OpenOrders() {
     });
 
     return result;
-  }, [orders, sortField, sortDirection, filterType]);
+  }, [mergedOrders, sortField, sortDirection, filterType]);
 
   // Paginated orders
   const displayedOrders = filteredAndSortedOrders.slice(0, displayCount);
@@ -963,11 +1068,46 @@ export default function OpenOrders() {
     setDisplayCount((prev) => prev + 20);
   };
 
-  const handleSearch = () => {
-    if (searchRef.trim()) {
-      fetchOrders(searchRef.trim());
-    } else {
+  // Resolve a typed WAVE name (e.g. "alice.rxd") to its token ref via the
+  // local glyph db (the indexer syncs other wallets' names here too).
+  const resolveNameToRef = async (
+    query: string
+  ): Promise<string | undefined> => {
+    const parts = query.toLowerCase().split(".");
+    const bareName = parts[0];
+    const domain = parts[1] || "rxd";
+    const match = await db.glyph
+      .filter((g) => {
+        if (!isWaveNameGlyph(g) || g.spent !== 0) return false;
+        const attrs = g.attrs as Record<string, string> | undefined;
+        if (!attrs) return false;
+        return (
+          (attrs.name || "").toLowerCase() === bareName &&
+          (attrs.domain || "rxd").toLowerCase() === domain
+        );
+      })
+      .first();
+    return match?.ref;
+  };
+
+  const handleSearch = async () => {
+    const query = searchRef.trim();
+    if (!query) {
       fetchOrders();
+      return;
+    }
+    // A 72-hex token ref is handled directly by fetchOrders.
+    if (/^[0-9a-f]{72}$/i.test(query)) {
+      fetchOrders(query);
+      return;
+    }
+    // Otherwise try to resolve it as a WAVE name to its token ref.
+    const ref = await resolveNameToRef(query);
+    if (ref) {
+      setFilterType("names");
+      fetchOrders(ref);
+    } else {
+      fetchOrders(query);
     }
   };
 
@@ -1185,11 +1325,46 @@ export default function OpenOrders() {
       // Broadcast the completed transaction
       const txid = await electrumWorker.value.broadcast(tx.toString());
 
-      toast({
-        status: "success",
-        title: "Swap accepted!",
-        description: `Transaction: ${txid.substring(0, 16)}...`,
-      });
+      // If a WAVE name was acquired, nudge the buyer to re-point it at their
+      // own address. The new NFT UTXO may not be indexed yet, so route them to
+      // the WAVE Names page where the "Target Update Required" prompt fires
+      // once the wallet syncs (rather than repointing inline here).
+      const acquiredName = getWaveDisplay(order.offeredGlyph);
+      if (acquiredName) {
+        toast({
+          status: "success",
+          duration: 12000,
+          isClosable: true,
+          render: ({ onClose }) => (
+            <Alert status="success" borderRadius="md" alignItems="start">
+              <AlertIcon />
+              <Box flex={1}>
+                <Text fontWeight="bold">Acquired {acquiredName.full}</Text>
+                <Text fontSize="sm">
+                  Point this name at your address from WAVE Names.
+                </Text>
+                <Button
+                  size="sm"
+                  mt={2}
+                  colorScheme="green"
+                  onClick={() => {
+                    onClose();
+                    navigate("/wave-names");
+                  }}
+                >
+                  Go to WAVE Names
+                </Button>
+              </Box>
+            </Alert>
+          ),
+        });
+      } else {
+        toast({
+          status: "success",
+          title: "Swap accepted!",
+          description: `Transaction: ${txid.substring(0, 16)}...`,
+        });
+      }
 
       // Refresh orders
       fetchOrders();
@@ -1372,6 +1547,7 @@ export default function OpenOrders() {
                   <option value="all">All Types</option>
                   <option value="ft">Fungible</option>
                   <option value="nft">NFT</option>
+                  <option value="names">WAVE Names</option>
                   <option value="rxd-in">Buying RXD</option>
                   <option value="rxd-out">Selling RXD</option>
                 </Select>
@@ -1392,6 +1568,21 @@ export default function OpenOrders() {
                 />
               </ButtonGroup>
             </Flex>
+
+            {/* Names market discovery notice */}
+            {filterType === "names" && (
+              <Alert status="info" borderRadius="md" fontSize="sm">
+                <AlertIcon />
+                <Text>
+                  Showing WAVE name listings among loaded offers. The swap index
+                  can't enumerate every name for sale — search a name (e.g.{" "}
+                  <Text as="span" fontFamily="mono">
+                    alice.rxd
+                  </Text>
+                  ) or paste a token ref to find a specific listing.
+                </Text>
+              </Alert>
+            )}
 
             {/* Stats */}
             {orders.length > 0 && (

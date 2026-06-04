@@ -1,5 +1,7 @@
 import GlowBox from "@app/components/GlowBox";
 import TokenContent from "@app/components/TokenContent";
+import WaveAssetLabel from "@app/components/WaveAssetLabel";
+import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
 import db from "@app/db";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { ContractType, SmartToken, SwapError } from "@app/types";
@@ -313,18 +315,24 @@ function SwapItem({
     <Flex w="full" gap={4} alignItems="center">
       {ref ? (
         <>
-          <TokenIcon glyph={glyph} />
+          {!isWaveNameGlyph(glyph) && <TokenIcon glyph={glyph} />}
           <Box flexGrow={1}>
-            <Box>{glyph.name}</Box>
-            {contractType === ContractType.FT ? (
-              <>
-                {value}
-                <Text color="lightBlue.A400" as="span" ml={2}>
-                  {glyph.ticker}
-                </Text>
-              </>
+            {glyph && isWaveNameGlyph(glyph) ? (
+              <WaveAssetLabel glyph={glyph} showTarget size="md" />
             ) : (
-              <>{value} Radiant photons</>
+              <>
+                <Box>{glyph.name}</Box>
+                {contractType === ContractType.FT ? (
+                  <>
+                    {value}
+                    <Text color="lightBlue.A400" as="span" ml={2}>
+                      {glyph.ticker}
+                    </Text>
+                  </>
+                ) : (
+                  <>{value} Radiant photons</>
+                )}
+              </>
             )}
           </Box>
           <div>
@@ -564,19 +572,32 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
         <SwapItem item={swapParams.to} />
       </Card>
       {complete ? (
-        <Alert mt={8} status="success">
+        <Alert mt={8} status="success" alignItems="start">
           <AlertIcon />
-          Swap complete!{" "}
-          <Link
-            as={RouterLink}
-            to={createExplorerUrl(txid)}
-            target="_blank"
-            isExternal
-            ml={2}
-          >
-            View on block explorer
-            <ExternalLinkIcon ml={1} />
-          </Link>
+          <Box>
+            <Box>
+              Swap complete!{" "}
+              <Link
+                as={RouterLink}
+                to={createExplorerUrl(txid)}
+                target="_blank"
+                isExternal
+                ml={2}
+              >
+                View on block explorer
+                <ExternalLinkIcon ml={1} />
+              </Link>
+            </Box>
+            {isWaveNameGlyph(swapParams.from.glyph) && (
+              <Box mt={2} fontSize="sm">
+                You acquired{" "}
+                <strong>{getWaveDisplay(swapParams.from.glyph)?.full}</strong>.{" "}
+                <Link as={RouterLink} to="/wave-names" color="green.300">
+                  Point it at your address →
+                </Link>
+              </Box>
+            )}
+          </Box>
         </Alert>
       ) : (
         <>

@@ -7,6 +7,7 @@ import {
   Button,
   Badge,
   Box,
+  Flex,
   Input,
   InputGroup,
   InputLeftElement,
@@ -35,6 +36,7 @@ import {
   Tooltip,
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useNavigate } from "react-router-dom";
 import {
   SearchIcon,
   ExternalLinkIcon,
@@ -51,13 +53,22 @@ import {
   MdSend,
   MdStar,
   MdStarBorder,
+  MdSell,
+  MdStorefront,
 } from "react-icons/md";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
-import { wallet, feeRate } from "@app/signals";
+import { wallet, feeRate, openModal } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
-import { SmartTokenType, TxO, ContractType } from "@app/types";
+import {
+  SmartTokenType,
+  TxO,
+  ContractType,
+  SwapStatus,
+  SwapError,
+} from "@app/types";
+import { cancelSwap } from "@app/swap";
 import { GLYPH_WAVE } from "@lib/protocols";
 import {
   validateWaveName,
@@ -65,24 +76,14 @@ import {
   createWaveReclaimMetadata,
   GRACE_PERIOD,
 } from "@lib/wave";
+import { updateWaveTarget } from "@app/waveTarget";
 import { photonsToRXD } from "@lib/format";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import Outpoint from "@lib/Outpoint";
-import { encodeGlyphMutable } from "@lib/token";
-import { fundTx } from "@lib/coinSelect";
-import {
-  mutableNftScript,
-  nftAuthScript,
-  p2pkhScript,
-  parseMutableScript,
-  isP2pkh,
-} from "@lib/script";
+import { isP2pkh } from "@lib/script";
 import { burnNft } from "@lib/burn";
 import { transferNonFungible, TransferError } from "@lib/transfer";
 import { SelectableInput } from "@lib/coinSelect";
-import { buildTx, findTokenOutput } from "@lib/tx";
-import { SmartTokenPayload, UnfinalizedInput } from "@lib/types";
-import { Transaction } from "@radiant-core/radiantjs";
 
 interface WaveNameRecord {
   ref: string;
@@ -97,6 +98,10 @@ interface WaveNameRecord {
   needsTargetUpdate?: boolean;
   reclaimableAfter?: number;
   gracePeriodEnd?: number;
+  // True while the name is escrowed in a pending swap (listed for sale). The
+  // NFT has been moved to the swap address, so on-chain actions that spend it
+  // (edit/send/burn/reclaim) must be blocked until the listing is cancelled.
+  listed?: boolean;
 }
 
 interface RecentLookup {
@@ -106,6 +111,7 @@ interface RecentLookup {
 }
 
 export default function WaveNames() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
   const [resolveQuery, setResolveQuery] = useState("");
   const [resolveResult, setResolveResult] = useState<{
@@ -256,6 +262,7 @@ export default function WaveNames() {
           needsTargetUpdate,
           reclaimableAfter,
           gracePeriodEnd,
+          listed: !!token.swapPending,
         });
       }
     }
@@ -350,6 +357,17 @@ export default function WaveNames() {
           {/* My Names Tab */}
           <TabPanel>
             <ContentContainer>
+              <Flex justify="flex-end" mb={4}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorScheme="purple"
+                  leftIcon={<Icon as={MdStorefront} />}
+                  onClick={() => navigate("/wave-names/market")}
+                >
+                  {"Browse Names for Sale"}
+                </Button>
+              </Flex>
               {isLoadingNames && displayNames.length === 0 ? (
                 <VStack spacing={4} align="center" py={8}>
                   <Spinner size="lg" color="brand.400" />
@@ -620,6 +638,7 @@ function WaveNameCard({
     onClose: onReclaimClose,
   } = useDisclosure();
   const toast = useToast();
+  const navigate = useNavigate();
   const [newTarget, setNewTarget] = useState(record.target);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isRenewing, setIsRenewing] = useState(false);
@@ -627,6 +646,55 @@ function WaveNameCard({
   const [isTransferring, setIsTransferring] = useState(false);
   const [transferAddress, setTransferAddress] = useState("");
   const [burnReason, setBurnReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  // Navigate to the Swap page with this name pre-filled as the offered asset.
+  // The seller picks the price (RXD or token) and listing mode there.
+  const handleListForSale = () => {
+    navigate("/swap", { state: { offerGlyphRef: record.ref } });
+  };
+
+  // Cancel a pending listing: move the escrowed NFT back to the spendable
+  // address and clear swapPending. Reuses the same cancelSwap path as the
+  // Pending Swaps page.
+  const handleCancelListing = async () => {
+    if (wallet.value.locked) {
+      openModal.value = { modal: "unlock" };
+      return;
+    }
+    setIsCancelling(true);
+    try {
+      const pending = await db.swap
+        .where({ status: SwapStatus.PENDING })
+        .toArray();
+      const swap = pending.find((s) => s.fromGlyph === record.ref);
+      if (!swap) {
+        throw new SwapError("Could not find the pending listing for this name");
+      }
+      await cancelSwap(
+        swap.from,
+        swap.txid,
+        swap.fromValue,
+        swap.fromGlyph || undefined
+      );
+      if (swap.id) {
+        await db.swap.update(swap.id, { status: SwapStatus.CANCEL });
+      }
+      toast({
+        title: "Listing cancelled",
+        description: `${record.name} is no longer for sale`,
+        status: "success",
+      });
+    } catch (error) {
+      toast({
+        title: "Cancel failed",
+        description: error instanceof Error ? error.message : String(error),
+        status: "error",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   const statusColors: Record<WaveNameRecord["status"], string> = {
     active: "green",
@@ -729,126 +797,24 @@ function WaveNameCard({
 
     setIsUpdating(true);
     try {
-      // Get the NFT UTXO
-      const txo = (await db.txo.get({ id: record.txoId })) as TxO;
-      if (!txo) {
-        throw new Error("Token UTXO not found");
-      }
+      const txid = await updateWaveTarget({
+        ref: record.ref,
+        txoId: record.txoId,
+        name: record.name,
+        domain: record.domain,
+        newTarget,
+      });
 
-      // Get NFT ref and calculate mutable contract ref
-      const nftRefBE = Outpoint.fromString(record.ref);
-      const nftRefLE = nftRefBE.reverse().toString();
-      const { txid: nftTxid, vout: refVout } = nftRefBE.toObject();
-
-      // Mutable contract ref is always token ref + 1
-      const mutRefBE = Outpoint.fromUTXO(nftTxid, refVout + 1);
-      const mutRefLE = mutRefBE.reverse().toString();
-
-      // Fetch current location of the mutable contract UTXO
-      const refResponse = await electrumWorker.value.getRef(
-        mutRefBE.toString()
-      );
-      if (!refResponse?.length) {
-        throw new Error("Mutable contract UTXO not found");
-      }
-      const location = refResponse[refResponse.length - 1].tx_hash;
-      const hex = await electrumWorker.value.getTransaction(location);
-      const refTx = new Transaction(hex);
-
-      const { vout: mutVout, output: mutOutput } = findTokenOutput(
-        refTx,
-        mutRefLE,
-        parseMutableScript
-      );
-
-      if (mutVout === undefined || !mutOutput) {
-        throw new Error("Could not locate mutable contract output");
-      }
-
-      // Build updated payload - only updating target
-      const payload: Partial<SmartTokenPayload> = {
+      // Update local record immediately. Mirror exactly the attrs we wrote
+      // on-chain above — NOT a spread of the WaveNameRecord, which would
+      // pollute attrs with UI fields (ref/status/txoId/…) and store the
+      // full "name.domain" label as `name`, corrupting the cached glyph.
+      await db.glyph.update(record.id, {
         attrs: {
           name: record.name.split(".")[0],
           domain: record.domain,
           target: newTarget,
           target_type: "address",
-        },
-      };
-
-      // contractOutputIndex=0, refHashIndex=1, refIndex=0, tokenOutputIndex=1
-      const glyph = encodeGlyphMutable("mod", payload, 0, 1, 0, 1);
-      const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
-      const nftOutputScript = nftAuthScript(wallet.value.address, nftRefLE, [
-        { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },
-      ]);
-
-      const nftInput: UnfinalizedInput = { ...txo };
-      const mutInput: UnfinalizedInput = {
-        txid: refTx.id,
-        vout: mutVout,
-        script: mutOutput.script.toHex(),
-        value: mutOutput.satoshis,
-        scriptSigSize: mutOutputScript.length / 2,
-      };
-
-      const nftOutput = { script: nftOutputScript, value: txo.value };
-      const mutContractOutput = {
-        script: mutOutputScript,
-        value: mutInput.value,
-      };
-
-      const inputs: UnfinalizedInput[] = [nftInput, mutInput];
-      const outputs = [nftOutput, mutContractOutput];
-
-      // Get RXD UTXOs for funding
-      const rxdUtxos = await db.txo
-        .where({ contractType: ContractType.RXD, spent: 0 })
-        .toArray();
-
-      const p2pkh = p2pkhScript(wallet.value.address);
-      const fund = fundTx(
-        wallet.value.address,
-        rxdUtxos,
-        inputs,
-        outputs,
-        p2pkh,
-        feeRate.value
-      );
-
-      if (!fund.funded) {
-        throw new Error("Insufficient funds for transaction fee");
-      }
-
-      inputs.push(...fund.funding);
-      outputs.push(...fund.change);
-
-      const rawTx = buildTx(
-        wallet.value.address,
-        wallet.value.wif.toString(),
-        inputs,
-        outputs,
-        false,
-        (index, script) => {
-          if (index === 1) {
-            // Mutable contract input: replace p2pkh scriptSig with glyph scriptSig
-            script.set({ chunks: [] });
-            script.add(glyph.scriptSig);
-          }
-        }
-      ).toString();
-
-      const txid = await electrumWorker.value.broadcast(rawTx);
-      await db.broadcast.put({
-        txid,
-        date: Date.now(),
-        description: "wave_name_update",
-      });
-
-      // Update local record immediately
-      await db.glyph.update(record.id, {
-        attrs: {
-          ...record,
-          target: newTarget,
         },
         height: Infinity,
       });
@@ -1101,6 +1067,12 @@ function WaveNameCard({
               {record.status === "grace" && "Grace Period"}
               {record.status === "reclaimable" && "Reclaimable"}
             </Badge>
+            {record.listed && (
+              <Badge colorScheme="purple" display="flex" alignItems="center">
+                <Icon as={MdSell} boxSize={3} mr={1} />
+                Listed for Sale
+              </Badge>
+            )}
           </HStack>
           <HStack spacing={2}>
             <Text fontSize="sm" color="gray.400" fontFamily="mono">
@@ -1129,9 +1101,9 @@ function WaveNameCard({
                   {"⚠️ Target Update Required"}
                 </Text>
                 <Text fontSize="xs">
-                  {
-                    "This WAVE name was transferred to you. The target still points to the previous owner. Click 'Update Target' to set it to your address."
-                  }
+                  {record.listed
+                    ? "This name is listed for sale. Cancel the listing before updating its target."
+                    : "This WAVE name was transferred to you. The target still points to the previous owner. Click 'Update Target' to set it to your address."}
                 </Text>
                 <Button
                   size="xs"
@@ -1139,6 +1111,7 @@ function WaveNameCard({
                   leftIcon={<Icon as={MdEdit} />}
                   onClick={onOpen}
                   mt={1}
+                  isDisabled={record.listed}
                 >
                   {"Update Target"}
                 </Button>
@@ -1220,8 +1193,32 @@ function WaveNameCard({
               onClick={onReclaimOpen}
               colorScheme="purple"
               variant="outline"
+              isDisabled={record.listed}
             >
               {"Reclaim"}
+            </Button>
+          )}
+          {/* List for sale / cancel an existing listing */}
+          {record.listed ? (
+            <Button
+              size="sm"
+              leftIcon={<Icon as={MdSell} />}
+              onClick={handleCancelListing}
+              isLoading={isCancelling}
+              colorScheme="purple"
+              variant="outline"
+            >
+              {"Cancel Listing"}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              leftIcon={<Icon as={MdSell} />}
+              onClick={handleListForSale}
+              colorScheme="purple"
+              variant="outline"
+            >
+              {"List for Sale"}
             </Button>
           )}
           <Button
@@ -1229,6 +1226,7 @@ function WaveNameCard({
             leftIcon={<Icon as={MdEdit} />}
             onClick={onOpen}
             variant="outline"
+            isDisabled={record.listed}
           >
             {"Edit"}
           </Button>
@@ -1238,6 +1236,7 @@ function WaveNameCard({
             onClick={onTransferOpen}
             variant="outline"
             colorScheme="blue"
+            isDisabled={record.listed}
           >
             {"Send"}
           </Button>
@@ -1248,6 +1247,7 @@ function WaveNameCard({
             colorScheme="red"
             variant="outline"
             aria-label="Burn WAVE name"
+            isDisabled={record.listed}
           />
           <a
             href={createExplorerUrl(record.ref.slice(0, 64))}

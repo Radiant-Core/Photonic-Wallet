@@ -23,7 +23,7 @@ import { buildTx } from "@lib/tx";
 import { PrivateKey } from "@radiant-core/radiantjs";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "../db";
-import { feeRate, wallet } from "@app/signals";
+import { feeRate, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 
 interface Props {
@@ -56,10 +56,24 @@ export default function MeltDigitalObject({
 
   if (!isOpen || !onClose) return null;
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submit = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     setSuccess(true);
     setLoading(true);
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the melt, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) submit();
+        },
+      };
+      return;
+    }
 
     const required: SelectableInput = { ...asset, required: true };
     const coins: SelectableInput[] = [required, ...rxd.slice()];

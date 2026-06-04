@@ -32,7 +32,7 @@ import {
   SwapMode,
   SwapStatus,
 } from "@app/types";
-import { PropsWithChildren, useState } from "react";
+import { PropsWithChildren, useEffect, useState } from "react";
 import TokenContent from "@app/components/TokenContent";
 import rxdIcon from "/rxd.png";
 import { useLocation } from "react-router-dom";
@@ -402,6 +402,7 @@ const ViewFooter = ({ children }: PropsWithChildren) => {
 
 function Swap() {
   // TODO test swapAddress gets created for old wallets
+  const location = useLocation();
   const toast = useToast();
   const [send, setSend] = useState<Asset | null>(null);
   const [sendRxd, setSendRxd] = useState(0);
@@ -412,6 +413,26 @@ function Swap() {
   const [broadcastTxid, setBroadcastTxid] = useState("");
   const [rpcUrl, setRpcUrl] = useState(getSwapRpcConfig().url);
   const [preparing, setPreparing] = useState(false);
+
+  // Pre-fill the offered asset when navigated here from a "List for Sale"
+  // action (e.g. the WAVE Names page passes the name's ref in route state).
+  // SwapPage remounts this component per location.key, so this runs once.
+  useEffect(() => {
+    const offerGlyphRef = (
+      location.state as { offerGlyphRef?: string } | null
+    )?.offerGlyphRef;
+    if (!offerGlyphRef) return;
+    let cancelled = false;
+    (async () => {
+      const glyph = await db.glyph.where({ ref: offerGlyphRef }).first();
+      if (!cancelled && glyph) {
+        setSend({ glyph, value: 0 });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.state]);
 
   const saveRpcUrl = () => {
     const trimmed = rpcUrl.trim();
@@ -462,15 +483,16 @@ function Swap() {
 
   const prepareTransaction = async () => {
     if (preparing) return;
-    if (wallet.value.locked || !wallet.value.swapWif) {
+    // Inline unlock: the wallet may have idle-locked while the form was open.
+    // Prompt for the password in place and resume preparing the swap, rather
+    // than forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.swapWif || !wallet.value.wif) {
       openModal.value = {
         modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) prepareTransaction();
+        },
       };
-      return;
-    }
-
-    if (!wallet.value.wif) {
-      // TODO error handling
       return;
     }
     setPreparing(true);

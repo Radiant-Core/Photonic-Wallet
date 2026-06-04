@@ -13,7 +13,7 @@ import StatusBar from "./StatusBar";
 import { language, openMenu } from "@app/signals";
 import { RiSwap2Line } from "react-icons/ri";
 import { HiOutlineAtSymbol } from "react-icons/hi";
-import { MdHome } from "react-icons/md";
+import { MdHome, MdStorefront } from "react-icons/md";
 import {
   TbTriangleSquareCircle,
   TbCoins,
@@ -98,6 +98,12 @@ export default function SideBar({ ...rest }: GridProps) {
           leftIcon={<Icon as={HiOutlineAtSymbol} boxSize={5} />}
         >
           {"Wave Names"}
+        </MenuButton>
+        <MenuButton
+          to="/wave-names/market"
+          leftIcon={<Icon as={MdStorefront} boxSize={5} />}
+        >
+          {"Names for Sale"}
         </MenuButton>
         <MenuButton to="/coins" leftIcon={<Icon as={TbCoins} boxSize={5} />}>
           {"Coins"}

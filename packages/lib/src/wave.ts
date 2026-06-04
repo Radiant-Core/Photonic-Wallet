@@ -175,16 +175,77 @@ export function canReclaimWaveName(
  * Check if a WAVE name token is a duplicate (not the canonical/first registration)
  */
 type WaveToken = {
-  protocols?: number[];
+  // Indexer/RPC tokens carry the protocol list as `protocols`; stored glyphs
+  // (db.glyph) carry it as `p`. Accept either so callers can pass either shape.
+  protocols?: (number | string)[];
+  p?: (number | string)[];
   is_wave_duplicate?: boolean;
 };
 
 export function isWaveDuplicate(token: unknown): boolean {
   if (!token || typeof token !== "object") return false;
   const t = token as WaveToken;
-  if (!Array.isArray(t.protocols)) return false;
-  const hasWaveProtocol = t.protocols.includes(5); // GLYPH_WAVE = 5
+  const protocols = Array.isArray(t.protocols)
+    ? t.protocols
+    : Array.isArray(t.p)
+      ? t.p
+      : null;
+  if (!protocols) return false;
+  const hasWaveProtocol = protocols.includes(GLYPH_WAVE);
   return hasWaveProtocol && t.is_wave_duplicate === true;
+}
+
+/**
+ * Minimal structural shape of a stored glyph (db.glyph SmartToken). Defined
+ * locally so this lib module never imports app types.
+ */
+export interface WaveGlyphLike {
+  p?: (number | string)[];
+  attrs?: Record<string, unknown>;
+}
+
+/**
+ * True if a stored glyph is a WAVE name (carries the WAVE protocol). This is
+ * the canonical detection idiom used across the app (glyph.p includes
+ * GLYPH_WAVE).
+ */
+export function isWaveNameGlyph(
+  glyph: WaveGlyphLike | null | undefined
+): boolean {
+  return !!glyph?.p?.includes(GLYPH_WAVE);
+}
+
+/**
+ * Extract display info for a WAVE name glyph. Returns null if it isn't a WAVE
+ * name or has no name attribute. Mirrors the attr handling in WaveNames.tsx so
+ * formatting stays consistent across the wallet (name list, swap UIs,
+ * marketplace).
+ */
+export function getWaveDisplay(glyph: WaveGlyphLike | null | undefined): {
+  name: string;
+  domain: string;
+  full: string;
+  target: string;
+  expires?: number;
+} | null {
+  if (!isWaveNameGlyph(glyph)) return null;
+  const attrs = (glyph?.attrs ?? {}) as Record<string, unknown>;
+  const name = attrs.name ? String(attrs.name) : "";
+  if (!name) return null;
+  const domain = attrs.domain ? String(attrs.domain) : "rxd";
+  const target = attrs.target ? String(attrs.target) : "";
+  const expiresRaw = attrs.expires;
+  const expires =
+    expiresRaw === undefined || expiresRaw === null || expiresRaw === ""
+      ? undefined
+      : Number(expiresRaw);
+  return {
+    name,
+    domain,
+    full: `${name}.${domain}`,
+    target,
+    expires: Number.isFinite(expires) ? expires : undefined,
+  };
 }
 
 /**

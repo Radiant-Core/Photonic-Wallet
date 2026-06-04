@@ -481,6 +481,10 @@ const router = createHashRouter([
             element: <WaveNames />,
           },
           {
+            path: "/wave-names/market",
+            element: <OpenOrders defaultFilter="names" />,
+          },
+          {
             element: <SettingsLayout />,
             children: [
               {

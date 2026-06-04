@@ -23,7 +23,7 @@ import { buildTx } from "@lib/tx";
 import { PrivateKey } from "@radiant-core/radiantjs";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "../db";
-import { feeRate, wallet } from "@app/signals";
+import { feeRate, openModal, wallet } from "@app/signals";
 import { reverseRef } from "@lib/Outpoint";
 import { electrumWorker } from "@app/electrum/Electrum";
 
@@ -69,6 +69,20 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
   const melt = async () => {
     setSuccess(true);
     setLoading(true);
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the melt, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) melt();
+        },
+      };
+      return;
+    }
 
     const refLE = reverseRef(glyph.ref);
     const fromScript = ftScript(wallet.value.address, refLE);

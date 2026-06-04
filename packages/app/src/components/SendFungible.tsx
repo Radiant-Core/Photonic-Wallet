@@ -36,7 +36,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { SmartToken, ContractType } from "@app/types";
 import { ftScript, isP2pkh, p2pkhScript } from "@lib/script";
-import { feeRate, network, wallet } from "@app/signals";
+import { feeRate, network, openModal, wallet } from "@app/signals";
+import { UnfinalizedInput } from "@lib/types";
 import {
   useWaveResolver,
   isPotentialWaveName,
@@ -81,7 +82,12 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     amount: number;
     fee: number;
     tokenAmount: string;
+    fromScript: string;
+    selected: { inputs: SelectableInput[]; outputs: UnfinalizedInput[] };
   } | null>(null);
+  // Guards against a double-broadcast if the confirm button is hit twice
+  // before the first request resolves.
+  const broadcasting = useRef(false);
 
   const rxd = useLiveQuery(
     () => db.txo.where({ contractType: ContractType.RXD, spent: 0 }).toArray(),
@@ -119,12 +125,21 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     waveResolver.clear();
     setRecipientInput("");
     setFinalAddress(null);
+    // Never carry a built-but-unbroadcast tx across an open/close. Without
+    // this, reopening the modal re-showed a stale approval for the previous
+    // transaction.
+    setConfirmModalOpen(false);
+    setPendingTx(null);
   }, [isOpen]);
 
   const ticker = (glyph.ticker as string) || glyph.name || "???";
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Build + sign the transaction and show the approval modal. Nothing is
+  // broadcast and no wallet state is mutated here — that happens only after
+  // the user confirms (see confirmBroadcast). Previously this fired onSuccess
+  // and updated the UTXO set before broadcasting, which produced a phantom
+  // success (txid shown for a tx never sent) and corrupted balances on cancel.
+  const buildAndConfirm = async () => {
     setSuccess(true);
     setLoading(true);
 
@@ -140,6 +155,20 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
           ? "WAVE name could not be resolved"
           : "Invalid address"
       );
+    }
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the send, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) buildAndConfirm();
+        },
+      };
+      return;
     }
 
     const value = parseInt(amount.current?.value, 10);
@@ -163,7 +192,6 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       );
       const rawTx = tx.toString();
       const txid = tx.hash;
-      const changeScript = p2pkhScript(wallet.value.address);
 
       // Calculate fee
       const inputTotal = selected.inputs.reduce(
@@ -176,7 +204,9 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
       );
       const fee = inputTotal - outputTotal;
 
-      // SECURITY FIX (C4): Show confirmation modal before broadcasting
+      // SECURITY FIX (C4): Show confirmation modal before broadcasting. Carry
+      // the selected coins so the UTXO set can be updated *after* a successful
+      // broadcast (in confirmBroadcast), not before.
       setPendingTx({
         rawTx,
         txid,
@@ -184,21 +214,11 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
         amount: value,
         fee,
         tokenAmount: `${value} ${ticker}`,
+        fromScript,
+        selected,
       });
       setConfirmModalOpen(true);
       setLoading(false);
-
-      await updateWalletUtxos(
-        ContractType.FT,
-        fromScript, // FT change
-        changeScript, // RXD change
-        txid,
-        selected.inputs,
-        selected.outputs
-      );
-      updateFtBalances(new Set([fromScript]));
-
-      if (onSuccess) onSuccess(txid);
     } catch (error) {
       if (error instanceof TransferError) {
         setErrorMessage(error.message);
@@ -211,6 +231,11 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     }
   };
 
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    buildAndConfirm();
+  };
+
   const [scan, setScan] = useState(false);
   const onScan = (value: string) => {
     setScan(false);
@@ -221,16 +246,33 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
     }
   };
 
-  // SECURITY FIX (C4): Function to broadcast after user confirms in modal
+  // SECURITY FIX (C4): Broadcast only after the user confirms in the modal.
   const confirmBroadcast = async () => {
-    if (!pendingTx) return;
+    if (!pendingTx || broadcasting.current) return;
+    broadcasting.current = true;
 
     setLoading(true);
     try {
       console.debug("Broadcasting", pendingTx.rawTx);
-      const txid = await electrumWorker.value.broadcast(pendingTx.rawTx);
+      const broadcastTxid = await electrumWorker.value.broadcast(
+        pendingTx.rawTx
+      );
+      // broadcast() returns "" when the server already has the tx in a block;
+      // fall back to the locally computed txid so records stay correct.
+      const txid = broadcastTxid || pendingTx.txid;
       db.broadcast.put({ txid, date: Date.now(), description: "ft_send" });
       console.debug("Result", txid);
+
+      // Update the local UTXO set only now that the tx is on the network.
+      await updateWalletUtxos(
+        ContractType.FT,
+        pendingTx.fromScript, // FT change
+        p2pkhScript(wallet.value.address), // RXD change
+        txid,
+        pendingTx.selected.inputs,
+        pendingTx.selected.outputs
+      );
+      updateFtBalances(new Set([pendingTx.fromScript]));
 
       toast({
         title: `Sent ${pendingTx.tokenAmount}`,
@@ -250,6 +292,7 @@ export default function SendFungible({ glyph, onSuccess, disclosure }: Props) {
         status: "error",
       });
     } finally {
+      broadcasting.current = false;
       setLoading(false);
     }
   };

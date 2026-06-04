@@ -30,7 +30,7 @@ import { ContractType, SmartToken, TxO } from "@app/types";
 import { isP2pkh, p2pkhScript } from "@lib/script";
 import Identifier from "./Identifier";
 import Outpoint from "@lib/Outpoint";
-import { feeRate, network, wallet } from "@app/signals";
+import { feeRate, network, openModal, wallet } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { updateWalletUtxos, updateNFTOwned } from "@app/utxos";
 import { BsQrCodeScan } from "react-icons/bs";
@@ -67,6 +67,9 @@ export default function SendDigitalObject({
     fee: number;
     nftName: string;
   } | null>(null);
+  // Guards against a double-broadcast if the confirm button is hit twice
+  // before the first request resolves.
+  const broadcasting = useRef(false);
 
   const rxd = useLiveQuery(
     () => db.txo.where({ contractType: ContractType.RXD, spent: 0 }).toArray(),
@@ -77,10 +80,14 @@ export default function SendDigitalObject({
   useEffect(() => {
     setSuccess(true);
     setLoading(false);
+    // Never carry a built-but-unbroadcast tx across an open/close.
+    setConfirmModalOpen(false);
+    setPendingTx(null);
   }, [isOpen]);
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Build + sign the transaction and show the approval modal. Broadcast and
+  // UTXO updates happen only after the user confirms (see confirmBroadcast).
+  const buildAndConfirm = async () => {
     setSuccess(true);
     setLoading(true);
 
@@ -95,6 +102,21 @@ export default function SendDigitalObject({
       setLoading(false);
       return;
     }
+
+    // Inline unlock: the wallet may have idle-locked since this modal opened.
+    // Prompt for the password in place and resume the send, rather than
+    // forcing the user to back out and unlock from the sidebar.
+    if (wallet.value.locked || !wallet.value.wif) {
+      setLoading(false);
+      openModal.value = {
+        modal: "unlock",
+        onClose: (unlocked) => {
+          if (unlocked) buildAndConfirm();
+        },
+      };
+      return;
+    }
+
     const coins: SelectableInput[] = rxd.slice();
 
     try {
@@ -144,6 +166,11 @@ export default function SendDigitalObject({
     }
   };
 
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    buildAndConfirm();
+  };
+
   const [scan, setScan] = useState(false);
   const onScan = (value: string) => {
     setScan(false);
@@ -153,16 +180,28 @@ export default function SendDigitalObject({
     }
   };
 
-  // SECURITY FIX (C4): Function to broadcast after user confirms in modal
+  // SECURITY FIX (C4): Broadcast only after the user confirms in the modal.
   const confirmBroadcast = async () => {
-    if (!pendingTx) return;
+    if (!pendingTx || broadcasting.current) return;
+    broadcasting.current = true;
 
     setLoading(true);
     try {
       console.debug("Broadcasting", pendingTx.rawTx);
-      const txid = await electrumWorker.value.broadcast(pendingTx.rawTx);
+      const broadcastTxid = await electrumWorker.value.broadcast(
+        pendingTx.rawTx
+      );
+      // broadcast() returns "" when the server already has the tx in a block;
+      // fall back to the locally computed txid so records stay correct.
+      const txid = broadcastTxid || pendingTx.txid;
       db.broadcast.put({ txid, date: Date.now(), description: "nft_send" });
       console.debug("Result", txid);
+
+      // Mark the NFT input spent so a second submit can't rebuild and
+      // rebroadcast the same transfer.
+      if (txo.id) {
+        await db.txo.update(txo.id, { spent: 1 });
+      }
 
       toast({
         title: `Sent NFT: ${pendingTx.nftName}`,
@@ -206,6 +245,7 @@ export default function SendDigitalObject({
         status: "error",
       });
     } finally {
+      broadcasting.current = false;
       setLoading(false);
     }
   };
