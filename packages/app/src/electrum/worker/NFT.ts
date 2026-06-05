@@ -574,6 +574,16 @@ export class NFTWorker implements Subscription {
       // Encrypted NFT fields — persisted so decryption UI can retrieve them
       ...(payload.crypto !== undefined ? { crypto: payload.crypto } : {}),
       ...(payload.main !== undefined ? { main: payload.main } : {}),
+      // Glyph v2 covenant metadata — persisted so the royalty-listing flow can
+      // recover the creator's recorded terms and badges reflect enforced
+      // royalty / soulbound policy. (Cast: SmartTokenPayload allows arbitrary
+      // v2 fields but doesn't type royalty/policy.)
+      ...((payload as { royalty?: unknown }).royalty !== undefined
+        ? { royalty: (payload as { royalty?: SmartToken["royalty"] }).royalty }
+        : {}),
+      ...((payload as { policy?: unknown }).policy !== undefined
+        ? { policy: (payload as { policy?: SmartToken["policy"] }).policy }
+        : {}),
     };
 
     record.id = (await db.glyph.put(record)) as number;

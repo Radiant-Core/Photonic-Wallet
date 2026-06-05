@@ -86,11 +86,19 @@ export async function verifyTransactionInclusion(
     return { status: "unverified", reason: "error" };
   }
 
+  // FIX 3 (M3): validate every numeric field of the server response BEFORE it
+  // is used. `block_height` and `pos` index into our header store / Merkle
+  // tree, so reject anything that isn't a non-negative safe integer, and reject
+  // a non-string-array merkle branch. A NaN/Infinity/negative/oversized value
+  // here would otherwise flow into a DB lookup or the proof folding.
   if (
     !proof ||
-    typeof proof.block_height !== "number" ||
+    !Number.isSafeInteger(proof.block_height) ||
+    proof.block_height < 0 ||
     !Array.isArray(proof.merkle) ||
-    typeof proof.pos !== "number"
+    !proof.merkle.every((h) => typeof h === "string") ||
+    !Number.isSafeInteger(proof.pos) ||
+    proof.pos < 0
   ) {
     return { status: "unverified", reason: "no-proof" };
   }

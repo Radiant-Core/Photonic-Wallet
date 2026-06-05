@@ -69,6 +69,9 @@ const wrapped = wrap<{
     address: string
   ): { contractType: ContractType; utxo: ElectrumUtxo }[];
   isUtxoUnspent: (txid: string, vout: number, scriptHash: string) => boolean;
+  getUtxosByScriptHash: (
+    scriptHash: string
+  ) => { tx_hash: string; tx_pos: number; height: number; value: number }[];
   getBlockHeight: () => number;
   resolveWaveName: (name: string) => { target: string } | null;
   checkWaveAvailable: (name: string) => boolean;

@@ -415,19 +415,31 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
       },
     ];
 
-    // REP-3012 enforced royalty support for RXD-priced NFT sales.
-    // Canonical ordering: vout0 = NFT to buyer, vout1 = seller payment, vout2.. = royalty outputs, change after.
+    // Royalty handling for the PSRT (maker-signed) swap path.
+    //
+    // IMPORTANT: this is BEST-EFFORT / ADVISORY. In a PSRT swap the maker only
+    // signs output[0] (SIGHASH_SINGLE) and the NFT sits in a plain `nftScript`
+    // — nothing forces these royalty outputs, so a hostile taker building their
+    // own completion tx can omit them. For UNSTRIPPABLE, consensus-enforced
+    // royalty the seller must instead list via the royalty *covenant*
+    // (@lib/royaltyCovenant: buildRoyaltyListingTx / buildRoyaltyPurchaseTx),
+    // which makes the seller-payout and royalty outputs a spend condition and is
+    // proven on regtest in
+    // packages/lib/src/__tests__/royaltyCovenant.regtest.test.ts.
+    //
+    // Canonical ordering: vout0 = seller payment (the maker pre-signed this
+    // with SIGHASH_SINGLE bound to its input at index 0), vout1 = NFT to buyer,
+    // vout2.. = royalty outputs, funding/change after. Do NOT reorder: the
+    // maker's reused scriptSig at input index 0 commits to output[0], so the
+    // payment must stay at index 0 or the maker signature becomes invalid.
+    // This matches the working regtest construction in
+    // packages/lib/src/__tests__/wave-swap-regtest.test.ts
+    // (swapOutputs = [payOut, nftToB, ...]).
     if (
       swapParams.from.contractType === ContractType.NFT &&
       swapParams.to.contractType === ContractType.RXD &&
       swapParams.to.value > 0
     ) {
-      // Reorder to (NFT to buyer) then (seller payment)
-      const sellerPayment = outputs[0];
-      const nftToBuyer = outputs[1];
-      outputs[0] = nftToBuyer;
-      outputs[1] = sellerPayment;
-
       if (swapParams.from.glyph) {
         const royalty = await getTokenRoyalty(swapParams.from.glyph);
         if (royalty?.enforced) {

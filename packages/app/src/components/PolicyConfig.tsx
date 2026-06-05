@@ -79,15 +79,17 @@ export default function PolicyConfig({ value, onChange }: PolicyConfigProps) {
       <FormHelperText mt={-2}>
         {policy.transferable
           ? "Token can be transferred normally"
-          : "Soulbound - cannot be transferred"}
+          : "Soulbound — non-transferable when minted with the soulbound covenant"}
       </FormHelperText>
 
       {!policy.transferable && (
         <Alert status="warning" borderRadius="md">
           <AlertIcon />
           <AlertDescription>
-            Soulbound tokens are permanently bound to the original owner and can
-            only be burned. This cannot be changed after minting.
+            Soulbound tokens are intended to stay with the original owner. When
+            minted with the soulbound covenant the token can only be re-locked to
+            the same owner or burned — it cannot be transferred to anyone else,
+            and this cannot be changed after minting.
           </AlertDescription>
         </Alert>
       )}

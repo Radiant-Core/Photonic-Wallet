@@ -10,6 +10,7 @@ import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 import { updateFtBalances } from "@app/utxos";
 import { arrayChunks } from "@lib/util";
+import { verifyFtRefCommitment } from "./verifyTxo";
 
 // Delay before re-running a sync that just failed, so a congested/timing-out
 // socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
@@ -31,7 +32,19 @@ export class FTWorker extends NFTWorker {
           .toString();
         if (!ref) return undefined;
         return ftScript(this.address, ref);
-      }
+      },
+      // FIX 2 (token identity): the FT script above is derived from the
+      // server's unauthenticated `refs[0].ref` annotation. Cross-check it
+      // against the actual on-chain output script before the token's value is
+      // counted — a malicious server must not be able to mislabel which token
+      // a UTXO belongs to. Mismatches are skipped in updateTxos.
+      (utxo, derivedScript) =>
+        verifyFtRefCommitment(
+          this.electrum.client,
+          utxo,
+          this.address,
+          derivedScript
+        )
     );
   }
 

@@ -46,7 +46,14 @@ export default async function walletCreate(
       net,
     };
 
-    fs.writeFileSync(walletFilename, JSON.stringify(hex, undefined, 2));
+    // The wallet file holds the encrypted mnemonic — restrict to owner-only.
+    // mode on writeFileSync only applies when creating a new file and is still
+    // subject to umask, so chmod after write to be umask-independent and to
+    // tighten an already-existing file.
+    fs.writeFileSync(walletFilename, JSON.stringify(hex, undefined, 2), {
+      mode: 0o600,
+    });
+    fs.chmodSync(walletFilename, 0o600);
   } catch (error) {
     this.error(
       errorMessage((error as Error).message || "Wallet creation failed")

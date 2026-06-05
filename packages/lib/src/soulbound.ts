@@ -4,32 +4,116 @@
  */
 
 import rjs from "@radiant-core/radiantjs";
+import { bytesToHex } from "@noble/hashes/utils";
+import { encodeDataPush } from "@bitauth/libauth";
 import { GlyphV2Policy } from "./v2metadata";
 
 const { Script, Address } = rjs;
 
+// Opcodes (hex) — see Radiant-Core src/script/{script.h,interpreter.cpp}.
+const OP_DROP = "75";
+const OP_IF = "63";
+const OP_ELSE = "67";
+const OP_ENDIF = "68";
+const OP_DUP = "76";
+const OP_HASH160 = "a9";
+const OP_EQUAL = "87";
+const OP_EQUALVERIFY = "88";
+const OP_NUMEQUAL = "9c";
+const OP_CHECKSIGVERIFY = "ad";
+const OP_0 = "00";
+const OP_INPUTINDEX = "c0";
+const OP_PUSHINPUTREFSINGLETON = "d8"; // 36-byte immediate ref
+const OP_REFOUTPUTCOUNT_OUTPUTS = "de"; // pop ref -> push #outputs carrying it
+const OP_CODESCRIPTBYTECODE_UTXO = "e9"; // pop index -> push input code script
+const OP_CODESCRIPTBYTECODE_OUTPUT = "ea"; // pop index -> push output code script
+
+function pushData(hex: string): string {
+  return bytesToHex(encodeDataPush(Buffer.from(hex, "hex")));
+}
+
 /**
- * Create soulbound NFT script
- * Enforces that token can only be spent by original owner
+ * scriptSig branch selectors a spender appends after `<sig> <pubkey>`:
+ *  - MOVE: re-lock the NFT to the SAME soulbound script (self-custody move).
+ *  - BURN: destroy the singleton (no output may carry its ref).
+ */
+export const SOULBOUND_MOVE_SELECTOR = "51"; // OP_1 -> OP_IF branch
+export const SOULBOUND_BURN_SELECTOR = "00"; // OP_0 -> OP_ELSE branch
+
+/**
+ * Create a soulbound (non-transferable) NFT covenant.
+ *
+ * The previous implementation was a plain `OP_PUSHINPUTREFSINGLETON <ref>
+ * OP_DROP` + P2PKH — i.e. an ordinary owner-spendable NFT that placed NO
+ * constraint on the destination, so a "soulbound" token could be sent to anyone
+ * (audit finding). This version actually enforces non-transferability on-chain.
+ *
+ * To spend, the owner must sign (P2PKH against `ownerAddress`) AND pick one of
+ * two paths via the scriptSig selector:
+ *
+ *   MOVE (selector OP_1): output[0]'s code script must be byte-identical to this
+ *     input's code script (induction via OP_CODESCRIPTBYTECODE). Because the
+ *     owner pkh and ref are baked into that code, the NFT can only ever re-lock
+ *     to the SAME soulbound script for the SAME owner — never to a different
+ *     recipient and never to a plain transferable nftScript.
+ *
+ *   BURN (selector OP_0): the singleton ref must appear in zero outputs
+ *     (OP_REFOUTPUTCOUNT_OUTPUTS == 0), destroying the token.
+ *
+ * Proven on regtest in soulbound.regtest.test.ts: an owner self-move is
+ * accepted, a transfer to any other recipient is REJECTED, and a spend by a
+ * non-owner is REJECTED.
  */
 export function soulboundNftScript(ownerAddress: string, ref: string): string {
-  // Script ensures:
-  // 1. Token ref exists (singleton)
-  // 2. Only original owner can spend (P2PKH locked to owner)
-  // 3. Output must go back to same owner OR be burned (no ref in outputs)
+  if (ref.length !== 72) {
+    throw new Error(
+      `soulboundNftScript: ref must be 36 bytes (72 hex chars), got ${ref.length}`
+    );
+  }
+  const pkh = Address.fromString(ownerAddress).hashBuffer.toString("hex");
+  if (pkh.length !== 40) {
+    throw new Error("soulboundNftScript: owner pkh must be 20 bytes");
+  }
 
-  const script = Script.fromASM(`OP_PUSHINPUTREFSINGLETON ${ref} OP_DROP`);
+  // Owner authorisation (P2PKH, VERIFY form) — required on both paths.
+  const ownerAuth =
+    OP_DUP + OP_HASH160 + pushData(pkh) + OP_EQUALVERIFY + OP_CHECKSIGVERIFY;
 
-  // Add owner verification
-  const addr = Address.fromString(ownerAddress);
-  const pubkeyhash = addr.hashBuffer.toString("hex");
+  // MOVE: output[0] code == this input's code (re-lock to same soulbound).
+  const moveBranch =
+    OP_0 +
+    OP_CODESCRIPTBYTECODE_OUTPUT +
+    OP_INPUTINDEX +
+    OP_CODESCRIPTBYTECODE_UTXO +
+    OP_EQUAL;
 
-  // Standard P2PKH template: OP_DUP OP_HASH160 <pubkeyhash> OP_EQUALVERIFY OP_CHECKSIG
-  script.add(
-    Script.fromASM(`OP_DUP OP_HASH160 ${pubkeyhash} OP_EQUALVERIFY OP_CHECKSIG`)
-  );
+  // BURN: the singleton ref must not appear in any output.
+  const burnBranch =
+    pushData(ref) + OP_REFOUTPUTCOUNT_OUTPUTS + OP_0 + OP_NUMEQUAL;
 
-  return script.toHex();
+  const hex =
+    OP_PUSHINPUTREFSINGLETON +
+    ref +
+    OP_DROP +
+    OP_IF +
+    ownerAuth +
+    moveBranch +
+    OP_ELSE +
+    ownerAuth +
+    burnBranch +
+    OP_ENDIF;
+
+  // Round-trip to guarantee well-formed bytes.
+  return Script.fromHex(hex).toHex();
+}
+
+// Recognise a soulbound covenant and recover its ref (for wallet discovery).
+const SOULBOUND_RE = /^d8([0-9a-f]{72})7563(?:.|\n)*68$/;
+export function isSoulboundScript(scriptHex: string): boolean {
+  return SOULBOUND_RE.test(scriptHex);
+}
+export function parseSoulboundRef(scriptHex: string): string | undefined {
+  return scriptHex.match(SOULBOUND_RE)?.[1];
 }
 
 /**

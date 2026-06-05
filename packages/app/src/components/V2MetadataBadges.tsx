@@ -34,9 +34,13 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
     <HStack spacing={2} flexWrap="wrap">
       {showRoyalty && (
         <Tooltip
-          label={`${
-            metadata.royalty!.enforced ? "Enforced" : "Advisory"
-          } Royalty: ${metadata.royalty!.bps / 100}%`}
+          label={`${metadata.royalty!.bps / 100}% royalty (${
+            metadata.royalty!.enforced ? "enforced" : "advisory"
+          }). ${
+            metadata.royalty!.enforced
+              ? "Enforced on-chain when the holder lists it via the royalty covenant — a buyer cannot strip or underpay it. Private/out-of-band transfers are not covered."
+              : "Creator-declared, not enforced on-chain."
+          }`}
         >
           <Badge
             colorScheme={metadata.royalty!.enforced ? "purple" : "gray"}
@@ -51,7 +55,7 @@ export default function V2MetadataBadges({ metadata }: V2MetadataBadgesProps) {
       )}
 
       {showSoulbound && (
-        <Tooltip label="Non-transferable (Soulbound)">
+        <Tooltip label="Soulbound (non-transferable). Enforced on-chain only when the token is minted into the soulbound covenant; otherwise a creator-declared flag.">
           <Badge
             colorScheme="orange"
             display="flex"

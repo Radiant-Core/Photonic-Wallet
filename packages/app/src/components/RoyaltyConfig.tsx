@@ -107,8 +107,8 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
             />
             <FormHelperText ml={3} mb={0}>
               {enforced
-                ? "Royalties enforced by smart contract"
-                : "Advisory only"}
+                ? "Enforced on-chain when the holder lists the token via “List with enforced royalty”: a buyer cannot strip or underpay the royalty. Private/out-of-band transfers are not covered."
+                : "Advisory only — not enforced on-chain"}
             </FormHelperText>
           </FormControl>
 

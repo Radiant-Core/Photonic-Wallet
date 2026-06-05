@@ -53,6 +53,7 @@ import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
 import History from "./pages/History";
 import VaultPage from "./pages/Vault";
+import Market from "./pages/Market";
 import WaveRegister from "./pages/WaveRegister";
 import WaveNames from "./pages/WaveNames";
 
@@ -422,6 +423,10 @@ const router = createHashRouter([
           {
             path: "/vault",
             element: <VaultPage />,
+          },
+          {
+            path: "/market",
+            element: <Market />,
           },
           {
             path: "/history",

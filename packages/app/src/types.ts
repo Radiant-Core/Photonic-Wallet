@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-ignore
 import type { EncryptedData } from "@lib/encryption";
+import type { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
 import { ElectrumUtxo, NetworkKey } from "@lib/types";
 import { CreateToastFnReturn } from "@chakra-ui/react";
 import type { SecretBytes } from "./secretBytes";
@@ -62,6 +63,59 @@ export interface TokenSwap {
   // New fields for broadcast swaps
   mode?: SwapMode;
   broadcastTxid?: string; // txid of the broadcast advertisement tx
+}
+
+// On-chain covenant a token can rest in. These scriptPubKeys are NOT the plain
+// zero-ref nftScript template the indexer indexes by owner, so a token resting
+// in one is invisible to the ordinary NFT subscription. We track them locally,
+// the same way PSRT swaps are tracked in db.swap, so covenant-listed/minted
+// tokens don't vanish from the wallet. See
+// docs/covenants-royalty-soulbound-authority.md §5.1.
+export enum CovenantType {
+  ROYALTY_LISTING,
+  SOULBOUND,
+  AUTHORITY_GATED,
+}
+
+export enum CovenantStatus {
+  // The covenant UTXO is live on-chain (listing open / token held in covenant).
+  ACTIVE,
+  // The covenant UTXO has been spent: a royalty listing was bought or
+  // cancelled, or a soulbound token was burned/moved. Resolved, kept for
+  // history.
+  RESOLVED,
+}
+
+// Serializable royalty sale terms (mirrors @lib/royaltyCovenant RoyaltySaleTerms;
+// duplicated as a plain shape so types.ts stays free of a lib value import).
+export interface CovenantRoyaltyTerms {
+  ref: string;
+  sellerAddress: string;
+  sellerScript: string;
+  price: number;
+  royalties: Array<{ script: string; value: number }>;
+}
+
+// A covenant UTXO the wallet created (a royalty listing, a soulbound mint, or an
+// authority-gated mint). Lets covenant-resting tokens stay discoverable/managed
+// locally without relying on indexer recognition of the covenant patterns.
+export interface CovenantRecord {
+  id?: number;
+  type: CovenantType;
+  /** Token singleton ref in BE display form (matches SmartToken.ref). */
+  ref: string;
+  /** Covenant UTXO outpoint. */
+  txid: string;
+  vout: number;
+  /** Covenant scriptPubKey hex (the listing/soulbound/gated script). */
+  script: string;
+  value: number;
+  /** Wallet address that created (and, for listings, can cancel) the covenant. */
+  ownerAddress: string;
+  status: CovenantStatus;
+  date: number;
+  /** Royalty sale terms — present for ROYALTY_LISTING covenants only. */
+  terms?: CovenantRoyaltyTerms;
 }
 
 export interface SubscriptionStatus {
@@ -129,6 +183,12 @@ export interface SmartToken {
   main?: unknown; // payload.main — on-chain ciphertext or file metadata
   // WAVE protocol fields
   is_wave_duplicate?: boolean; // True if this is a duplicate WAVE name registration
+  // Glyph v2 covenant metadata — persisted from the reveal payload so the
+  // royalty-listing flow can recover the creator's recorded terms
+  // (royaltyTermsFromMetadata) and badges can reflect enforced royalty /
+  // soulbound policy without re-decoding the reveal.
+  royalty?: GlyphV2Royalty;
+  policy?: GlyphV2Policy;
 }
 
 export interface Subscription {

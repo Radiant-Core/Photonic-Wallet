@@ -27,6 +27,20 @@ const checkpoint: BlockData = {
   bits: 436241129,
 };
 
+// FIX 4 (header-sync DoS hardening).
+//
+// Serialized block-header length, in bytes / hex chars. ElectrumX returns a
+// concatenated hex blob; each header is 80 bytes = 160 hex chars.
+const HEADER_HEX_LEN = 160;
+// ElectrumX `blockchain.block.headers` caps a single response at 2016 headers
+// (one difficulty epoch). Never request — or parse — more than this per call,
+// so a malicious server can't make us allocate/iterate an unbounded blob.
+const MAX_HEADERS_PER_REQUEST = 2016;
+// Upper bound on rollback→catchup recursion. A reorg deeper than this many
+// rollbacks is treated as a hard error and surfaced rather than recursing
+// forever (the original `// FIXME check for infinite loop?`).
+const MAX_REORG_ITERATIONS = 200;
+
 export class HeadersSubscription implements Subscription {
   private electrum: ElectrumManager;
   private latestBlock: BlockData;
@@ -40,22 +54,63 @@ export class HeadersSubscription implements Subscription {
     this.catchingUp = false;
   }
 
-  async catchup() {
+  async catchup(reorgDepth = 0) {
     this.catchingUp = true;
     console.debug("Catching up block headers");
     try {
+      // FIX 4: bound the rollback→catchup recursion. A reorg deeper than
+      // MAX_REORG_ITERATIONS rollbacks is almost certainly a malicious or
+      // broken server feeding us a header chain that never reconciles. Give up
+      // with a surfaced error instead of recursing (and re-requesting) forever.
+      if (reorgDepth > MAX_REORG_ITERATIONS) {
+        this.catchingUp = false;
+        throw new Error(
+          `[Headers] reorg did not resolve after ${MAX_REORG_ITERATIONS} rollbacks; aborting catchup`
+        );
+      }
+
       const fetchFromHeight = this.latestBlock.height;
       const fetchToHeight =
         this.pending[0]?.height || this.latestBlock.height + 1000;
 
+      // FIX 4: never request more than one ElectrumX response can hold. The
+      // server interprets the second arg as a count (we shift one extra to
+      // align with our +1 indexing below). Clamp it to the protocol max so a
+      // crafted `pending[0].height` can't make us ask for (and parse) an
+      // unbounded number of headers.
+      const requestedCount = Math.min(
+        Math.max(fetchToHeight - fetchFromHeight, 0),
+        MAX_HEADERS_PER_REQUEST
+      );
+
       const response = (await this.electrum.client?.request(
         "blockchain.block.headers",
         fetchFromHeight,
-        fetchToHeight - fetchFromHeight
+        requestedCount
       )) as ElectrumHeadersResponse;
 
+      // FIX 4: reject an oversized / malformed response before parsing. A hex
+      // blob longer than MAX_HEADERS_PER_REQUEST headers (or not a clean
+      // multiple of the header length) is not something an honest server
+      // returns for our bounded request — refuse it rather than allocating a
+      // huge array from `.match()`.
+      const hex = typeof response?.hex === "string" ? response.hex : "";
+      const maxHexLen = MAX_HEADERS_PER_REQUEST * HEADER_HEX_LEN;
+      if (hex.length > maxHexLen) {
+        this.catchingUp = false;
+        throw new Error(
+          `[Headers] oversized headers response: ${hex.length} hex chars > cap ${maxHexLen}`
+        );
+      }
+      if (hex.length % HEADER_HEX_LEN !== 0) {
+        this.catchingUp = false;
+        throw new Error(
+          `[Headers] malformed headers response: ${hex.length} hex chars not a multiple of ${HEADER_HEX_LEN}`
+        );
+      }
+
       // Split 80 byte header hex strings
-      const headers = response.hex.match(/.{160}/g) || [];
+      const headers = hex.match(/.{160}/g) || [];
 
       // Check the first header returned matches our last header
       // If not, there must be a reorg
@@ -63,12 +118,10 @@ export class HeadersSubscription implements Subscription {
       if (first) {
         const firstHeader = RadJSBlockHeader.fromString(first);
         if (this.latestBlock.hash !== firstHeader.hash) {
-          // FIXME check for infinite loop?
-
           // Reorg. We need to find where the last good header is.
-          // Go back 10 blocks and reattempt
+          // Go back 10 blocks and reattempt — bounded by reorgDepth (FIX 4).
           await this.rollback();
-          await this.catchup();
+          await this.catchup(reorgDepth + 1);
           return;
         }
         console.debug("No reorg found");
@@ -76,6 +129,7 @@ export class HeadersSubscription implements Subscription {
 
       console.debug("Processing catchup headers");
 
+      const heightBefore = this.latestBlock.height;
       headers.forEach((hex, index) => {
         this.processHeader({
           height: fetchFromHeight + index + 1, // Add one because first header was shifted
@@ -88,8 +142,21 @@ export class HeadersSubscription implements Subscription {
         this.pending.length &&
         this.latestBlock.height < this.pending[0].height - 1
       ) {
+        // FIX 4: if this iteration made no forward progress (server returned no
+        // usable headers past our tip), don't recurse forever waiting to reach
+        // the pending height — treat it as a stalled catchup and surface it.
+        // Honest servers always advance the tip here.
+        if (this.latestBlock.height <= heightBefore) {
+          this.catchingUp = false;
+          throw new Error(
+            `[Headers] catchup stalled at height ${heightBefore} (no progress toward ${this.pending[0].height}); aborting`
+          );
+        }
         console.debug("Still not caught up");
-        await this.catchup();
+        // Preserve the reorg counter across forward-progress recursion so a
+        // server that alternates "reorg, advance one, reorg, …" can't bypass
+        // the cap (FIX 4).
+        await this.catchup(reorgDepth);
         return;
       }
 

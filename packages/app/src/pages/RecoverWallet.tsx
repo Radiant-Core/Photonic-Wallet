@@ -17,7 +17,12 @@ import {
   Textarea,
   useBreakpointValue,
 } from "@chakra-ui/react";
-import { recoverKeys, LEGACY_COIN_TYPE } from "@app/keys";
+import {
+  recoverKeys,
+  LEGACY_COIN_TYPE,
+  validatePasswordStrength,
+  MIN_PASSWORD_LENGTH,
+} from "@app/keys";
 import Card from "@app/components/Card";
 import { NetworkKey } from "@lib/types";
 import config from "@app/config.json";
@@ -35,14 +40,30 @@ export default function RecoverWallet() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [forceLegacy, setForceLegacy] = useState(false);
+  // Live password-policy feedback shown under the new-password field.
+  const [passwordHint, setPasswordHint] = useState("");
   const navigate = useNavigate();
   const isMobile = useBreakpointValue({ base: true, lg: false });
+
+  const onPasswordChange = (value: string) => {
+    if (!value) {
+      setPasswordHint("");
+      return;
+    }
+    const result = validatePasswordStrength(value);
+    setPasswordHint(result.ok ? "Password strength: OK" : result.reason);
+  };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const passwordValue = password.current?.value || "";
     const confirmValue = confirm.current?.value || "";
+    const strength = validatePasswordStrength(passwordValue);
+    if (!strength.ok) {
+      setError(strength.reason);
+      return false;
+    }
     if (confirmValue !== passwordValue) {
       setError("Passwords do not match");
       return false;
@@ -122,7 +143,24 @@ export default function RecoverWallet() {
           </FormControl>
           <FormControl mb={4}>
             <FormLabel>{"New password"}</FormLabel>
-            <Input ref={password} type="password" placeholder="Password" />
+            <Input
+              ref={password}
+              type="password"
+              placeholder="Password"
+              onChange={(e) => onPasswordChange(e.target.value)}
+            />
+            <FormHelperText
+              color={
+                passwordHint === "Password strength: OK"
+                  ? "green.400"
+                  : passwordHint
+                  ? "red.400"
+                  : undefined
+              }
+            >
+              {passwordHint ||
+                `Use at least ${MIN_PASSWORD_LENGTH} characters with a mix of letters, numbers, or symbols.`}
+            </FormHelperText>
           </FormControl>
           <FormControl mb={4}>
             <FormLabel>{"Confirm password"}</FormLabel>

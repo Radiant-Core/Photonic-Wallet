@@ -2,6 +2,7 @@ import React, { useCallback, useReducer, useRef, useState } from "react";
 import mime from "mime";
 import { Link } from "react-router-dom";
 import {
+  GLYPH_AUTHORITY,
   GLYPH_DMINT,
   GLYPH_ENCRYPTED,
   GLYPH_FT,
@@ -48,9 +49,18 @@ import { DropzoneState, useDropzone } from "react-dropzone";
 import { MdCheck, MdImage } from "react-icons/md";
 import GlowBox from "@app/components/GlowBox";
 import db from "@app/db";
-import { ContractType, ElectrumStatus } from "@app/types";
-import Outpoint from "@lib/Outpoint";
-import { mintToken } from "@lib/mint";
+import {
+  ContractType,
+  CovenantType,
+  ElectrumStatus,
+  SmartTokenType,
+} from "@app/types";
+import Outpoint, { reverseRef } from "@lib/Outpoint";
+import { mintToken, RevealCovenant } from "@lib/mint";
+import RoyaltyConfig from "@app/components/RoyaltyConfig";
+import PolicyConfig from "@app/components/PolicyConfig";
+import { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
+import { recordCovenant } from "@app/covenant";
 import { sanitizeSvgBytes, looksLikeSvg } from "@app/svgSanitize";
 //import { encodeCid, upload } from "@lib/ipfs";
 import { photonsToRXD } from "@lib/format";
@@ -365,6 +375,16 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   const [timelockState, setTimelockState] = reset(
     useState<TimelockSectionState>(initialTimelockState)
   );
+  // Glyph v2 covenant config (NFT only): royalty terms recorded for the
+  // royalty-listing covenant, policy (transferable=false → soulbound mint), and
+  // an optional authority token to gate the mint.
+  const [royalty, setRoyalty] = reset(
+    useState<GlyphV2Royalty | undefined>(undefined)
+  );
+  const [policy, setPolicy] = reset(
+    useState<GlyphV2Policy | undefined>(undefined)
+  );
+  const [authorityId, setAuthorityId] = reset(useState<string>(""));
   const attrName = useRef<HTMLInputElement>(null);
   const attrValue = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = reset(
@@ -396,6 +416,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
   );
   const containers = useLiveQuery(
     async () => await db.glyph.where({ type: "container", spent: 0 }).toArray(),
+    [],
+    []
+  );
+  // Owned authority tokens that can gate a mint (must have a live UTXO to
+  // co-spend). Filtered client-side by the GLYPH_AUTHORITY protocol flag.
+  const authorities = useLiveQuery(
+    async () =>
+      (
+        await db.glyph.where({ tokenType: SmartTokenType.NFT }).toArray()
+      ).filter(
+        (g) =>
+          g.spent === 0 && !!g.lastTxoId && !!g.p?.includes(GLYPH_AUTHORITY)
+      ),
     [],
     []
   );
@@ -952,11 +985,54 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         }
       : undefined;
 
+    // Resolve optional on-chain covenant emission. Soulbound / authority-gated
+    // mints lock the NFT into a covenant at reveal time (mint.ts) and are only
+    // supported for immutable NFTs.
+    let covenant: RevealCovenant | undefined;
+    const covenantSoulbound =
+      tokenType !== "fungible" &&
+      immutable === "1" &&
+      policy?.transferable === false;
+    if (tokenType !== "fungible" && immutable === "1") {
+      let authority: RevealCovenant["authority"];
+      if (authorityId !== "" && authorities[parseInt(authorityId, 10)]) {
+        const aGlyph = authorities[parseInt(authorityId, 10)];
+        const aTxo = aGlyph.lastTxoId
+          ? await db.txo.get(aGlyph.lastTxoId)
+          : undefined;
+        if (!aTxo) {
+          setLoading(false);
+          toast({
+            title: "Error",
+            description: "Couldn't find the authority token's UTXO to co-spend",
+            status: "error",
+          });
+          return;
+        }
+        // glyph.ref is BE display form; OP_REQUIREINPUTREF wants the LE ref.
+        authority = { ref: reverseRef(aGlyph.ref), utxo: aTxo };
+      }
+      if (covenantSoulbound || authority) {
+        covenant = { soulbound: covenantSoulbound, authority };
+      }
+    }
+
+    // Record policy only when it carries a non-default flag, so ordinary mints
+    // aren't bloated with a redundant all-defaults policy object.
+    const includePolicy =
+      policy &&
+      (policy.transferable === false ||
+        policy.nsfw === true ||
+        policy.executable === true ||
+        policy.renderable === false);
+
     const payload: SmartTokenPayload = {
       v: 2, // Glyph v2 version
       p: protocols,
       ...(Object.keys(args).length ? args : undefined),
       ...meta,
+      ...(royalty ? { royalty } : undefined),
+      ...(includePolicy ? { policy } : undefined),
       ...(encryptedFileObj ?? fileObj),
       ...(dmintPayload ? { dmint: dmintPayload } : undefined),
     };
@@ -1063,7 +1139,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         coins,
         payload,
         relInputs,
-        feeRate.value
+        feeRate.value,
+        undefined,
+        covenant
       );
 
       const broadcast = async (rawTx: string) =>
@@ -1109,6 +1187,32 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           date: Date.now(),
           description: `${shortTokenType}_mint`,
         });
+
+        // Covenant mint: the NFT was locked into a soulbound/authority covenant,
+        // so the ordinary by-owner NFT subscription won't discover it. Track it
+        // locally (covenant.ts) and pull its metadata so it stays visible in the
+        // wallet. The minted NFT singleton is at vout 0 of the reveal tx.
+        if (covenant && (covenant.soulbound || covenant.authority)) {
+          const refLE = Outpoint.fromUTXO(commitTx.id, 0).reverse().toString();
+          const refBE = reverseRef(refLE);
+          await recordCovenant({
+            type: covenant.soulbound
+              ? CovenantType.SOULBOUND
+              : CovenantType.AUTHORITY_GATED,
+            ref: refBE,
+            txid: revealTxId,
+            vout: 0,
+            script: revealTx.outputs[0].script.toHex(),
+            value: revealTx.outputs[0].satoshis,
+            ownerAddress: wallet.value.address,
+          });
+          // Populate the glyph record (discovery skips covenant scripts).
+          try {
+            await electrumWorker.value.fetchGlyph(refBE);
+          } catch (error) {
+            console.debug("[Mint] covenant glyph fetch failed", error);
+          }
+        }
 
         // If this mint had a timelock, persist the CEK locally so the owner
         // can later publish the reveal transaction (Phase 5, REP-3009).
@@ -2039,6 +2143,61 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   "A mutable contract will be created. The token owner can edit name, description, and attributes after minting."
                 }
               </Alert>
+            )}
+            {tokenType !== "fungible" && (
+              <FormSection>
+                <FormControl>
+                  <FormLabel>{"Royalty"}</FormLabel>
+                  <FormHelperText mb={3}>
+                    {
+                      "Recorded with the token. Enforced on-chain when the holder lists it for sale via the royalty covenant (“List with enforced royalty”)."
+                    }
+                  </FormHelperText>
+                  <RoyaltyConfig value={royalty} onChange={setRoyalty} />
+                </FormControl>
+                <Divider />
+                {formData.immutable === "1" ? (
+                  <>
+                    <FormControl>
+                      <FormLabel>{"Policy"}</FormLabel>
+                      <FormHelperText mb={3}>
+                        {
+                          "Turn off “Transferable” to mint a soulbound (non-transferable) token directly into the soulbound covenant."
+                        }
+                      </FormHelperText>
+                      <PolicyConfig value={policy} onChange={setPolicy} />
+                    </FormControl>
+                    <Divider />
+                    <FormControl>
+                      <FormLabel>{"Authority gating"}</FormLabel>
+                      <Select
+                        value={authorityId}
+                        onChange={(e) => setAuthorityId(e.target.value)}
+                      >
+                        <option value="">{"None"}</option>
+                        {authorities.map((a, index) => (
+                          <option key={a.ref} value={index}>
+                            {a.name || "Authority"} [
+                            {Outpoint.fromString(a.ref).shortRef()}]
+                          </option>
+                        ))}
+                      </Select>
+                      <FormHelperText>
+                        {
+                          "Require this authority token to be co-spent at mint (OP_REQUIREINPUTREF). A counterfeiter without it cannot mint the item."
+                        }
+                      </FormHelperText>
+                    </FormControl>
+                  </>
+                ) : (
+                  <Alert status="info" fontSize="sm">
+                    <AlertIcon />
+                    {
+                      "Soulbound and authority-gated minting require an immutable token."
+                    }
+                  </Alert>
+                )}
+              </FormSection>
             )}
             {tokenType === "fungible" && (
               <>

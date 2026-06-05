@@ -4,13 +4,14 @@
 # Stage 1: Build
 FROM node:18-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin pnpm to match `packageManager` in package.json (pnpm@11.1.3).
+# Floating to @latest at build time is non-reproducible and a supply-chain risk.
+RUN corepack enable && corepack prepare pnpm@11.1.3 --activate
 
 WORKDIR /app
 
 # Copy dependency files first (for layer caching)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY patches/ ./patches/
 COPY packages/config-eslint/package.json ./packages/config-eslint/
 COPY packages/config-typescript/ ./packages/config-typescript/
 COPY packages/lib/package.json ./packages/lib/

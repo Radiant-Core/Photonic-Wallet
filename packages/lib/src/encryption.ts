@@ -43,8 +43,15 @@ const WALLET_SCRYPT_PARAMS = {
   p: 1,
 };
 
-// Version tag written into new wallet blobs so we can distinguish format on load
+// Version tags written into wallet blobs so we can distinguish format on load.
+//   0x02 — AES-256-GCM, no AAD (blobs written before the AAD-binding fix).
+//   0x03 — AES-256-GCM, with version/salt/iv bound into the GCM AAD so the
+//          format discriminator and KDF inputs are authenticated and cannot be
+//          tampered with to downgrade-route the blob to the legacy v1 path.
+// Both decrypt; only 0x03 is written for new wallets. The on-disk shape is
+// otherwise identical, so existing 0x02 (and v1) blobs keep working unchanged.
 const WALLET_V2_MAGIC = 0x02;
+const WALLET_V3_MAGIC = 0x03;
 
 // ============================================================================
 // Legacy Types (backwards compatibility)
@@ -682,8 +689,9 @@ export function fromBase64(base64: string): Uint8Array {
  * Uses AES-256-GCM (authenticated) with scrypt N=2^17.
  * The returned EncryptedData is wire-compatible with the existing SavedWallet
  * shape stored in IndexedDB, with `mac` repurposed as the GCM auth tag and
- * `iv` as the 12-byte GCM nonce.  A `version` field (0x02) is written so
- * decryptWallet can distinguish new blobs from old AES-CTR ones.
+ * `iv` as the 12-byte GCM nonce.  A `version` field (0x03) is written so
+ * decryptWallet can distinguish new AAD-bound blobs from older v2 (no-AAD GCM)
+ * and legacy v1 (AES-CTR) ones.
  */
 export async function encryptWallet(
   data: Uint8Array,
@@ -701,9 +709,18 @@ export async function encryptWallet(
     ["encrypt"]
   );
 
+  // Bind the format discriminator and KDF inputs (version || salt || iv) into
+  // the GCM AAD so a tampered blob cannot be re-routed to the legacy v1 path.
+  const aad = buildWalletAad(WALLET_V3_MAGIC, salt, iv);
+
   // AES-GCM output = ciphertext || 16-byte auth tag
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv.slice().buffer, tagLength: 128 },
+    {
+      name: "AES-GCM",
+      iv: iv.slice().buffer,
+      tagLength: 128,
+      additionalData: aad.slice().buffer,
+    },
     importedKey,
     data.slice().buffer
   );
@@ -713,7 +730,7 @@ export async function encryptWallet(
   const tag = encBytes.slice(-16);
 
   return {
-    version: WALLET_V2_MAGIC,
+    version: WALLET_V3_MAGIC,
     ciphertext,
     salt,
     iv,
@@ -722,8 +739,25 @@ export async function encryptWallet(
 }
 
 /**
+ * Build the GCM additional-authenticated-data for a v3 wallet blob:
+ * `version-byte || salt || iv`. Binding these makes the format discriminator
+ * and KDF inputs tamper-evident (any change flips the auth tag).
+ */
+function buildWalletAad(
+  version: number,
+  salt: Uint8Array,
+  iv: Uint8Array
+): Uint8Array {
+  const toU8 = (v: ArrayBuffer | Uint8Array): Uint8Array =>
+    v instanceof Uint8Array ? v : new Uint8Array(v);
+  return concatBytes(new Uint8Array([version]), toU8(salt), toU8(iv));
+}
+
+/**
  * Decrypt wallet entropy.
- * Handles both v2 (AES-256-GCM) and legacy v1 (AES-128-CTR) blobs.
+ * Handles v3 (AES-256-GCM with AAD-bound version/salt/iv), v2 (AES-256-GCM,
+ * no AAD) and legacy v1 (AES-128-CTR) blobs. The version byte selects the path;
+ * older blobs continue to decrypt unchanged.
  */
 export async function decryptWallet(
   data: EncryptedData & { version?: number },
@@ -731,10 +765,61 @@ export async function decryptWallet(
 ): Promise<Uint8Array> {
   // The version discriminator is already in the function signature
   // (`& { version?: number }`); no cast needed.
+  if (data.version === WALLET_V3_MAGIC) {
+    // v3: GCM with version/salt/iv bound into the AAD.
+    return _decryptWalletV3(data, password);
+  }
   if (data.version === WALLET_V2_MAGIC) {
+    // v2: GCM without AAD (blobs written before the AAD-binding fix).
     return _decryptWalletV2(data, password);
   }
   return _decryptWalletV1(data, password);
+}
+
+async function _decryptWalletV3(
+  data: EncryptedData,
+  password: string
+): Promise<Uint8Array> {
+  const { key } = deriveKeyScryptWallet(password, data.salt);
+
+  const { crypto } = globalThis;
+  const importedKey = await crypto.subtle.importKey(
+    "raw",
+    key.slice().buffer,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"]
+  );
+
+  // Normalize EncryptedData fields (typed as ArrayBuffer|Uint8Array) to Uint8Array
+  const toU8 = (v: ArrayBuffer | Uint8Array): Uint8Array =>
+    v instanceof Uint8Array ? v : new Uint8Array(v);
+
+  // Reassemble ciphertext || tag
+  const ct = toU8(data.ciphertext);
+  const tag = toU8(data.mac);
+  const combined = new Uint8Array(ct.byteLength + tag.byteLength);
+  combined.set(ct);
+  combined.set(tag, ct.byteLength);
+
+  // AAD must reproduce exactly what encryptWallet bound (version || salt || iv).
+  const aad = buildWalletAad(WALLET_V3_MAGIC, toU8(data.salt), toU8(data.iv));
+
+  try {
+    const decrypted = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: toU8(data.iv).slice().buffer,
+        tagLength: 128,
+        additionalData: aad.slice().buffer,
+      },
+      importedKey,
+      combined.slice().buffer
+    );
+    return new Uint8Array(decrypted);
+  } catch {
+    throw new Error("Password incorrect");
+  }
 }
 
 async function _decryptWalletV2(

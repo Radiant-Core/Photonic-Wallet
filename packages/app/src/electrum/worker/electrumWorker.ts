@@ -11,10 +11,7 @@ import { findSwaps } from "./findSwaps";
 import { isUtxoUnspent } from "./isUtxoUnspent";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 import { HeadersSubscription } from "./Headers";
-import {
-  verifyTransactionInclusion,
-  type TxVerification,
-} from "@app/verifier";
+import { verifyTransactionInclusion, type TxVerification } from "@app/verifier";
 
 type Timer = ReturnType<typeof setTimeout> | null;
 
@@ -238,6 +235,22 @@ const worker = {
   },
   async isUtxoUnspent(txid: string, vout: number, scriptHash: string) {
     return isUtxoUnspent(electrum, txid, vout, scriptHash);
+  },
+  // List unspent outputs for an arbitrary scripthash. Used by covenant tracking
+  // (covenant.ts) to reconcile listing/soulbound/authority UTXOs, which rest in
+  // scripts the per-contract subscriptions don't watch.
+  async getUtxosByScriptHash(scriptHash: string) {
+    return (
+      ((await electrum.client?.request(
+        "blockchain.scripthash.listunspent",
+        scriptHash
+      )) as {
+        tx_hash: string;
+        tx_pos: number;
+        height: number;
+        value: number;
+      }[]) || []
+    );
   },
   async getBlockHeight(): Promise<number> {
     try {

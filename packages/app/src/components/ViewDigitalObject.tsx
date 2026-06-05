@@ -39,6 +39,7 @@ import TokenContent from "@app/components/TokenContent";
 import TokenType from "@app/components/TokenType";
 import PageHeader from "@app/components/PageHeader";
 import MeltDigitalObject from "./MeltDigitalObject";
+import RoyaltyListModal from "./RoyaltyListModal";
 import TxSuccessModal from "./TxSuccessModal";
 import { SmartToken, TxO } from "../types";
 import { openModal, wallet } from "@app/signals";
@@ -47,7 +48,13 @@ import createExplorerUrl from "@app/network/createExplorerUrl";
 import { RiContractRightLine, RiExpandLeftLine } from "react-icons/ri";
 import { useViewPanelContext } from "@app/layouts/ViewPanelLayout";
 import ActionIcon from "./ActionIcon";
-import { MdDeleteForever, MdEdit, MdLock, MdTimer } from "react-icons/md";
+import {
+  MdDeleteForever,
+  MdEdit,
+  MdLock,
+  MdSell,
+  MdTimer,
+} from "react-icons/md";
 import { TbArrowUpRight, TbBox } from "react-icons/tb";
 import mime from "mime";
 import {
@@ -114,6 +121,7 @@ export default function ViewDigitalObject({
   const sendDisclosure = useDisclosure();
   const meltDisclosure = useDisclosure();
   const editDisclosure = useDisclosure();
+  const listDisclosure = useDisclosure();
   const successDisclosure = useDisclosure();
   const [nft, txo, author, container] = useLiveQuery(
     async () => {
@@ -159,6 +167,7 @@ export default function ViewDigitalObject({
   const openSend = () => sendDisclosure.onOpen();
   const openEdit = () => editDisclosure.onOpen();
   const openMelt = () => meltDisclosure.onOpen();
+  const openList = () => listDisclosure.onOpen();
 
   const openSuccess = (id: string) => {
     txid.current = id;
@@ -386,6 +395,16 @@ export default function ViewDigitalObject({
               >
                 {"Melt"}
               </Button>
+              {nft.royalty && (
+                <Button
+                  disabled={nft.swapPending}
+                  leftIcon={<ActionIcon as={MdSell} />}
+                  onClick={() => unlock(openList)}
+                  sx={{ gridColumn: "span 2 / span 2" }}
+                >
+                  {"List with enforced royalty"}
+                </Button>
+              )}
               {nft.type === "container" && (
                 <Button
                   as={Link}
@@ -473,6 +492,7 @@ export default function ViewDigitalObject({
           openSuccess(txid);
         }}
       />
+      <RoyaltyListModal glyph={nft} txo={txo} disclosure={listDisclosure} />
       <TxSuccessModal
         onClose={() => {
           successDisclosure.onClose();

@@ -41,9 +41,33 @@ import { buildTx } from "./tx";
 import Outpoint from "./Outpoint";
 import rjs from "@radiant-core/radiantjs";
 import { GLYPH_NFT } from "./protocols";
+import { soulboundNftScript } from "./soulbound";
+import { authorityGatedNftScript } from "./authority";
 const { Script, crypto } = rjs;
 
 const defaultFeeRate = 10000;
+
+/**
+ * Optional covenant emission for a single NFT mint. When supplied, the reveal's
+ * NFT output is locked into a covenant instead of the plain transferable
+ * `nftScript`:
+ *
+ *  - `soulbound: true` → `soulboundNftScript(owner, tokenRef)`: the NFT is
+ *    non-transferable (owner self-move or burn only). Proven in
+ *    soulbound.regtest.test.ts.
+ *  - `authority` → `authorityGatedNftScript(owner, tokenRef, authority.ref)`:
+ *    the item embeds `OP_REQUIREINPUTREF <authorityRef>`, a creation-time rule,
+ *    so it can only be minted by a tx that co-spends the genuine authority
+ *    token. The authority UTXO is added as an input and re-created as an output
+ *    to preserve it. Proven in authority.regtest.test.ts.
+ *
+ * Only one mode applies at a time and only to immutable NFTs (the mutable
+ * contract path is incompatible with these single-output covenants).
+ */
+export type RevealCovenant = {
+  soulbound?: boolean;
+  authority?: { ref: string; utxo: Utxo };
+};
 
 export function commitBundle(
   deployMethod: DeployMethod,
@@ -377,7 +401,8 @@ export function createRevealOutputs(
   creatorAddress: string,
   mint: TokenMint,
   deployMethod: DeployMethod,
-  deployParams: RevealDirectParams | RevealDmintParams
+  deployParams: RevealDirectParams | RevealDmintParams,
+  covenant?: RevealCovenant
 ) {
   if (deployMethod === "dmint" && mint.contract !== "ft") {
     throw new Error("Operation does not support dmint deployments");
@@ -389,14 +414,57 @@ export function createRevealOutputs(
   const outputs: UnfinalizedOutput[] = [];
 
   if (mint.contract === "nft") {
-    outputs.push({
-      script: nftScript(deployParams.address, tokenRef),
-      value: mint.outputValue,
-    });
-    console.debug("Added NFT output", {
-      address: deployParams.address,
-      tokenRef,
-    });
+    if (covenant && (covenant.soulbound || covenant.authority)) {
+      if (!mint.immutable) {
+        throw new Error(
+          "Covenant mints (soulbound/authority-gated) must be immutable"
+        );
+      }
+      if (covenant.authority) {
+        // Authority-gated: the item embeds OP_REQUIREINPUTREF <authorityRef>,
+        // satisfiable only by co-spending the genuine authority token, which we
+        // add as an input and re-create as an output so it is preserved.
+        outputs.push({
+          script: authorityGatedNftScript(
+            deployParams.address,
+            tokenRef,
+            covenant.authority.ref
+          ),
+          value: mint.outputValue,
+        });
+        // The authority token is co-spent as an input (pushed after the commit
+        // input below so the commit stays at index 0) and re-created here so it
+        // survives the mint.
+        outputs.push({
+          script: covenant.authority.utxo.script,
+          value: covenant.authority.utxo.value,
+        });
+        console.debug("Added authority-gated NFT output", {
+          address: deployParams.address,
+          tokenRef,
+          authorityRef: covenant.authority.ref,
+        });
+      } else {
+        // Soulbound: non-transferable covenant (owner self-move / burn only).
+        outputs.push({
+          script: soulboundNftScript(deployParams.address, tokenRef),
+          value: mint.outputValue,
+        });
+        console.debug("Added soulbound NFT output", {
+          address: deployParams.address,
+          tokenRef,
+        });
+      }
+    } else {
+      outputs.push({
+        script: nftScript(deployParams.address, tokenRef),
+        value: mint.outputValue,
+      });
+      console.debug("Added NFT output", {
+        address: deployParams.address,
+        tokenRef,
+      });
+    }
   } else if (mint.contract === "ft") {
     if (deployMethod === "direct") {
       outputs.push({
@@ -461,6 +529,13 @@ export function createRevealOutputs(
     // Batch reveals will already handle this with txSize but single mints require it
     scriptSigSize: revealScriptSigSize(mint.revealScriptSig.length / 2),
   });
+
+  // Authority-gated mint: co-spend the genuine authority token so the
+  // OP_REQUIREINPUTREF in the gated output is satisfied. Added after the commit
+  // input so the commit stays at index 0 (the reveal scriptSig targets it).
+  if (mint.contract === "nft" && covenant?.authority) {
+    inputs.push({ ...covenant.authority.utxo });
+  }
 
   if (mint.contract === "ft" && deployMethod === "dmint") {
     // Add input for creating the dmint contract ref
@@ -692,10 +767,18 @@ export function mintToken(
   payload: SmartTokenPayload,
   relUtxos: Utxo[],
   feeRate: number,
-  extraOutputs?: { script: string; value: number }[] // Additional outputs for reveal tx (e.g., registration fees)
+  extraOutputs?: { script: string; value: number }[], // Additional outputs for reveal tx (e.g., registration fees)
+  covenant?: RevealCovenant // Optional soulbound / authority-gated emission (NFT only)
 ) {
   if (deploy.method === "dmint" && contract !== "ft") {
     throw new Error("Token contract does not support dmint deployments");
+  }
+  if (
+    covenant &&
+    (covenant.soulbound || covenant.authority) &&
+    contract !== "nft"
+  ) {
+    throw new Error("Covenant mints are only supported for NFTs");
   }
 
   let unspentRxd = utxos;
@@ -758,7 +841,8 @@ export function mintToken(
     deploy.params.address,
     mint,
     deploy.method,
-    deploy.params
+    deploy.params,
+    covenant
   );
 
   if (linkCommit) {

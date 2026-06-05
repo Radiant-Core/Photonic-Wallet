@@ -45,6 +45,86 @@ export { RADIANT_COIN_TYPE, LEGACY_COIN_TYPE, DEFAULT_COIN_TYPE };
  * @param coinType SLIP-0044 coin type (default 512). Legacy wallets pass 0.
  * @returns Hybrid X25519 + ML-KEM-768 keypair
  */
+/**
+ * Minimum acceptable wallet-encryption password length.
+ * 10+ characters materially raises scrypt brute-force cost on top of the
+ * N=2^17 KDF, while staying usable for a manually-typed unlock password.
+ */
+export const MIN_PASSWORD_LENGTH = 10;
+
+/**
+ * A small, dependency-free set of passwords that must always be rejected.
+ * zxcvbn is not bundled in this workspace, so this is a pragmatic floor —
+ * it catches the most common trivially-weak choices rather than aiming to be
+ * exhaustive. Compared case-insensitively against the trimmed password.
+ */
+const COMMON_WEAK_PASSWORDS = new Set([
+  "password",
+  "password1",
+  "passw0rd",
+  "12345678",
+  "123456789",
+  "1234567890",
+  "qwertyui",
+  "qwerty123",
+  "letmein123",
+  "iloveyou",
+  "admin123",
+  "welcome1",
+  "photonic",
+  "radiant1",
+]);
+
+/**
+ * Validate the strength of a new wallet-encryption password.
+ *
+ * Policy (no external strength library is available in this workspace, so this
+ * is an inline heuristic, not zxcvbn):
+ *   - At least {@link MIN_PASSWORD_LENGTH} characters.
+ *   - Not a single repeated character (e.g. "aaaaaaaaaa").
+ *   - Not a known trivially-weak / common password.
+ *   - Must contain at least two distinct character classes
+ *     (lower / upper / digit / symbol) to discourage e.g. all-lowercase words.
+ *
+ * @returns `{ ok: true }` if acceptable, otherwise `{ ok: false, reason }`
+ *          with a user-facing message.
+ */
+export function validatePasswordStrength(
+  password: string
+): { ok: true } | { ok: false; reason: string } {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return {
+      ok: false,
+      reason: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+    };
+  }
+
+  // Reject a single character repeated (e.g. "aaaaaaaaaa", "1111111111").
+  if (/^(.)\1*$/.test(password)) {
+    return { ok: false, reason: "Password is too weak (all one character)" };
+  }
+
+  if (COMMON_WEAK_PASSWORDS.has(password.trim().toLowerCase())) {
+    return { ok: false, reason: "Password is too common; choose another" };
+  }
+
+  const classes = [
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /[0-9]/.test(password),
+    /[^a-zA-Z0-9]/.test(password),
+  ].filter(Boolean).length;
+  if (classes < 2) {
+    return {
+      ok: false,
+      reason:
+        "Password is too weak; mix letters, numbers, or symbols",
+    };
+  }
+
+  return { ok: true };
+}
+
 export function deriveEncryptionKeypair(
   mnemonic: string,
   coinType: number = DEFAULT_COIN_TYPE
@@ -165,15 +245,12 @@ export async function decryptKeys(net: NetworkKey, password: string) {
   //     we actually derived so downstream consumers agree.
   const needsReencrypt = !data.version;
   const needsCoinType = typeof data.coinType !== "number";
-  if (needsReencrypt || needsCoinType) {
-    const blob = needsReencrypt
-      ? await encryptWallet(decrypted, password)
-      : {
-          ciphertext: data.ciphertext,
-          salt: data.salt,
-          iv: data.iv,
-          version: data.version,
-        };
+  if (needsReencrypt) {
+    // Legacy v1 (AES-128-CTR) blob → re-encrypt with the current authenticated
+    // AES-256-GCM format. This produces a brand-new blob
+    // (ciphertext/salt/iv/version/mac), so replacing the whole record is
+    // correct here.
+    const blob = await encryptWallet(decrypted, password);
     await db.kvp.put(
       {
         ...blob,
@@ -184,6 +261,18 @@ export async function decryptKeys(net: NetworkKey, password: string) {
       },
       "wallet"
     );
+  } else if (needsCoinType) {
+    // v2 blob that merely lacks `coinType` (and possibly has a stale address).
+    // Patch ONLY the changed plaintext fields in place — never rebuild the
+    // blob, or we would drop the GCM auth tag (`mac`) and brick the wallet on
+    // the next unlock (red-team finding R4). ciphertext/salt/iv/version/mac
+    // are left untouched.
+    await db.kvp.update("wallet", {
+      coinType,
+      address,
+      swapAddress,
+      net: data.net,
+    });
   }
 
   return {

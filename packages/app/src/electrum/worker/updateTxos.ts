@@ -7,17 +7,48 @@ import db from "@app/db";
 import { ContractType, TxO } from "@app/types";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import { ElectrumUtxo } from "@lib/types";
+import { validateElectrumUtxo, verifyTxoInclusion } from "./verifyTxo";
+import { updateFtBalances } from "@app/utxos";
 
 export type ElectrumTxMap = {
   [key: string]: { hex: string; tx: Transaction };
 };
+
+/**
+ * Per-utxo async on-chain validation hook (FIX 2 / token identity).
+ *
+ * `buildUpdateTXOs` derives the txo script purely from server-supplied data.
+ * For contract types where the server *also* tells us which token a UTXO is
+ * (FT `refs[0].ref`), the caller passes a validator that fetches the raw
+ * (hash-verified) tx and confirms the on-chain output script commits to the
+ * claimed ref. Returning false skips the UTXO so a spoofed token never counts
+ * toward a balance. Omitted for RXD/NFT where no extra server annotation is
+ * trusted beyond the script itself.
+ */
+export type ScriptValidator = (
+  utxo: ElectrumUtxo,
+  derivedScript: string
+) => Promise<boolean>;
+
+/**
+ * TxO plus the SPV verification flag (FIX 1 / R14).
+ *
+ * `TxO` lives in the out-of-scope `@app/types`, so the `verified` column is
+ * declared here as a structural extension and persisted as an extra Dexie
+ * field (Dexie stores unindexed properties transparently). `verified === 1`
+ * means a Merkle proof for this txo checked out against our locally
+ * PoW-validated header chain; `0`/undefined means unverified (either still
+ * unconfirmed, or the server could not or would not prove inclusion).
+ */
+export type VerifiableTxO = TxO & { verified?: 0 | 1 };
 
 // Update txo table for a contract type
 export const buildUpdateTXOs =
   (
     electrum: ElectrumManager,
     contractType: ContractType,
-    scriptBuilder: (utxo: ElectrumUtxo) => string | undefined
+    scriptBuilder: (utxo: ElectrumUtxo) => string | undefined,
+    scriptValidator?: ScriptValidator
   ) =>
   async (
     scriptHash: string,
@@ -59,11 +90,27 @@ export const buildUpdateTXOs =
 
     // Fetch unspent outputs
     console.debug("Calling listunspent");
-    const utxos = (await electrum.client?.request(
+    const rawUtxos = (await electrum.client?.request(
       "blockchain.scripthash.listunspent",
       scriptHash
-    )) as ElectrumUtxo[];
-    console.debug("Unspent", contractType, utxos);
+    )) as unknown[];
+    console.debug("Unspent", contractType, rawUtxos);
+
+    // FIX 3 (M3): validate every server-supplied entry BEFORE any numeric
+    // field is trusted. Reject (skip) entries with non-integer / negative /
+    // out-of-range value, height, or tx_pos, or a malformed tx_hash, instead
+    // of summing garbage into balances or using bad array/DB positions.
+    const utxos: ElectrumUtxo[] = [];
+    for (const candidate of Array.isArray(rawUtxos) ? rawUtxos : []) {
+      if (validateElectrumUtxo(candidate)) {
+        utxos.push(candidate);
+      } else {
+        console.warn(
+          "[updateTxos] Rejecting malformed listunspent entry",
+          candidate
+        );
+      }
+    }
 
     // Check tx exists in database
     // Dedup any transactions that have multiple UTXOs for this wallet
@@ -115,16 +162,52 @@ export const buildUpdateTXOs =
     }
 
     // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
-    const added: TxO[] = [];
+    const added: VerifiableTxO[] = [];
     for (const utxo of newUtxos) {
       const script = scriptBuilder(utxo);
       if (!script) continue;
+
+      // FIX 2 (token identity): for contract types that carry a server-supplied
+      // token annotation (FT refs[0].ref), confirm the on-chain output script
+      // actually commits to the claimed ref before counting it. A failed check
+      // means the server lied about which token this UTXO is — skip it.
+      if (scriptValidator) {
+        let ok = false;
+        try {
+          ok = await scriptValidator(utxo, script);
+        } catch (err) {
+          console.warn("[updateTxos] script validation threw, skipping", err);
+          ok = false;
+        }
+        if (!ok) {
+          console.warn(
+            "[updateTxos] On-chain ref mismatch, skipping UTXO",
+            utxo.tx_hash,
+            utxo.tx_pos
+          );
+          continue;
+        }
+      }
 
       // Check if this is our own tx. User won't be notified for these.
       const isOwnTx =
         (await db.broadcast.get(utxo.tx_hash)) === undefined ? 0 : 1;
 
-      const txo: TxO = {
+      // FIX 1 (R14): a server-claimed confirmation height is NOT trusted on its
+      // own. Only mark the txo verified once a Merkle proof checks out against
+      // our locally PoW-validated header at that height. Unverified-but-claimed-
+      // confirmed coins are stored with height=Infinity-equivalent semantics
+      // (verified:0) so balance code surfaces them as pending, not confirmed.
+      // Graceful degradation: verifyTxoInclusion never throws — on no-proof /
+      // no-header / bad-proof it returns false and the coin stays unverified.
+      const height = utxo.height || Infinity;
+      const verified =
+        height !== Infinity &&
+        (await verifyTxoInclusion(electrum.client, utxo.tx_hash, utxo.height))
+          ? 1
+          : 0;
+
+      const txo: VerifiableTxO = {
         txid: utxo.tx_hash,
         vout: utxo.tx_pos,
         script,
@@ -132,10 +215,11 @@ export const buildUpdateTXOs =
         // FIXME find a better way to store date
         // Maybe when block header subscription is finished it can be used
         // date: newTxs[utxo.tx_hash].raw.time || undefined,
-        height: utxo.height || Infinity,
+        height,
         spent: 0,
         change: isOwnTx,
         contractType,
+        verified,
       };
 
       added.push(txo);
@@ -145,11 +229,26 @@ export const buildUpdateTXOs =
       // Update confirmations and conflicting utxos
       await db.transaction("rw", db.txo, async () => {
         for (const [id, utxo] of confs) {
+          // FIX 1 (R14): a txo transitioning to (or between) confirmed heights
+          // must be re-verified against the header chain. Cache the result so
+          // already-verified txos at an unchanged height aren't re-proven every
+          // sync — `confs` only contains txos whose height actually changed.
+          const height = utxo.height || Infinity;
+          const verified =
+            height !== Infinity &&
+            (await verifyTxoInclusion(
+              electrum.client,
+              utxo.tx_hash,
+              utxo.height
+            ))
+              ? 1
+              : 0;
           await db.txo.update(id, {
-            height: utxo.height || Infinity,
+            height,
             spent: 0,
+            verified,
             // date: newTxs[utxo.tx_hash].raw.time || undefined, // how to get date without fetching?
-          });
+          } as Partial<VerifiableTxO>);
         }
         for (const [id] of conflict) {
           await db.txo.update(id, {
@@ -159,5 +258,69 @@ export const buildUpdateTXOs =
       });
     }
 
+    // FIX 1 (R14) — re-verify stragglers. A confirmed coin inserted while the
+    // header chain hadn't synced to its height yet would have been stored
+    // `verified:0` and, since its height never changes, would never reappear in
+    // `confs` to get re-proven. Sweep the unspent, confirmed-but-unverified txos
+    // for this contract type each sync and retry the Merkle proof now that more
+    // headers may be available. Cheap: only touches txos still pending
+    // verification, and verified ones are never re-proven.
+    if (!emptyTxoTable) {
+      await reverifyPendingTxos(electrum, contractType);
+    }
+
     return { added, confs, conflict, spent, utxoCount: utxos.length };
   };
+
+/**
+ * Retry SPV inclusion verification for unspent, confirmed txos that are still
+ * flagged unverified (FIX 1 / R14). Idempotent and bounded — verified txos are
+ * skipped, and each call only re-proves what remains pending.
+ *
+ * When a txo flips to verified, its balance must be recomputed (it now counts
+ * as confirmed). RXD recomputes its balance unconditionally after every sync,
+ * so only FT needs an explicit refresh here, keyed by the affected scripts.
+ */
+async function reverifyPendingTxos(
+  electrum: ElectrumManager,
+  contractType: ContractType
+): Promise<void> {
+  const pending = (await db.txo
+    .where({ contractType, spent: 0 })
+    .toArray()) as VerifiableTxO[];
+
+  const toVerify = pending.filter(
+    (txo) =>
+      txo.id !== undefined &&
+      txo.height !== undefined &&
+      txo.height !== Infinity &&
+      txo.verified !== 1
+  );
+  if (toVerify.length === 0) return;
+
+  const changedScripts = new Set<string>();
+  for (const txo of toVerify) {
+    const ok = await verifyTxoInclusion(
+      electrum.client,
+      txo.txid,
+      txo.height as number
+    );
+    if (ok) {
+      await db.txo.update(txo.id as number, {
+        verified: 1,
+      } as Partial<VerifiableTxO>);
+      changedScripts.add(txo.script);
+    }
+  }
+
+  if (changedScripts.size === 0) return;
+
+  // Recompute balances so the freshly-verified coins move from pending to
+  // confirmed. FT balances are per-script and need an explicit nudge here. RXD
+  // and NFT don't: RXDWorker calls updateRxdBalances(address) unconditionally
+  // after every sync (so any flipped RXD straggler is reflected on this same
+  // pass), and NFTs don't use the value-balance table.
+  if (contractType === ContractType.FT) {
+    await updateFtBalances(changedScripts);
+  }
+}

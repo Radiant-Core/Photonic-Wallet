@@ -5,6 +5,27 @@ import { ContractType, TxO } from "./types";
 import { parseFtScript } from "@lib/script";
 import { reverseRef } from "@lib/Outpoint";
 
+/**
+ * SPV verification flag carried on a stored txo (FIX 1 / R14).
+ *
+ * `TxO` lives in the out-of-scope `@app/types`, so we read the extra Dexie
+ * column via this structural extension. `verified === 1` means the txo's
+ * inclusion was proven (Merkle proof checked against a locally PoW-validated
+ * header). Anything else (0 / undefined) is unverified.
+ */
+type VerifiableTxO = TxO & { verified?: 0 | 1 };
+
+/**
+ * A txo counts toward the CONFIRMED balance only when it has a real block
+ * height AND its inclusion has been SPV-verified (FIX 1 / R14). A height that
+ * the server merely *claims* (without a valid Merkle proof) is treated as
+ * pending — surfaced under `unconfirmed` — so a malicious server cannot inflate
+ * the confirmed/spendable balance with a fabricated confirmation.
+ */
+function isConfirmedAndVerified(txo: VerifiableTxO): boolean {
+  return txo.height !== Infinity && txo.height !== undefined && txo.verified === 1;
+}
+
 // Update txo table after a transaction. This will keep the db in sync before an ElectrumX subscription is received.
 // ownScript and changeScript will be the same for RXD UTXOs
 export async function updateWalletUtxos(
@@ -62,11 +83,13 @@ export async function updateRxdBalances(id: string) {
     let unconfirmed = 0;
     await db.txo
       .where({ contractType: ContractType.RXD, spent: 0 })
-      .each(({ height, value }) => {
-        if (height === Infinity) {
-          unconfirmed += value;
+      .each((txo) => {
+        // FIX 1 (R14): only SPV-verified confirmations count as confirmed.
+        // Claimed-confirmed-but-unverified coins are surfaced as pending.
+        if (isConfirmedAndVerified(txo as VerifiableTxO)) {
+          confirmed += txo.value;
         } else {
-          confirmed += value;
+          unconfirmed += txo.value;
         }
       });
 
@@ -88,11 +111,12 @@ export async function updateFtBalances(scripts: Set<string>) {
     for (const script of scripts) {
       let confirmed = 0;
       let unconfirmed = 0;
-      await db.txo.where({ script, spent: 0 }).each(({ height, value }) => {
-        if (height === Infinity) {
-          unconfirmed += value;
+      await db.txo.where({ script, spent: 0 }).each((txo) => {
+        // FIX 1 (R14): only SPV-verified confirmations count as confirmed.
+        if (isConfirmedAndVerified(txo as VerifiableTxO)) {
+          confirmed += txo.value;
         } else {
-          confirmed += value;
+          unconfirmed += txo.value;
         }
       });
       const { ref } = parseFtScript(script);

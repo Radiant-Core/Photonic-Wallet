@@ -9,12 +9,17 @@ import {
   Center,
   Container,
   FormControl,
+  FormHelperText,
   FormLabel,
   Heading,
   Input,
   Select,
 } from "@chakra-ui/react";
-import { createKeys } from "@app/keys";
+import {
+  createKeys,
+  validatePasswordStrength,
+  MIN_PASSWORD_LENGTH,
+} from "@app/keys";
 import RecoveryPhrase from "@app/components/RecoveryPhrase";
 import Card from "@app/components/Card";
 import { NetworkKey } from "@lib/types";
@@ -38,7 +43,19 @@ export default function CreateWallet() {
   const [phrase, setPhrase] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Live password-policy feedback shown under the password field. Empty string
+  // means "no message" (field untouched or currently valid).
+  const [passwordHint, setPasswordHint] = useState("");
   const navigate = useNavigate();
+
+  const onPasswordChange = (value: string) => {
+    if (!value) {
+      setPasswordHint("");
+      return;
+    }
+    const result = validatePasswordStrength(value);
+    setPasswordHint(result.ok ? "Password strength: OK" : result.reason);
+  };
 
   const licenseRead = useLiveQuery(
     async () => await (db.kvp.get("licenseRead") as PromiseExtended<boolean>),
@@ -64,6 +81,11 @@ export default function CreateWallet() {
 
     const passwordValue = password.current?.value || "";
     const confirmValue = confirm.current?.value || "";
+    const strength = validatePasswordStrength(passwordValue);
+    if (!strength.ok) {
+      setError(strength.reason);
+      return false;
+    }
     if (confirmValue !== passwordValue) {
       setError("Passwords do not match");
       return false;
@@ -141,7 +163,20 @@ export default function CreateWallet() {
                       ref={password}
                       type="password"
                       placeholder={"Password"}
+                      onChange={(e) => onPasswordChange(e.target.value)}
                     />
+                    <FormHelperText
+                      color={
+                        passwordHint === "Password strength: OK"
+                          ? "green.400"
+                          : passwordHint
+                          ? "red.400"
+                          : undefined
+                      }
+                    >
+                      {passwordHint ||
+                        `Use at least ${MIN_PASSWORD_LENGTH} characters with a mix of letters, numbers, or symbols.`}
+                    </FormHelperText>
                   </FormControl>
                   <FormControl mb={4}>
                     <FormLabel>{"Confirm password"}</FormLabel>

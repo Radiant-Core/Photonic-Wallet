@@ -66,6 +66,14 @@ import rjs from "@radiant-core/radiantjs";
 import { buildTx } from "@lib/tx";
 import { findTokenOutput } from "@lib/tx";
 import { Buffer } from "buffer";
+import Big from "big.js";
+
+// Decimal-safe RXD -> photons conversion. Plain `rxd * 100000000` on a JS float
+// yields non-integer photon values (e.g. 0.07 -> 7000000.000000001); Big()
+// matches the rest of the wallet (see components/SendRXD.tsx).
+function rxdToPhotons(rxd: number): number {
+  return Number(Big(rxd).times(100000000).round(0, 0).toString());
+}
 
 const { Opcode, Script } = rjs;
 
@@ -536,7 +544,7 @@ function Swap() {
           fromValue = 1;
         }
       } else {
-        const sendRxdPhotons = sendRxd * 100000000;
+        const sendRxdPhotons = rxdToPhotons(sendRxd);
         tx = await prepareRadiant(coins, sendRxdPhotons);
         from = ContractType.RXD;
         fromValue = sendRxdPhotons;
@@ -572,7 +580,7 @@ function Swap() {
         toValue = 1;
       }
     } else {
-      const receiveRxdPhotons = receiveRxd * 100000000;
+      const receiveRxdPhotons = rxdToPhotons(receiveRxd);
       psrtOutput = {
         script: p2pkhScript(wallet.value.address),
         value: receiveRxdPhotons,
@@ -638,6 +646,13 @@ function Swap() {
     };
 
     // Build Partially Signed Radiant Transaction
+    // TODO(security): swap offers have no expiry or cancellation nonce. The PSRT
+    // signs with SIGHASH_SINGLE|ANYONECANPAY, so it stays live and broadcastable
+    // by anyone who holds it until the maker self-spends the reserved UTXO to
+    // cancel. A shared (public/broadcast) offer therefore remains executable
+    // indefinitely at the originally-signed price. Mitigating this needs a
+    // protocol change (e.g. an nLockTime/CLTV expiry or a per-offer nonce
+    // committed by the covenant) — not changed here.
     const rawPsrt = partiallySigned(
       wallet.value.swapAddress,
       input,
@@ -792,8 +807,8 @@ function Swap() {
           </Alert>
         )}
         <ViewSwap
-          from={send ? send : sendRxd * 100000000}
-          to={receive ? receive : receiveRxd * 100000000}
+          from={send ? send : rxdToPhotons(sendRxd)}
+          to={receive ? receive : rxdToPhotons(receiveRxd)}
           hex={psrt}
           BodyComponent={Card}
           FooterComponent={ViewFooter}

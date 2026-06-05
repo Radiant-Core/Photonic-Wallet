@@ -8,6 +8,7 @@ import {
   BroadcastResult,
   TokenSwap,
   VaultRecord,
+  CovenantRecord,
 } from "./types";
 import config from "@app/config.json";
 import { shuffle } from "@lib/util";
@@ -24,6 +25,7 @@ export class Database extends Dexie {
   broadcast!: Table<BroadcastResult>;
   swap!: Table<TokenSwap>;
   vault!: Table<VaultRecord>;
+  covenant!: Table<CovenantRecord>;
 
   constructor() {
     super("photonic");
@@ -173,6 +175,15 @@ export class Database extends Dexie {
     // not indexed" for all users with an existing DB.
     this.version(15).stores({
       swap: "++id, status, txid, mode",
+    });
+
+    // Add covenant table for tracking tokens resting in on-chain covenants
+    // (royalty listings, soulbound mints, authority-gated mints). These rest in
+    // scriptPubKeys the ordinary NFT subscription doesn't index by owner, so —
+    // like PSRT swaps in `swap` — they are tracked locally to stay
+    // discoverable/manageable. See covenant.ts.
+    this.version(16).stores({
+      covenant: "++id, type, ref, status, &[txid+vout], [status+type]",
     });
   }
 }

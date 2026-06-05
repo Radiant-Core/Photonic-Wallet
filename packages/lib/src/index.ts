@@ -15,6 +15,7 @@ export * from "./wallet";
 export * from "./v2metadata";
 export * from "./burn";
 export * from "./royalty";
+export * from "./royaltyCovenant";
 export * from "./soulbound";
 export {
   createContainer,

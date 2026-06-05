@@ -143,11 +143,14 @@ export default async function bundleCommit(
 
   // Check local file sizes haven't changed since prepare
   bundle.tokens.map((token) =>
-    Object.entries(token.files || {}).map((tokenFile) => {
-      if (typeof tokenFile === "string") {
-        const safePath = safeResolvePath(bundleDir, tokenFile);
+    Object.values(token.files || {}).map((tokenFile) => {
+      // Only embedded (local) files have a `path` and need a size re-check.
+      // Remote files ({ src }) are not read from disk here.
+      if (typeof (tokenFile as EmbeddedTokenFile).path === "string") {
+        const embed = tokenFile as EmbeddedTokenFile;
+        const safePath = safeResolvePath(bundleDir, embed.path);
         if (fs.statSync(safePath).size > config.maxFileSize) {
-          throw new Error(`File '${tokenFile}' is too large`);
+          throw new Error(`File '${embed.path}' is too large`);
         }
       }
     })
@@ -164,16 +167,12 @@ export default async function bundleCommit(
   log(chalk("Wallet unlocked:", highlight(wallet.address)));
 
   const readFile = (...paths: string[]) => {
-    // Validate paths to prevent directory traversal
-    const safePaths = paths.map((p, idx) => {
-      if (idx === 0) return p; // First path is the bundleDir (already validated)
-      // Validate each subsequent path component
-      if (p.includes("..") || p.includes("/") || p.includes("\\")) {
-        throw new Error(`Invalid path component: ${p}`);
-      }
-      return p;
-    });
-    return fs.readFileSync(path.join(bundleDir, ...safePaths));
+    // Resolve the requested path relative to the bundle dir and ensure it
+    // stays inside it. The first arg is attacker-controlled (embed.path from
+    // bundle.json / bundle-lock.json), so it MUST be validated too — mirror
+    // the safeResolvePath usage in bundle:prepare.
+    const safePath = safeResolvePath(bundleDir, path.join(...paths));
+    return fs.readFileSync(safePath);
   };
 
   // Build token payloads

@@ -5,10 +5,34 @@
 
 import { GlyphV2Metadata } from "./v2metadata";
 import { GLYPH_NFT, GLYPH_AUTHORITY } from "./protocols";
-import Outpoint from "./Outpoint";
+import { reverseRef } from "./Outpoint";
 import rjs from "@radiant-core/radiantjs";
 
 const { Script } = rjs;
+
+/**
+ * An authority token candidate: its on-chain singleton ref (36-byte hex, either
+ * byte orientation accepted) plus its decoded metadata.
+ */
+export type AuthorityCandidate = {
+  ref: string;
+  metadata: GlyphV2Metadata;
+};
+
+/** Both byte orientations of a 36-byte ref, lowercased, for robust matching. */
+function refOrientations(refHex: string): string[] {
+  const h = (refHex || "").toLowerCase();
+  if (!/^[0-9a-f]{72}$/.test(h)) return [h];
+  try {
+    return [h, reverseRef(h).toLowerCase()];
+  } catch {
+    return [h];
+  }
+}
+
+function byEntryToHex(b: Uint8Array | string): string {
+  return (typeof b === "string" ? b : Buffer.from(b).toString("hex")).toLowerCase();
+}
 
 /**
  * Authority token metadata
@@ -134,39 +158,54 @@ export function hasPermission(
 }
 
 /**
- * Verify authority chain
- * Checks if a token was issued by a valid authority
+ * Verify authority chain.
+ *
+ * Checks that a token was *actually* issued by one of the supplied authority
+ * tokens by matching the token's claimed issuer ref(s) (its `by` field) against
+ * each candidate authority's on-chain ref.
+ *
+ * Audit fix: the previous implementation did `authorityTokens.find(() => true)`
+ * with an explicit TODO — i.e. ANY token presenting ANY authority-looking token
+ * passed, so a forged/unrelated authority was accepted. This now requires a real
+ * ref equality between the token's `by` reference and the authority's ref, so a
+ * token claiming an authority it was not issued by is rejected.
+ *
+ * Refs are compared in both byte orientations (LE script form and BE display
+ * form) so callers don't have to normalise ahead of time — this codebase passes
+ * refs in both conventions depending on the source.
  */
 export function verifyAuthorityChain(
   tokenMetadata: GlyphV2Metadata,
-  authorityTokens: GlyphV2Metadata[]
-): { valid: boolean; error?: string; authority?: GlyphV2Metadata } {
+  authorityTokens: AuthorityCandidate[]
+): { valid: boolean; error?: string; authority?: AuthorityCandidate } {
   // Check if token has 'by' field (issued by authority)
   const byField = (tokenMetadata as Record<string, unknown>).by as
-    | Uint8Array[]
+    | Array<Uint8Array | string>
     | undefined;
   if (!byField || byField.length === 0) {
     return { valid: false, error: "Token has no issuer reference" };
   }
 
-  // Decode issuer ref from token for future ref-matching logic.
-  // TODO: compare each authorityTokens[i] against this issuer ref once the
-  // blockchain-side ref lookup is in place. For now we accept the first
-  // authority token (simplified path).
-  Outpoint.fromString(Buffer.from(byField[0]).toString("hex"))
-    .reverse()
-    .toString();
-
-  const authority = authorityTokens.find(() => {
-    return true;
-  });
-
-  if (!authority) {
-    return { valid: false, error: "No matching authority token found" };
+  // Canonical set of every claimed issuer ref (both byte orientations).
+  const claimed = new Set<string>();
+  for (const b of byField) {
+    for (const form of refOrientations(byEntryToHex(b))) claimed.add(form);
   }
 
-  // Validate authority token
-  const validation = validateAuthority(authority);
+  // The audited fix: require a real ref match, not the first available token.
+  const match = authorityTokens.find((a) =>
+    refOrientations(a.ref).some((form) => claimed.has(form))
+  );
+  if (!match) {
+    return {
+      valid: false,
+      error:
+        "No authority token matches the token's claimed issuer reference (by)",
+    };
+  }
+
+  // Validate the matched authority token's metadata.
+  const validation = validateAuthority(match.metadata);
   if (!validation.valid) {
     return {
       valid: false,
@@ -175,16 +214,27 @@ export function verifyAuthorityChain(
   }
 
   // Check if authority is expired
-  if (isAuthorityExpired(authority)) {
+  if (isAuthorityExpired(match.metadata)) {
     return { valid: false, error: "Authority token has expired" };
   }
 
-  return { valid: true, authority };
+  return { valid: true, authority: match };
 }
 
 /**
- * Create authority-gated NFT script
- * Requires authority token to be present in transaction
+ * Create an authority-gated NFT script.
+ *
+ * `OP_REQUIREINPUTREF <authorityRef>` is a **creation-time (mint-time)** rule:
+ * Radiant-Core's validateTransactionReferenceOperations requires every
+ * require-ref found in a tx's OUTPUT scripts to be present among that tx's input
+ * refs. Therefore an output using this script can only be *created* by a tx that
+ * holds the authority token (ref `requiredAuthorityRef`) as an input — a
+ * counterfeiter without the issuer's authority token cannot mint a gated item.
+ * Proven on regtest in authority.regtest.test.ts (mint without/with-forged
+ * authority is REJECTED; mint with the genuine authority is ACCEPTED).
+ *
+ * `OP_PUSHINPUTREFSINGLETON <ref>` carries the item's own singleton forward, and
+ * the trailing P2PKH authorises the owner's spends.
  */
 export function authorityGatedNftScript(
   address: string,

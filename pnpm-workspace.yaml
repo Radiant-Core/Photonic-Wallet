@@ -6,6 +6,11 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: true
+# Supply-chain cooldown: don't install any dependency version until it has
+# been published for at least this many minutes (1440 = 1 day). This blunts
+# fast-moving compromised-release attacks. Without a base value the exclude
+# list below is a no-op, so this MUST be set for the policy to do anything.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   # Recent radiantjs releases the pnpm supply-chain policy briefly flags as
   # "too new" (within minimumReleaseAge). Kept here for stable installs
