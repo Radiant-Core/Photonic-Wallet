@@ -85,6 +85,7 @@ import { updateRxdBalances, updateWalletUtxos } from "@app/utxos";
 import { burnNft } from "@lib/burn";
 import { transferNonFungible, TransferError } from "@lib/transfer";
 import { SelectableInput } from "@lib/coinSelect";
+import { UnfinalizedInput } from "@lib/types";
 
 interface WaveNameRecord {
   ref: string;
@@ -800,7 +801,7 @@ function WaveNameCard({
 
     setIsUpdating(true);
     try {
-      const txid = await updateWaveTarget({
+      const { txid, newNftTxo, rxdInputs, outputs } = await updateWaveTarget({
         ref: record.ref,
         txoId: record.txoId,
         name: record.name,
@@ -808,10 +809,32 @@ function WaveNameCard({
         newTarget,
       });
 
+      // The update co-spent the NFT singleton and re-created it at a NEW
+      // outpoint (txid:0). Keep the local db consistent so the name doesn't
+      // vanish: (1) spend the old NFT txo, (2) insert the new NFT txo,
+      // (3) re-point the glyph's `lastTxoId` at it. Without (3) the Electrum
+      // sync would see the old txo consumed and flip the glyph row to
+      // `spent: 1` (NFT.ts), dropping the name from the WaveNames list.
+      await db.txo.update(record.txoId, { spent: 1 });
+      const newTxoId = (await db.txo.put(newNftTxo)) as number;
+
+      // RXD fee coins + change bookkeeping (mirrors the transfer/send flows).
+      const changeScript = p2pkhScript(wallet.value.address);
+      await updateWalletUtxos(
+        ContractType.RXD,
+        changeScript,
+        changeScript,
+        txid,
+        rxdInputs,
+        outputs as unknown as UnfinalizedInput[]
+      );
+      await updateRxdBalances(wallet.value.address);
+
       // Update local record immediately. Mirror exactly the attrs we wrote
       // on-chain above — NOT a spread of the WaveNameRecord, which would
       // pollute attrs with UI fields (ref/status/txoId/…) and store the
       // full "name.domain" label as `name`, corrupting the cached glyph.
+      // Relink lastTxoId to the new NFT UTXO and keep spent: 0.
       await db.glyph.update(record.id, {
         attrs: {
           name: record.name.split(".")[0],
@@ -819,6 +842,8 @@ function WaveNameCard({
           target: newTarget,
           target_type: "address",
         },
+        lastTxoId: newTxoId,
+        spent: 0,
         height: Infinity,
       });
 

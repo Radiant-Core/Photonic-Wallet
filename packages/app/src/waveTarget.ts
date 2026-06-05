@@ -4,7 +4,7 @@ import db from "@app/db";
 import { TxO, ContractType } from "@app/types";
 import Outpoint from "@lib/Outpoint";
 import { encodeGlyphMutable } from "@lib/token";
-import { fundTx } from "@lib/coinSelect";
+import { fundTx, SelectableInput } from "@lib/coinSelect";
 import {
   mutableNftScript,
   nftAuthScript,
@@ -27,15 +27,29 @@ import { Transaction } from "@radiant-core/radiantjs";
  * local db.glyph updates.
  *
  * @param name Full name string (e.g. "alice.rxd"); the bare label is derived.
- * @returns the broadcast transaction id
+ * @returns the broadcast txid plus the bookkeeping the caller needs to keep the
+ *   local db in sync: the NFT singleton moved to a NEW outpoint (output 0 of
+ *   this tx), so the caller must spend the old NFT txo, insert `newNftTxo`, and
+ *   relink the glyph's `lastTxoId` — otherwise the Electrum sync marks the
+ *   glyph spent (its old txo was consumed) and the name vanishes from the UI.
  */
+export interface WaveTargetUpdateResult {
+  txid: string;
+  /** The NFT singleton's new UTXO (this tx, vout 0). Insert + relink the glyph. */
+  newNftTxo: TxO;
+  /** RXD coins consumed for the fee (have db ids). */
+  rxdInputs: SelectableInput[];
+  /** Final output list, for RXD change bookkeeping via updateWalletUtxos. */
+  outputs: { script: string; value: number }[];
+}
+
 export async function updateWaveTarget(opts: {
   ref: string;
   txoId: number;
   name: string;
   domain: string;
   newTarget: string;
-}): Promise<string> {
+}): Promise<WaveTargetUpdateResult> {
   const { ref, txoId, name, domain, newTarget } = opts;
 
   if (!wallet.value.wif) {
@@ -159,5 +173,26 @@ export async function updateWaveTarget(opts: {
     description: "wave_name_update",
   });
 
-  return txid;
+  // The NFT singleton was re-created at output 0 of this tx (still owned by us
+  // via nftAuthScript). Hand the new UTXO back so the caller can re-point the
+  // glyph row at it instead of the now-spent input.
+  const newNftTxo: TxO = {
+    contractType: ContractType.NFT,
+    script: nftOutputScript,
+    value: nftOutput.value,
+    txid,
+    vout: 0,
+    spent: 0,
+    height: Infinity,
+    date: Date.now(),
+  };
+
+  // fund.funding elements are the original rxdUtxos (TxO rows carrying db ids),
+  // so the cast to SelectableInput is sound for updateWalletUtxos bookkeeping.
+  return {
+    txid,
+    newNftTxo,
+    rxdInputs: fund.funding as SelectableInput[],
+    outputs,
+  };
 }

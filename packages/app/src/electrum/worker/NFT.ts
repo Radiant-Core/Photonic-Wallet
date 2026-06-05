@@ -190,10 +190,28 @@ export class NFTWorker implements Subscription {
         });
       }
 
-      // Update any NFTs that have been transferred
+      // Update any NFTs that have been transferred.
+      //
+      // A token can be *moved* rather than *sent away*: a WAVE-name target
+      // update (and similar covenant respends) co-spends the singleton and
+      // re-creates it at a new outpoint in the SAME tx. That new UTXO is in
+      // `added` above and the glyph was relinked to it (lastTxoId updated),
+      // so the `where({ lastTxoId })` match below normally skips it. Guard
+      // explicitly too: never flag a glyph spent when its ref still has a
+      // live UTXO this pass — otherwise the name vanishes from the wallet
+      // even though it's still owned on-chain.
+      const liveRefs = new Set(Object.values(scriptRefMap));
       await db.transaction("rw", db.glyph, async () => {
         for (const lastTxo of spent) {
-          await db.glyph.where({ lastTxoId: lastTxo.id }).modify({ spent: 1 });
+          const movedGlyphs = await db.glyph
+            .where({ lastTxoId: lastTxo.id })
+            .toArray();
+          for (const g of movedGlyphs) {
+            if (g.ref && liveRefs.has(g.ref)) continue; // moved, not spent
+            if (g.id !== undefined) {
+              await db.glyph.update(g.id, { spent: 1 });
+            }
+          }
         }
       });
 
