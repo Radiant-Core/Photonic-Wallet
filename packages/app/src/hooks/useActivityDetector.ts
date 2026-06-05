@@ -1,4 +1,5 @@
 import { electrumWorker } from "@app/electrum/Electrum";
+import db from "@app/db";
 import { wallet } from "@app/signals";
 import { lockWallet, wipeSecrets } from "@app/wallet";
 import { autoLockMs } from "@app/autoLock";
@@ -8,6 +9,13 @@ import { useEffect, useRef, useCallback } from "react";
 
 type Timeout = ReturnType<typeof setTimeout>;
 const LOCK_VISIBILITY_GRACE = 30000; // 30 seconds grace period when tab hidden
+
+// While a subscription is in the error state (e.g. a status response timed out
+// under server load), retry it in the background on this cadence so it
+// self-heals and the soft "Reconnecting…" indicator clears without the user
+// having to act. Gentle interval — only fires while the tab is active AND a
+// subscription is actually errored, so it never storms a healthy server.
+const RETRY_WHILE_ERRORED_MS = 30000;
 
 // Minimum spacing between the syncPending kicked off on reactivate. Safari
 // fires spurious focus/blur (and therefore deactivate/reactivate) far more
@@ -115,6 +123,24 @@ export default function useActivityDetector() {
     // Arm timer immediately on mount if wallet is unlocked
     armLockTimer(timer, toast, delay);
 
+    // Background self-heal: while any subscription is errored and the tab is
+    // active, re-run a manual sync so a transient failure recovers on its own.
+    const retryTimer = setInterval(async () => {
+      try {
+        if (document.visibilityState !== "visible") return;
+        if (!(await electrumWorker.value.isActive())) return;
+        const errored = await db.subscriptionStatus
+          .filter((v) => v.sync.error === true)
+          .count();
+        if (errored > 0) {
+          console.debug("Retrying errored subscriptions");
+          await electrumWorker.value.manualSync();
+        }
+      } catch (e) {
+        console.debug("Sync retry skipped:", e);
+      }
+    }, RETRY_WHILE_ERRORED_MS);
+
     // Listen for logout broadcasts from other tabs
     let bc: BroadcastChannel | undefined;
     try {
@@ -148,6 +174,7 @@ export default function useActivityDetector() {
     return () => {
       clearTimeout(timer.current);
       clearTimeout(visibilityTimer.current);
+      clearInterval(retryTimer);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("touchstart", onTouchStart);

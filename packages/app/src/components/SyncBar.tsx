@@ -42,8 +42,13 @@ export default function SyncBar() {
         </Box>
       )}
       {!!errors?.length && (
-        <Box px={6} py={2} color="whiteAlpha.700">
-          Sync Error
+        // A failed subscription is usually a transient server hiccup (a slow
+        // status response under load) and the wallet keeps retrying in the
+        // background, so present it as a soft "reconnecting" state rather than a
+        // hard error. Balances still update via the listunspent fallback.
+        <Box px={6} py={2} color="whiteAlpha.600">
+          Reconnecting…
+          <Progress my={2} isIndeterminate size="xs" />
         </Box>
       )}
     </SimpleGrid>
