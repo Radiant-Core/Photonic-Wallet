@@ -1098,9 +1098,14 @@ function WaveNameCard({
       borderColor="whiteAlpha.200"
       bg="gray.800"
     >
-      <HStack justify="space-between" align="start">
-        <VStack align="start" spacing={1}>
-          <HStack>
+      <Flex
+        justify="space-between"
+        align="start"
+        direction={{ base: "column", xl: "row" }}
+        gap={3}
+      >
+        <VStack align="start" spacing={1} flex="1" minW={0} maxW="100%">
+          <HStack flexWrap="wrap" rowGap={1}>
             <Icon as={HiOutlineAtSymbol} color="brand.400" boxSize={5} />
             <Text fontSize="xl" fontWeight="bold">
               {record.name}
@@ -1119,8 +1124,14 @@ function WaveNameCard({
               </Badge>
             )}
           </HStack>
-          <HStack spacing={2}>
-            <Text fontSize="sm" color="gray.400" fontFamily="mono">
+          <HStack spacing={2} w="100%" minW={0}>
+            <Text
+              fontSize="sm"
+              color="gray.400"
+              fontFamily="mono"
+              isTruncated
+              minW={0}
+            >
               {"Target:"} {record.target || "Not set"}
             </Text>
             {record.target && onCopy && (
@@ -1129,6 +1140,7 @@ function WaveNameCard({
                 icon={<CopyIcon />}
                 aria-label={"Copy target"}
                 variant="ghost"
+                flexShrink={0}
                 onClick={(e) => {
                   e.stopPropagation();
                   onCopy(record.target, "Target address");
@@ -1195,7 +1207,12 @@ function WaveNameCard({
           )}
         </VStack>
 
-        <HStack>
+        <HStack
+          flexWrap="wrap"
+          rowGap={2}
+          justify={{ base: "flex-start", xl: "flex-end" }}
+          flexShrink={0}
+        >
           {/* Primary badge or Set Primary button */}
           {isPrimary ? (
             <Tooltip label="This is your primary WAVE name" placement="top">
@@ -1304,7 +1321,7 @@ function WaveNameCard({
             </Button>
           </a>
         </HStack>
-      </HStack>
+      </Flex>
 
       {/* Edit Modal */}
       <Modal isOpen={isOpen} onClose={onClose}>
