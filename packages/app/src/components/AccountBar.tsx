@@ -59,8 +59,6 @@ export default function AccountBar(props: FlexProps) {
       flexDir="column"
       alignItems="center"
       mx={4}
-      w="100%"
-      maxW="100%"
       minW={0}
       {...props}
     >
