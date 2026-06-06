@@ -34,7 +34,7 @@ import ElectrumManager from "@app/electrum/ElectrumManager";
 import opfs from "@app/opfs";
 import setSubscriptionStatus from "./setSubscriptionStatus";
 import { arrayChunks, batchRequests } from "@lib/util";
-import { GLYPH_FT, GLYPH_NFT, GLYPH_WAVE } from "@lib/protocols";
+import { GLYPH_FT, GLYPH_NFT, GLYPH_MUT } from "@lib/protocols";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 
@@ -209,11 +209,16 @@ export class NFTWorker implements Subscription {
             .toArray();
           for (const g of movedGlyphs) {
             if (g.ref && liveRefs.has(g.ref)) continue; // moved, not spent
-            // WAVE names rest under per-update auth covenant scripts that never
-            // appear in this address' NFT listunspent, so the scripthash sweep
-            // must NOT mark them spent — reconcileWaveNames() tracks them by ref
-            // (blockchain.ref.get) and is the sole authority on their state.
-            if (g.p?.includes(GLYPH_WAVE)) continue;
+            // Ref-tracked NFTs never appear in this address' NFT listunspent, so
+            // the scripthash sweep must NOT decide their fate:
+            //  - mutable singletons (GLYPH_MUT, incl. WAVE) respend under an auth
+            //    covenant on every state/target update → reconcileRefTrackedNfts()
+            //    tracks them by ref (blockchain.ref.get), hiding only on a proven
+            //    transfer away.
+            //  - covenant-escrowed NFTs (listed / soulbound mint) rest in a
+            //    covenant script and carry swapPending → syncCovenants() is the
+            //    authority on when they resolve.
+            if (g.p?.includes(GLYPH_MUT) || g.swapPending) continue;
             if (g.id !== undefined) {
               await db.glyph.update(g.id, { spent: 1 });
             }
@@ -230,16 +235,17 @@ export class NFTWorker implements Subscription {
         }
       });
 
-      // WAVE-name recovery / tracking by ref. A target update re-creates the
-      // name's singleton under an auth covenant script that is NOT in this
-      // address' NFT listunspent, so the scripthash sync above can neither see
-      // nor relink it (and a rescan can't recover it). Resolve each wave name's
-      // live location via blockchain.ref.get and re-attach the moved singleton
-      // (or mark it gone). Wrapped so a failure never breaks the main sync.
+      // Mutable-NFT (incl. WAVE) recovery / tracking by ref. A state/target
+      // update re-creates the singleton under an auth covenant script that is
+      // NOT in this address' NFT listunspent, so the scripthash sync above can
+      // neither see nor relink it (and a rescan can't recover it). Resolve each
+      // mutable NFT's live location via blockchain.ref.get and re-attach the
+      // moved singleton (or hide it only on a proven transfer away). Wrapped so
+      // a failure never breaks the main sync.
       try {
-        await this.reconcileWaveNames();
+        await this.reconcileRefTrackedNfts();
       } catch (e) {
-        console.warn("[NFT] wave-name reconcile failed:", e);
+        console.warn("[NFT] ref-tracked NFT reconcile failed:", e);
       }
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.NFT);
@@ -271,37 +277,51 @@ export class NFTWorker implements Subscription {
   }
 
   /**
-   * Reconcile WAVE-name singletons by ref instead of by scripthash.
+   * Reconcile mutable-NFT singletons (GLYPH_MUT, which includes WAVE names) by
+   * ref instead of by scripthash.
    *
-   * A WAVE-name target update is forced (by the mutable-target covenant) to
-   * re-create the name's NFT singleton under an auth script
+   * A mutable NFT's state/target update is forced (by the mutable covenant) to
+   * re-create its NFT singleton under an auth script
    * (`OP_REQUIREINPUTREF <mutRef> <scriptSigHash> OP_2DROP … OP_PUSHINPUTREFSINGLETON
    * <ref> OP_DROP <P2PKH>`). RXinDexer keys every UTXO by `sha256(zero_refs(script))`,
    * and `zero_refs` preserves the auth preamble + scriptSig-hash push, so the
    * singleton lands under a per-update scripthash this wallet never subscribes
-   * to. It is therefore invisible to `blockchain.scripthash.listunspent`
-   * (so a normal sync/rescan can never see or recover it), even though the name
-   * is alive on-chain and still owned by us.
+   * to. It is therefore invisible to `blockchain.scripthash.listunspent` (so a
+   * normal sync/rescan can never see or relink it), even though the token is
+   * alive on-chain and still owned by us. (Covenant-escrowed NFTs — listed /
+   * soulbound — are handled separately by covenant.ts/syncCovenants.)
    *
-   * The name's `ref` is stable, so we track it the reliable way: resolve the
+   * The token's `ref` is stable, so we track it the reliable way: resolve the
    * live location with `blockchain.ref.get(ref)`, confirm the current output is
    * a singleton for that ref paying to one of our addresses, and re-attach it
-   * (upsert a ref-tracked `byRef` txo + un-hide the glyph). If the ref has no
-   * live location (burned) or it moved to someone else (transferred), hide it.
+   * (upsert a ref-tracked `byRef` txo + un-hide the glyph). We hide ONLY on
+   * proof of a transfer away (the singleton found at its current location paying
+   * to a different address); transient/ambiguous lookups leave the row visible.
    *
-   * Bounded by the number of WAVE names held (typically small); the per-name
-   * tx fetch is OPFS-cached, so steady state is one cheap `ref.get` per name.
+   * Cost control: a glyph that already has a healthy ref-tracked txo
+   * (spent:0 + byRef) was reconciled on a prior pass and is skipped, so steady
+   * state makes no network calls — only stale/lost/just-seeded glyphs do a
+   * `ref.get` (+ an OPFS-cached tx fetch).
    */
-  async reconcileWaveNames() {
-    const waveGlyphs = await db.glyph
-      .filter((g) => !!g.p?.includes(GLYPH_WAVE))
+  async reconcileRefTrackedNfts() {
+    const glyphs = await db.glyph
+      .filter((g) => !!g.p?.includes(GLYPH_MUT))
       .toArray();
-    if (!waveGlyphs.length) return;
+    if (!glyphs.length) return;
 
     const ourTail = p2pkhScript(this.address); // 76a914<our h160>88ac
 
-    for (const g of waveGlyphs) {
+    for (const g of glyphs) {
       if (!g.ref || g.id === undefined) continue;
+
+      // Skip the network round-trip for glyphs already healthy & ref-tracked
+      // (reconciled on a prior pass). Only re-confirm stale/lost ones — e.g. a
+      // just-seeded recovery (spent:1), or a row whose linked txo isn't a live
+      // byRef singleton.
+      if (g.spent === 0 && g.lastTxoId !== undefined) {
+        const cur = await db.txo.get(g.lastTxoId);
+        if (cur && cur.spent === 0 && cur.byRef === 1) continue;
+      }
 
       // Resolve the live location of this singleton ref.
       let refResult: { tx_hash: string; height: number }[] | undefined;
@@ -311,7 +331,7 @@ export class NFTWorker implements Subscription {
           g.ref
         )) as { tx_hash: string; height: number }[];
       } catch (e) {
-        console.warn("[NFT] ref.get failed for wave name", g.ref, e);
+        console.warn("[NFT] ref.get failed for mutable NFT", g.ref, e);
         continue; // transient — leave existing state untouched
       }
 
@@ -442,7 +462,7 @@ export class NFTWorker implements Subscription {
    *  2. Fetch the mint tx and read the singleton output to derive the REAL
    *     singleton ref (the funding outpoint embedded after OP_PUSHINPUTREFSINGLETON).
    *  3. `fetchGlyph(realRef)` seeds the glyph row from the reveal, then
-   *     `reconcileWaveNames()` attaches the live singleton (auth or plain) and
+   *     `reconcileRefTrackedNfts()` attaches the live singleton (auth or plain) and
    *     un-hides it iff it pays to one of our addresses.
    *
    * Returns whether the name is now owned & visible, with a reason on failure.
@@ -527,7 +547,7 @@ export class NFTWorker implements Subscription {
 
     // 3. Seed the glyph row, then reconcile by ref to attach the live singleton.
     await this.fetchGlyph(singletonRefBE);
-    await this.reconcileWaveNames();
+    await this.reconcileRefTrackedNfts();
 
     const g = await db.glyph.get({ ref: singletonRefBE });
     if (g && g.spent === 0) {

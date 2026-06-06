@@ -145,10 +145,10 @@ export const buildUpdateTXOs =
     const spent = emptyTxoTable
       ? []
       : (await db.txo.where({ contractType, spent: 0 }).toArray())
-          // Ref-tracked UTXOs (WAVE-name singletons under auth covenants) never
-          // appear in this address' scripthash listunspent, so their absence
-          // here does NOT mean spent. They're reconciled by ref in the NFT
-          // worker (reconcileWaveNames); exclude them from the scripthash sweep.
+          // Ref-tracked UTXOs (mutable-NFT / WAVE singletons under auth
+          // covenants) never appear in this address' scripthash listunspent, so
+          // their absence here does NOT mean spent. They're reconciled by ref in
+          // the NFT worker (reconcileRefTrackedNfts); exclude them from the sweep.
           .filter((txo) => txo.byRef !== 1)
           .filter(({ txid, vout }) => !outpoints.includes(`${txid}${vout}`))
           .map(({ id, value, script }) => ({
