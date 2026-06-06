@@ -40,6 +40,83 @@ function workerLog(msg: string, data?: unknown) {
 
 const RXINDEXER_WSS = "wss://electrumx.radiantcore.org";
 
+// Resolve a WAVE name to its full indexer record (incl. `ref`). Tries the
+// connected electrum server first, then falls back to a direct RXinDexer WSS
+// call — the connected server frequently doesn't expose the wave.* methods, so
+// without this fallback resolution (and name recovery) fails with
+// "Name not found on the indexer" even though the indexer knows the name.
+async function resolveWaveRaw(
+  bareName: string
+): Promise<{ ref?: string; target?: string } | null> {
+  // 1. Connected server.
+  try {
+    if (electrum.client && electrum.connected()) {
+      const r = (await electrum.client.request("wave.resolve", bareName)) as
+        | { ref?: string; target?: string }
+        | null
+        | undefined;
+      if (r && r.ref) return r;
+    }
+  } catch {
+    // Connected server doesn't support wave.resolve — fall through.
+  }
+
+  // 2. Direct WSS to RXinDexer (server.version handshake, then wave.resolve).
+  try {
+    const ws = new WebSocket(RXINDEXER_WSS);
+    return await new Promise<{ ref?: string; target?: string } | null>(
+      (resolve) => {
+        const timeout = setTimeout(() => {
+          ws.close();
+          resolve(null);
+        }, 10000);
+        let versionSent = false;
+        ws.onopen = () => {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "server.version",
+              params: ["photonic", "1.4"],
+            })
+          );
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data as string);
+            if (!versionSent) {
+              versionSent = true;
+              ws.send(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "wave.resolve",
+                  params: [bareName],
+                })
+              );
+              return;
+            }
+            clearTimeout(timeout);
+            ws.close();
+            resolve(data.result || null);
+          } catch {
+            clearTimeout(timeout);
+            ws.close();
+            resolve(null);
+          }
+        };
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          ws.close();
+          resolve(null);
+        };
+      }
+    );
+  } catch {
+    return null;
+  }
+}
+
 const worker = {
   ready: false,
   active: true,
@@ -232,10 +309,23 @@ const worker = {
   },
   // Recover a WAVE name into this wallet by name. Handles the case where the
   // local glyph row is gone and the name rests under an auth-covenant singleton
-  // (post target-update) that never appears in NFT listunspent — see
-  // NFTWorker.recoverWaveName.
+  // (post target-update) that never appears in NFT listunspent. Resolve the ref
+  // here (with the WSS fallback) so recovery works even when the connected
+  // server lacks wave.*; NFTWorker.recoverWaveName does the chain work.
   async recoverWaveName(name: string) {
-    return nft.recoverWaveName(name);
+    const bareName = (name || "").toLowerCase().split(".")[0].trim();
+    if (!bareName) {
+      return { recovered: false, name, reason: "Empty name" };
+    }
+    const res = await resolveWaveRaw(bareName);
+    if (!res?.ref) {
+      return {
+        recovered: false,
+        name: bareName,
+        reason: "Name not found on the indexer",
+      };
+    }
+    return nft.recoverWaveName(bareName, res.ref);
   },
   async findSwaps(address: string) {
     return findSwaps(electrum, address);

@@ -447,7 +447,10 @@ export class NFTWorker implements Subscription {
    *
    * Returns whether the name is now owned & visible, with a reason on failure.
    */
-  async recoverWaveName(name: string): Promise<{
+  async recoverWaveName(
+    name: string,
+    regRef: string
+  ): Promise<{
     recovered: boolean;
     name: string;
     ref?: string;
@@ -455,18 +458,10 @@ export class NFTWorker implements Subscription {
   }> {
     const bareName = (name || "").toLowerCase().split(".")[0].trim();
     if (!bareName) return { recovered: false, name, reason: "Empty name" };
-
-    // 1. Resolve name -> registration ref via the indexer.
-    let regRef: string | undefined;
-    try {
-      const res = (await this.electrum.client?.request(
-        "wave.resolve",
-        bareName
-      )) as { ref?: string } | null;
-      regRef = res?.ref ?? undefined;
-    } catch (e) {
-      console.warn("[NFT] recover: wave.resolve failed", e);
-    }
+    // `regRef` is the indexer's registration outpoint for the name, resolved by
+    // the caller (electrumWorker.recoverWaveName) which has the connected-server
+    // + RXinDexer WSS fallback. NOTE it's the MINT outpoint, NOT the singleton's
+    // funding-outpoint ref that ref.get keys on — we derive the real ref below.
     if (!regRef) {
       return {
         recovered: false,
