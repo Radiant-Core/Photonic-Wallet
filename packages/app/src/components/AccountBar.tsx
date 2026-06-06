@@ -1,4 +1,5 @@
 import {
+  Box,
   Button,
   Flex,
   FlexProps,
@@ -54,10 +55,18 @@ export default function AccountBar(props: FlexProps) {
   }, []);
 
   return (
-    <Flex flexDir="column" alignItems="center" mx={4} {...props}>
+    <Flex
+      flexDir="column"
+      alignItems="center"
+      mx={4}
+      w="100%"
+      maxW="100%"
+      minW={0}
+      {...props}
+    >
       {/* Primary WAVE Name Badge */}
       {primaryWaveName && (
-        <Tooltip label={"Your primary WAVE name"} placement="top">
+        <Tooltip label={primaryWaveName} placement="top">
           <Badge
             colorScheme="brand"
             mb={3}
@@ -68,12 +77,24 @@ export default function AccountBar(props: FlexProps) {
             display="flex"
             alignItems="center"
             gap={1}
+            maxW="100%"
+            overflow="hidden"
             cursor="pointer"
             onClick={() => (window.location.href = "#/wave-names")}
             _hover={{ bg: "brand.600" }}
           >
-            <HiOutlineAtSymbol />
-            {primaryWaveName}
+            {/* Long names must not widen the fixed-width sidebar: keep the @
+                glyph fixed and ellipsize the name. */}
+            <Box as={HiOutlineAtSymbol} flexShrink={0} />
+            <Box
+              as="span"
+              overflow="hidden"
+              textOverflow="ellipsis"
+              whiteSpace="nowrap"
+              minW={0}
+            >
+              {primaryWaveName}
+            </Box>
           </Badge>
         </Tooltip>
       )}

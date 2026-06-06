@@ -65,6 +65,12 @@ const wrapped = wrap<{
   setActive: (active: boolean) => void;
   isActive: () => boolean;
   fetchGlyph: (refBE: string) => SmartToken | undefined;
+  recoverWaveName: (name: string) => {
+    recovered: boolean;
+    name: string;
+    ref?: string;
+    reason?: string;
+  };
   findSwaps(
     address: string
   ): { contractType: ContractType; utxo: ElectrumUtxo }[];

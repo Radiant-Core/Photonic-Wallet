@@ -413,6 +413,126 @@ export class NFTWorker implements Subscription {
     }
   }
 
+  /**
+   * Recover a WAVE name into this wallet by name.
+   *
+   * Needed when the local glyph row is gone (e.g. a wallet rebuild) AND the
+   * name rests under an auth-covenant singleton (post target-update) that never
+   * appears in this address' NFT `listunspent`. Such a name can't be discovered
+   * by the ordinary sync at all, so we seed it from the chain:
+   *
+   *  1. Resolve the name on the indexer to its registration outpoint. NOTE the
+   *     indexer returns the REGISTRATION (mint) txid as the ref — NOT the
+   *     singleton's funding-outpoint ref that `blockchain.ref.get` keys on.
+   *  2. Fetch the mint tx and read the singleton output to derive the REAL
+   *     singleton ref (the funding outpoint embedded after OP_PUSHINPUTREFSINGLETON).
+   *  3. `fetchGlyph(realRef)` seeds the glyph row from the reveal, then
+   *     `reconcileWaveNames()` attaches the live singleton (auth or plain) and
+   *     un-hides it iff it pays to one of our addresses.
+   *
+   * Returns whether the name is now owned & visible, with a reason on failure.
+   */
+  async recoverWaveName(name: string): Promise<{
+    recovered: boolean;
+    name: string;
+    ref?: string;
+    reason?: string;
+  }> {
+    const bareName = (name || "").toLowerCase().split(".")[0].trim();
+    if (!bareName) return { recovered: false, name, reason: "Empty name" };
+
+    // 1. Resolve name -> registration ref via the indexer.
+    let regRef: string | undefined;
+    try {
+      const res = (await this.electrum.client?.request(
+        "wave.resolve",
+        bareName
+      )) as { ref?: string } | null;
+      regRef = res?.ref ?? undefined;
+    } catch (e) {
+      console.warn("[NFT] recover: wave.resolve failed", e);
+    }
+    if (!regRef) {
+      return {
+        recovered: false,
+        name: bareName,
+        reason: "Name not found on the indexer",
+      };
+    }
+
+    // resolve() returns the registration outpoint as "<mintTxid>_<vout>".
+    const mintTxid = regRef.split("_")[0];
+    if (!mintTxid || mintTxid.length !== 64) {
+      return {
+        recovered: false,
+        name: bareName,
+        reason: "Unexpected registration ref from indexer",
+      };
+    }
+
+    // 2. Fetch the mint tx (hash-verified, OPFS-cached) and derive the REAL
+    //    singleton ref from its singleton output.
+    let hex = await opfs.getTx(mintTxid);
+    if (!hex) {
+      hex = (await this.electrum.client?.request(
+        "blockchain.transaction.get",
+        mintTxid
+      )) as string;
+      if (hex) {
+        try {
+          if (verifyTransactionHash(hexToBytes(hex), mintTxid)) {
+            await opfs.putTx(mintTxid, hex);
+          } else {
+            hex = "";
+          }
+        } catch {
+          hex = "";
+        }
+      }
+    }
+    if (!hex) {
+      return {
+        recovered: false,
+        name: bareName,
+        reason: "Could not fetch the registration transaction",
+      };
+    }
+
+    const tx = new Transaction(hex);
+    let singletonRefBE: string | undefined;
+    for (const o of tx.outputs) {
+      const { ref: refLE } = parseNftScript(o.script.toHex());
+      if (refLE) {
+        singletonRefBE = reverseRef(refLE);
+        break;
+      }
+    }
+    if (!singletonRefBE) {
+      return {
+        recovered: false,
+        name: bareName,
+        reason: "No singleton output in the registration transaction",
+      };
+    }
+
+    // 3. Seed the glyph row, then reconcile by ref to attach the live singleton.
+    await this.fetchGlyph(singletonRefBE);
+    await this.reconcileWaveNames();
+
+    const g = await db.glyph.get({ ref: singletonRefBE });
+    if (g && g.spent === 0) {
+      return { recovered: true, name: bareName, ref: singletonRefBE };
+    }
+    return {
+      recovered: false,
+      name: bareName,
+      ref: singletonRefBE,
+      reason: g
+        ? "Found on-chain but not owned by this wallet"
+        : "Could not index the name",
+    };
+  }
+
   async register(address: string) {
     this.scriptHash = nftScriptHash(address as string);
     this.address = address;

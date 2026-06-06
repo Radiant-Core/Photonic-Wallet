@@ -126,6 +126,52 @@ export default function WaveNames() {
   const [cachedNames, setCachedNames] = useState<WaveNameRecord[] | null>(null);
   const [isLoadingNames, setIsLoadingNames] = useState(true);
   const toast = useToast();
+  const [showRecover, setShowRecover] = useState(false);
+  const [recoverQuery, setRecoverQuery] = useState("");
+  const [isRecovering, setIsRecovering] = useState(false);
+
+  // Recover a WAVE name you own that's missing from the list. Needed when the
+  // local record was lost (e.g. a wallet rebuild) AND the name rests under an
+  // auth-covenant singleton after a target update, so it never appears in the
+  // ordinary NFT sync. Seeds it from the chain by name; see
+  // NFTWorker.recoverWaveName.
+  const handleRecover = async () => {
+    const q = recoverQuery.trim();
+    if (!q || isRecovering) return;
+    setIsRecovering(true);
+    try {
+      const res = await electrumWorker.value.recoverWaveName(q);
+      if (res.recovered) {
+        toast({
+          title: "Name recovered",
+          description: `${res.name}.rxd is back in your wallet.`,
+          status: "success",
+          duration: 6000,
+          isClosable: true,
+        });
+        setRecoverQuery("");
+        setShowRecover(false);
+      } else {
+        toast({
+          title: "Could not recover that name",
+          description: res.reason || "Unknown error",
+          status: "warning",
+          duration: 8000,
+          isClosable: true,
+        });
+      }
+    } catch (e) {
+      toast({
+        title: "Recovery failed",
+        description: e instanceof Error ? e.message : String(e),
+        status: "error",
+        duration: 8000,
+        isClosable: true,
+      });
+    } finally {
+      setIsRecovering(false);
+    }
+  };
 
   // Load recent lookups from localStorage
   useEffect(() => {
@@ -359,7 +405,15 @@ export default function WaveNames() {
           {/* My Names Tab */}
           <TabPanel>
             <ContentContainer>
-              <Flex justify="flex-end" mb={4}>
+              <Flex justify="space-between" align="center" mb={4} gap={2}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  colorScheme="purple"
+                  onClick={() => setShowRecover((v) => !v)}
+                >
+                  {"Recover a name"}
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -370,6 +424,26 @@ export default function WaveNames() {
                   {"Browse Names for Sale"}
                 </Button>
               </Flex>
+              {showRecover && (
+                <Flex gap={2} mb={4} align="center">
+                  <Input
+                    placeholder={"Name to recover (e.g. 12345.rxd)"}
+                    value={recoverQuery}
+                    onChange={(e) => setRecoverQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRecover();
+                    }}
+                  />
+                  <Button
+                    colorScheme="brand"
+                    isLoading={isRecovering}
+                    loadingText={"Recovering"}
+                    onClick={handleRecover}
+                  >
+                    {"Recover"}
+                  </Button>
+                </Flex>
+              )}
               {isLoadingNames && displayNames.length === 0 ? (
                 <VStack spacing={4} align="center" py={8}>
                   <Spinner size="lg" color="brand.400" />

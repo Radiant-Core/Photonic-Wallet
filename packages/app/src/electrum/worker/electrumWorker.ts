@@ -230,6 +230,13 @@ const worker = {
   async fetchGlyph(ref: string) {
     return nft.fetchGlyph(ref);
   },
+  // Recover a WAVE name into this wallet by name. Handles the case where the
+  // local glyph row is gone and the name rests under an auth-covenant singleton
+  // (post target-update) that never appears in NFT listunspent — see
+  // NFTWorker.recoverWaveName.
+  async recoverWaveName(name: string) {
+    return nft.recoverWaveName(name);
+  },
   async findSwaps(address: string) {
     return findSwaps(electrum, address);
   },
