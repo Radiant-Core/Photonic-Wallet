@@ -370,7 +370,19 @@ export function parseNftScript(script: string): {
   ref?: string;
   address?: string;
 } {
-  const pattern = /^d8([0-9a-f]{72})7576a914([0-9a-f]{40})88ac$/;
+  // Matches a plain NFT singleton:
+  //   OP_PUSHINPUTREFSINGLETON <ref> OP_DROP <P2PKH>
+  //   d8 <ref:72> 75 76a914 <h160:40> 88ac
+  // AND the auth-covenant form a WAVE-name target update is forced to produce
+  // (the mutable covenant requires the token output to re-commit the mutable
+  // ref + its scriptSig hash):
+  //   ( OP_REQUIREINPUTREF <ref> <scriptSigHash> OP_2DROP )+ OP_STATESEPARATOR
+  //   OP_PUSHINPUTREFSINGLETON <ref> OP_DROP <P2PKH>
+  //   ( d1 <ref:72> 20 <hash:64> 6d )+ bd  d8 <ref:72> 75 76a914 <h160:40> 88ac
+  // The singleton ref + owner address are always the trailing d8…/p2pkh, so an
+  // optional auth preamble is skipped without changing the captured groups.
+  const pattern =
+    /^(?:d1[0-9a-f]{72}20[0-9a-f]{64}6d)*(?:bd)?d8([0-9a-f]{72})7576a914([0-9a-f]{40})88ac$/;
   const [, ref, address] = script.match(pattern) || [];
   return { ref, address };
 }
@@ -483,7 +495,9 @@ export function pushMinimalAsm(n: bigint | number) {
 export function pushTarget9Bytes(target: bigint | number): string {
   const value = BigInt(target);
   if (value < 0n || value > 0x7fffffffffffffffn) {
-    throw new Error(`V3 target out of range (0 ≤ target ≤ MAX_TARGET): ${value}`);
+    throw new Error(
+      `V3 target out of range (0 ≤ target ≤ MAX_TARGET): ${value}`
+    );
   }
   const bytes = new Uint8Array(8);
   let v = value;
@@ -725,27 +739,27 @@ const V2_BYTECODE_PART_B4 = "6b75757575";
 //
 // 21 bytes total. Inlined twice in PartC (once for height, once for target).
 const MINIMAL_PUSH_BYTECODE = [
-  "76",     // OP_DUP            [..., n, n]
-  "00",     // OP_0              [..., n, n, 0]
-  "9c",     // OP_NUMEQUAL       [..., n, n==0]
-  "63",     // OP_IF
-    "75",   //   OP_DROP         [..., ]     drop the n
-    "0100", //   PUSH(1) 0x00    [..., "00"] single OP_0 byte
-  "67",     // OP_ELSE
-    "76",   //   OP_DUP          [..., n, n]
-    "60",   //   OP_16           [..., n, n, 16]
-    "a1",   //   OP_LESSTHANOREQUAL [..., n, n<=16]
-    "63",   //   OP_IF
-      "0150", //   PUSH(1) 0x50  [..., n, 80]
-      "93",   //   OP_ADD        [..., (n+80)]
-      "51",   //   OP_1          [..., (n+80), 1]
-      "80",   //   OP_NUM2BIN    [..., single_byte_OP_N]
-    "67",   //   OP_ELSE
-      "82", //     OP_SIZE       [..., n, L]
-      "7c", //     OP_SWAP       [..., L, n]
-      "7e", //     OP_CAT        [..., L||n_bytes]
-    "68",   //   OP_ENDIF
-  "68",     // OP_ENDIF
+  "76", // OP_DUP            [..., n, n]
+  "00", // OP_0              [..., n, n, 0]
+  "9c", // OP_NUMEQUAL       [..., n, n==0]
+  "63", // OP_IF
+  "75", //   OP_DROP         [..., ]     drop the n
+  "0100", //   PUSH(1) 0x00    [..., "00"] single OP_0 byte
+  "67", // OP_ELSE
+  "76", //   OP_DUP          [..., n, n]
+  "60", //   OP_16           [..., n, n, 16]
+  "a1", //   OP_LESSTHANOREQUAL [..., n, n<=16]
+  "63", //   OP_IF
+  "0150", //   PUSH(1) 0x50  [..., n, 80]
+  "93", //   OP_ADD        [..., (n+80)]
+  "51", //   OP_1          [..., (n+80), 1]
+  "80", //   OP_NUM2BIN    [..., single_byte_OP_N]
+  "67", //   OP_ELSE
+  "82", //     OP_SIZE       [..., n, L]
+  "7c", //     OP_SWAP       [..., L, n]
+  "7e", //     OP_CAT        [..., L||n_bytes]
+  "68", //   OP_ENDIF
+  "68", // OP_ENDIF
 ].join("");
 
 // Build PartC for the new V2 launch shape.
@@ -788,46 +802,49 @@ export function buildV2PartC(middleLiteralHex: string): string {
   // MINIMAL_PUSH for the variable height/target pushes plus the literal
   // middle blob for the fixed deploy-time slots.
   const ELSE_BRANCH = [
-    "78de519d",                  // OVER REFOUTPUTCOUNT_OUTPUTS 1 NUMEQUALVERIFY
-                                 //   → asserts cRef (depth-1) appears in exactly 1
-                                 //   output (singleton preservation). After this,
-                                 //   stack is [outputIndex, cRef, newHeight] with
-                                 //   newHeight on top — confirmed by walking the
-                                 //   prologue against Radiant-Core interpreter.cpp
-                                 //   (OP_REFOUTPUTCOUNT_OUTPUTS at line 2058,
-                                 //   OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS at the
-                                 //   earlier prologue ops).
-    "76", MINIMAL_PUSH_BYTECODE, // DUP newHeight on top, MINIMAL_PUSH → newHeightPush.
-                                 //   MUST be DUP (0x76), not OVER (0x78). The
-                                 //   pre-2026-05-27 emit used OVER, which dups
-                                 //   depth-1 (cRef, 36 bytes). MINIMAL_PUSH's
-                                 //   first op (OP_NUMEQUAL) caps script-nums at
-                                 //   8 bytes (Radiant-Core script.h:568,639),
-                                 //   so a 36-byte buffer trips
-                                 //   INVALID_NUMBER_RANGE_64_BIT and the mint
-                                 //   tx is rejected as
-                                 //   `mandatory-script-verify-flag-failed
-                                 //   (unknown error)`. Every V2-launch contract
-                                 //   deployed before this fix is permanently
-                                 //   un-mineable.
-    middlePushBytes, "7e",       // push literal middle blob, CAT
-    "c55480547c7e7e",            // TXLOCKTIME 4 NUM2BIN OP_4 SWAP CAT CAT
-                                 //   → append "04" || NUM2BIN(4, locktime).
-                                 //   OP_4 (54) replaces a literal `01 04` push
-                                 //   here because `01 04` triggers MINIMALDATA
-                                 //   (data byte 0x04 ∈ [1..16] must use OP_4).
-                                 //   The pre-redesign V3 PartC had this latent
-                                 //   bug — hidden behind the height-0 state-
-                                 //   script issue at the miner pre-check; would
-                                 //   have failed in radiantd interpreter once
-                                 //   that was bypassed.
-    "6c", MINIMAL_PUSH_BYTECODE, // FROMALTSTACK newTarget, MINIMAL_PUSH
-    "7e",                        // CAT — append newTargetPush
+    "78de519d", // OVER REFOUTPUTCOUNT_OUTPUTS 1 NUMEQUALVERIFY
+    //   → asserts cRef (depth-1) appears in exactly 1
+    //   output (singleton preservation). After this,
+    //   stack is [outputIndex, cRef, newHeight] with
+    //   newHeight on top — confirmed by walking the
+    //   prologue against Radiant-Core interpreter.cpp
+    //   (OP_REFOUTPUTCOUNT_OUTPUTS at line 2058,
+    //   OP_CODESCRIPTHASHOUTPUTCOUNT_OUTPUTS at the
+    //   earlier prologue ops).
+    "76",
+    MINIMAL_PUSH_BYTECODE, // DUP newHeight on top, MINIMAL_PUSH → newHeightPush.
+    //   MUST be DUP (0x76), not OVER (0x78). The
+    //   pre-2026-05-27 emit used OVER, which dups
+    //   depth-1 (cRef, 36 bytes). MINIMAL_PUSH's
+    //   first op (OP_NUMEQUAL) caps script-nums at
+    //   8 bytes (Radiant-Core script.h:568,639),
+    //   so a 36-byte buffer trips
+    //   INVALID_NUMBER_RANGE_64_BIT and the mint
+    //   tx is rejected as
+    //   `mandatory-script-verify-flag-failed
+    //   (unknown error)`. Every V2-launch contract
+    //   deployed before this fix is permanently
+    //   un-mineable.
+    middlePushBytes,
+    "7e", // push literal middle blob, CAT
+    "c55480547c7e7e", // TXLOCKTIME 4 NUM2BIN OP_4 SWAP CAT CAT
+    //   → append "04" || NUM2BIN(4, locktime).
+    //   OP_4 (54) replaces a literal `01 04` push
+    //   here because `01 04` triggers MINIMALDATA
+    //   (data byte 0x04 ∈ [1..16] must use OP_4).
+    //   The pre-redesign V3 PartC had this latent
+    //   bug — hidden behind the height-0 state-
+    //   script issue at the miner pre-check; would
+    //   have failed in radiantd interpreter once
+    //   that was bypassed.
+    "6c",
+    MINIMAL_PUSH_BYTECODE, // FROMALTSTACK newTarget, MINIMAL_PUSH
+    "7e", // CAT — append newTargetPush
     // Continuation-verify epilogue (byte-identical to old V3 PartC tail):
-    "5379ec7888",                // 3 PICK STATESCRIPTBYTECODE_OUTPUT_NOSEP OVER EQUALVERIFY
-    "5379eac0e988",              // 3 PICK OUTPUTCODESCRIPTBYTECODE INPUTINDEX 0xe9 EQUALVERIFY
-    "5379cc519d",                // 3 PICK OUTPUTVALUE 1 NUMEQUALVERIFY
-    "75",                        // DROP
+    "5379ec7888", // 3 PICK STATESCRIPTBYTECODE_OUTPUT_NOSEP OVER EQUALVERIFY
+    "5379eac0e988", // 3 PICK OUTPUTCODESCRIPTBYTECODE INPUTINDEX 0xe9 EQUALVERIFY
+    "5379cc519d", // 3 PICK OUTPUTVALUE 1 NUMEQUALVERIFY
+    "75", // DROP
   ].join("");
 
   // PartC closing (ENDIF, 2DROP, DROP, push 1) — unchanged from V2/V3.
@@ -1347,7 +1364,7 @@ export function dMintScript(
   algorithm: string = "sha256d",
   daaMode: string = "fixed",
   daaParams: DaaParams | null = null,
-  lastTime: number = 0,
+  lastTime: number = 0
 ) {
   const algorithmIds: Record<string, number> = {
     sha256d: 0,

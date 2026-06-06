@@ -34,6 +34,12 @@ export interface TxO {
   spent: 0 | 1;
   change?: 0 | 1;
   contractType: ContractType;
+  // Ref-tracked UTXO (WAVE-name singletons resting under an auth covenant
+  // script). These never appear in the address' ordinary NFT
+  // `listunspent`, so the scripthash sweep in updateTxos must NOT decide
+  // their spent state — `reconcileWaveNames` (NFT worker) tracks them by ref
+  // via `blockchain.ref.get`. See [[photonic_wave_update_disappear_bug]].
+  byRef?: 0 | 1;
 }
 
 export enum SwapStatus {

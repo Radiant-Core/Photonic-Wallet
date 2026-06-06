@@ -5,6 +5,7 @@ import {
   parseDelegateBaseScript,
   parseNftScript,
   nftScript,
+  p2pkhScript,
 } from "@lib/script";
 import {
   Subscription,
@@ -33,7 +34,7 @@ import ElectrumManager from "@app/electrum/ElectrumManager";
 import opfs from "@app/opfs";
 import setSubscriptionStatus from "./setSubscriptionStatus";
 import { arrayChunks, batchRequests } from "@lib/util";
-import { GLYPH_FT, GLYPH_NFT } from "@lib/protocols";
+import { GLYPH_FT, GLYPH_NFT, GLYPH_WAVE } from "@lib/protocols";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 
@@ -208,6 +209,11 @@ export class NFTWorker implements Subscription {
             .toArray();
           for (const g of movedGlyphs) {
             if (g.ref && liveRefs.has(g.ref)) continue; // moved, not spent
+            // WAVE names rest under per-update auth covenant scripts that never
+            // appear in this address' NFT listunspent, so the scripthash sweep
+            // must NOT mark them spent — reconcileWaveNames() tracks them by ref
+            // (blockchain.ref.get) and is the sole authority on their state.
+            if (g.p?.includes(GLYPH_WAVE)) continue;
             if (g.id !== undefined) {
               await db.glyph.update(g.id, { spent: 1 });
             }
@@ -223,6 +229,18 @@ export class NFTWorker implements Subscription {
             .modify({ height: conf.height || Infinity });
         }
       });
+
+      // WAVE-name recovery / tracking by ref. A target update re-creates the
+      // name's singleton under an auth covenant script that is NOT in this
+      // address' NFT listunspent, so the scripthash sync above can neither see
+      // nor relink it (and a rescan can't recover it). Resolve each wave name's
+      // live location via blockchain.ref.get and re-attach the moved singleton
+      // (or mark it gone). Wrapped so a failure never breaks the main sync.
+      try {
+        await this.reconcileWaveNames();
+      } catch (e) {
+        console.warn("[NFT] wave-name reconcile failed:", e);
+      }
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.NFT);
     } catch (err) {
@@ -250,6 +268,149 @@ export class NFTWorker implements Subscription {
     }
 
     consolidationCheck();
+  }
+
+  /**
+   * Reconcile WAVE-name singletons by ref instead of by scripthash.
+   *
+   * A WAVE-name target update is forced (by the mutable-target covenant) to
+   * re-create the name's NFT singleton under an auth script
+   * (`OP_REQUIREINPUTREF <mutRef> <scriptSigHash> OP_2DROP … OP_PUSHINPUTREFSINGLETON
+   * <ref> OP_DROP <P2PKH>`). RXinDexer keys every UTXO by `sha256(zero_refs(script))`,
+   * and `zero_refs` preserves the auth preamble + scriptSig-hash push, so the
+   * singleton lands under a per-update scripthash this wallet never subscribes
+   * to. It is therefore invisible to `blockchain.scripthash.listunspent`
+   * (so a normal sync/rescan can never see or recover it), even though the name
+   * is alive on-chain and still owned by us.
+   *
+   * The name's `ref` is stable, so we track it the reliable way: resolve the
+   * live location with `blockchain.ref.get(ref)`, confirm the current output is
+   * a singleton for that ref paying to one of our addresses, and re-attach it
+   * (upsert a ref-tracked `byRef` txo + un-hide the glyph). If the ref has no
+   * live location (burned) or it moved to someone else (transferred), hide it.
+   *
+   * Bounded by the number of WAVE names held (typically small); the per-name
+   * tx fetch is OPFS-cached, so steady state is one cheap `ref.get` per name.
+   */
+  async reconcileWaveNames() {
+    const waveGlyphs = await db.glyph
+      .filter((g) => !!g.p?.includes(GLYPH_WAVE))
+      .toArray();
+    if (!waveGlyphs.length) return;
+
+    const ourTail = p2pkhScript(this.address); // 76a914<our h160>88ac
+
+    for (const g of waveGlyphs) {
+      if (!g.ref || g.id === undefined) continue;
+
+      // Resolve the live location of this singleton ref.
+      let refResult: { tx_hash: string; height: number }[] | undefined;
+      try {
+        refResult = (await this.electrum.client?.request(
+          "blockchain.ref.get",
+          g.ref
+        )) as { tx_hash: string; height: number }[];
+      } catch (e) {
+        console.warn("[NFT] ref.get failed for wave name", g.ref, e);
+        continue; // transient — leave existing state untouched
+      }
+
+      if (!refResult?.length) {
+        // No live ref location: the name was burned/melted. Hide it.
+        if (g.spent !== 1) await db.glyph.update(g.id, { spent: 1 });
+        continue;
+      }
+
+      const current = refResult[refResult.length - 1];
+      const loc = current.tx_hash;
+
+      // Fetch (hash-verified, OPFS-cached) the tx holding the current location.
+      let hex = await opfs.getTx(loc);
+      if (!hex) {
+        hex = (await this.electrum.client?.request(
+          "blockchain.transaction.get",
+          loc
+        )) as string;
+        if (hex) {
+          try {
+            if (verifyTransactionHash(hexToBytes(hex), loc)) {
+              await opfs.putTx(loc, hex);
+            } else {
+              console.error(
+                `[NFT] SECURITY: tx hash mismatch for wave location ${loc}`
+              );
+              hex = "";
+            }
+          } catch {
+            hex = "";
+          }
+        }
+      }
+      if (!hex) continue;
+
+      const tx = new Transaction(hex);
+
+      // Find the singleton output for this ref (plain OR auth) that pays to us.
+      let found: { vout: number; script: string; value: number } | undefined;
+      for (let i = 0; i < tx.outputs.length; i++) {
+        const scriptHex = tx.outputs[i].script.toHex() as string;
+        const { ref: refLE, address } = parseNftScript(scriptHex);
+        if (!refLE || !address) continue;
+        if (reverseRef(refLE) !== g.ref) continue;
+        if (!scriptHex.endsWith(ourTail)) continue; // not owned by us
+        found = {
+          vout: i,
+          script: scriptHex,
+          value: tx.outputs[i].satoshis as number,
+        };
+        break;
+      }
+
+      if (!found) {
+        // Live ref, but the singleton no longer pays to us (transferred away).
+        if (g.spent !== 1) await db.glyph.update(g.id, { spent: 1 });
+        continue;
+      }
+
+      const height = current.height || Infinity;
+
+      // Upsert the ref-tracked singleton txo. `byRef:1` keeps the scripthash
+      // sweep (updateTxos) from re-marking it spent on the next sync.
+      const existing = await db.txo
+        .where({ txid: loc, vout: found.vout })
+        .first();
+      let txoId: number;
+      if (existing?.id !== undefined) {
+        await db.txo.update(existing.id, {
+          script: found.script,
+          value: found.value,
+          height,
+          spent: 0,
+          contractType: ContractType.NFT,
+          byRef: 1,
+        });
+        txoId = existing.id;
+      } else {
+        txoId = (await db.txo.put({
+          txid: loc,
+          vout: found.vout,
+          script: found.script,
+          value: found.value,
+          height,
+          spent: 0,
+          contractType: ContractType.NFT,
+          byRef: 1,
+        })) as number;
+      }
+
+      if (g.lastTxoId !== txoId || g.spent !== 0 || g.height !== height) {
+        await db.glyph.update(g.id, {
+          lastTxoId: txoId,
+          spent: 0,
+          height,
+        });
+      }
+    }
   }
 
   async register(address: string) {

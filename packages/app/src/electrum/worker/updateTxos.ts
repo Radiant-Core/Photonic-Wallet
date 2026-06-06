@@ -145,6 +145,11 @@ export const buildUpdateTXOs =
     const spent = emptyTxoTable
       ? []
       : (await db.txo.where({ contractType, spent: 0 }).toArray())
+          // Ref-tracked UTXOs (WAVE-name singletons under auth covenants) never
+          // appear in this address' scripthash listunspent, so their absence
+          // here does NOT mean spent. They're reconciled by ref in the NFT
+          // worker (reconcileWaveNames); exclude them from the scripthash sweep.
+          .filter((txo) => txo.byRef !== 1)
           .filter(({ txid, vout }) => !outpoints.includes(`${txid}${vout}`))
           .map(({ id, value, script }) => ({
             id: id as number,
@@ -306,9 +311,12 @@ async function reverifyPendingTxos(
       txo.height as number
     );
     if (ok) {
-      await db.txo.update(txo.id as number, {
-        verified: 1,
-      } as Partial<VerifiableTxO>);
+      await db.txo.update(
+        txo.id as number,
+        {
+          verified: 1,
+        } as Partial<VerifiableTxO>
+      );
       changedScripts.add(txo.script);
     }
   }
