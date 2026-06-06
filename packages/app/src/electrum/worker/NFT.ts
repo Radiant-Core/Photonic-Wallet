@@ -316,8 +316,10 @@ export class NFTWorker implements Subscription {
       }
 
       if (!refResult?.length) {
-        // No live ref location: the name was burned/melted. Hide it.
-        if (g.spent !== 1) await db.glyph.update(g.id, { spent: 1 });
+        // Ambiguous: ref.get returned nothing — could be a transient server
+        // hiccup or a not-yet-indexed update. NEVER hide on this: a target
+        // update must not make the name vanish. Leave the row as-is. A genuine
+        // burn/melt is recorded spent:1 by the burn/melt handler itself.
         continue;
       }
 
@@ -350,27 +352,40 @@ export class NFTWorker implements Subscription {
 
       const tx = new Transaction(hex);
 
-      // Find the singleton output for this ref (plain OR auth) that pays to us.
-      let found: { vout: number; script: string; value: number } | undefined;
+      // Find the singleton output for THIS ref at the current location. Track
+      // separately whether it pays to us vs. to a different address, so we only
+      // ever hide on POSITIVE evidence of a transfer away — never on a transient
+      // fetch/parse miss, which must not make a name the user still owns vanish.
+      let foundOurs:
+        | { vout: number; script: string; value: number }
+        | undefined;
+      let foundForRefElsewhere = false;
       for (let i = 0; i < tx.outputs.length; i++) {
         const scriptHex = tx.outputs[i].script.toHex() as string;
-        const { ref: refLE, address } = parseNftScript(scriptHex);
-        if (!refLE || !address) continue;
-        if (reverseRef(refLE) !== g.ref) continue;
-        if (!scriptHex.endsWith(ourTail)) continue; // not owned by us
-        found = {
-          vout: i,
-          script: scriptHex,
-          value: tx.outputs[i].satoshis as number,
-        };
-        break;
+        const { ref: refLE } = parseNftScript(scriptHex);
+        if (!refLE || reverseRef(refLE) !== g.ref) continue;
+        if (scriptHex.endsWith(ourTail)) {
+          foundOurs = {
+            vout: i,
+            script: scriptHex,
+            value: tx.outputs[i].satoshis as number,
+          };
+          break;
+        }
+        foundForRefElsewhere = true; // singleton for this ref, but not our key
       }
 
-      if (!found) {
-        // Live ref, but the singleton no longer pays to us (transferred away).
-        if (g.spent !== 1) await db.glyph.update(g.id, { spent: 1 });
+      if (!foundOurs) {
+        // Only hide when we POSITIVELY saw this name's singleton pay to another
+        // address (sold/transferred). If no singleton for this ref was found at
+        // the current location (transient fetch/parse miss, or an in-flight
+        // update), leave the row visible — a target update must never hide it.
+        if (foundForRefElsewhere && g.spent !== 1) {
+          await db.glyph.update(g.id, { spent: 1 });
+        }
         continue;
       }
+      const found = foundOurs;
 
       const height = current.height || Infinity;
 

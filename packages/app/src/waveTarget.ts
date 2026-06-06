@@ -176,6 +176,12 @@ export async function updateWaveTarget(opts: {
   // The NFT singleton was re-created at output 0 of this tx (still owned by us
   // via nftAuthScript). Hand the new UTXO back so the caller can re-point the
   // glyph row at it instead of the now-spent input.
+  //
+  // byRef: 1 — this singleton rests under an auth covenant and so will NOT
+  // appear in this address' NFT listunspent. Flag it ref-tracked from the
+  // moment it's inserted so the scripthash sweep (updateTxos) never marks it
+  // spent on the next sync; reconcileWaveNames keeps it live by ref. Without
+  // this the name would flicker (txo spent -> reconciled back) every sync.
   const newNftTxo: TxO = {
     contractType: ContractType.NFT,
     script: nftOutputScript,
@@ -185,6 +191,7 @@ export async function updateWaveTarget(opts: {
     spent: 0,
     height: Infinity,
     date: Date.now(),
+    byRef: 1,
   };
 
   // fund.funding elements are the original rxdUtxos (TxO rows carrying db ids),
