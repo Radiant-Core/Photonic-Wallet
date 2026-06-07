@@ -143,4 +143,22 @@ describe("ViewDigitalObject — List for sale", () => {
     expect(screen.getByText("List with enforced royalty")).toBeInTheDocument();
     expect(screen.queryByText("List for sale")).toBeNull();
   });
+
+  it("shows a loading state while the live query is unresolved", async () => {
+    // undefined result === query not yet resolved
+    live.current = undefined as unknown as unknown[];
+    await renderObject("ref-loading");
+
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("List for sale")).toBeNull();
+  });
+
+  it("shows 'Token not found' when the query resolved but the token is missing", async () => {
+    // resolved (array) but no nft/txo
+    live.current = [undefined, undefined, undefined, undefined];
+    await renderObject("ref-missing");
+
+    expect(screen.getByText("Token not found")).toBeInTheDocument();
+    expect(screen.queryByText("List for sale")).toBeNull();
+  });
 });

@@ -123,7 +123,10 @@ export default function ViewDigitalObject({
   const editDisclosure = useDisclosure();
   const listDisclosure = useDisclosure();
   const successDisclosure = useDisclosure();
-  const [nft, txo, author, container] = useLiveQuery(
+  // No default result: `undefined` means the live query hasn't resolved yet
+  // (loading), which we surface distinctly from a token that isn't in the
+  // wallet (resolved but missing).
+  const result = useLiveQuery(
     async () => {
       const nft = await db.glyph.get({ ref: sref });
       if (!nft?.lastTxoId) return [undefined, undefined];
@@ -132,9 +135,9 @@ export default function ViewDigitalObject({
       const c = nft?.container && (await db.glyph.get({ ref: nft.container }));
       return [nft, txo, a, c] as [SmartToken, TxO, SmartToken?, SmartToken?];
     },
-    [sref],
-    []
+    [sref]
   );
+  const [nft, txo, author, container] = result ?? [];
   const txid = useRef("");
   const { onCopy: onLinkCopy } = useClipboard(nft?.remote?.u || "");
 
@@ -144,11 +147,23 @@ export default function ViewDigitalObject({
     "application/octet-stream"
   );
 
-  // TODO show loading or 404
+  if (!result) {
+    return (
+      <ContentContainer>
+        <PageHeader />
+        <Box p={8} textAlign="center" color="gray.500">
+          {"Loading…"}
+        </Box>
+      </ContentContainer>
+    );
+  }
   if (!txo || !nft) {
     return (
       <ContentContainer>
         <PageHeader />
+        <Box p={8} textAlign="center" color="gray.500">
+          {"Token not found"}
+        </Box>
       </ContentContainer>
     );
   }
