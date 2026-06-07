@@ -5,6 +5,7 @@ import {
 } from "./radiantCoinSelect";
 import { UnfinalizedInput, UnfinalizedOutput, Utxo } from "./types";
 import { normalizeFeeRate } from "./feePolicy";
+import { isTokenBearing } from "./script";
 
 export type SelectableInput = UnfinalizedInput & {
   required?: boolean;
@@ -39,6 +40,19 @@ export function coinSelect(
   remaining: SelectableInput[];
 } {
   const safeFeeRate = normalizeFeeRate(feeRate);
+
+  // Backstop: never let a token-bearing UTXO (FT/NFT/dMint) be spent as
+  // discretionary funding — that silently burns the token. `required` inputs
+  // are deliberate token spends and are exempt. Photonic already segregates
+  // token UTXOs by ContractType, so this never fires in normal operation; it
+  // makes the no-burn property locally enforced rather than emergent.
+  for (const u of utxos) {
+    if (!u.required && isTokenBearing(u.script)) {
+      throw new Error(
+        `coinSelect: refusing token-bearing UTXO ${u.txid}:${u.vout} as discretionary funding (would burn the token)`
+      );
+    }
+  }
 
   // Shape rows for the selector: it estimates size from `script` (hex).
   // We feed scriptSig as `script` for input-byte sizing, and stash the original
@@ -116,6 +130,18 @@ export function fundTx(
   feeRate: number
 ) {
   const safeFeeRate = normalizeFeeRate(feeRate);
+
+  // Backstop: the discretionary funding pool (`utxos`) must be plain RXD —
+  // spending a token-bearing UTXO here would burn the token. `requiredInputs`
+  // are deliberate token spends and are kept separate (not checked here).
+  for (const u of utxos) {
+    if (isTokenBearing(u.script)) {
+      throw new Error(
+        `fundTx: refusing token-bearing UTXO ${u.txid}:${u.vout} as funding (would burn the token)`
+      );
+    }
+  }
+
   const required = requiredInputs.map((i) => ({ ...i, required: true }));
 
   type Row = CoinSelectInput & {

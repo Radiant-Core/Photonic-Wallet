@@ -38,8 +38,8 @@ import { GLYPH_FT, GLYPH_NFT, GLYPH_MUT } from "@lib/protocols";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 
-// 500KB size limit
-const fileSizeLimit = 500_000;
+// 512 KiB on-chain content limit (matches GLYPH_INSCRIPTION_MAX_SIZE / mintEmbedMaxBytes)
+const fileSizeLimit = 524_288;
 
 // Delay before re-running a sync that just failed, so a congested/timing-out
 // socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
@@ -864,7 +864,7 @@ export class NFTWorker implements Subscription {
     // Support dual-file tokens: use preview for thumbnails, fallback to main
     const embedSource = embeddedFiles.preview || embeddedFiles.main;
     const embed =
-      embedSource && embedSource.b.length < fileSizeLimit
+      embedSource && embedSource.b.length <= fileSizeLimit
         ? embedSource
         : undefined;
 

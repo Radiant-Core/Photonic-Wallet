@@ -26,6 +26,61 @@ export const mutableNftScriptSize = 175;
 
 const zeroRef = "00".repeat(36);
 
+/**
+ * True if a locking script is token-bearing (FT / NFT / dMint) — i.e. it
+ * contains an `OP_PUSHINPUTREF`-family opcode (`0xd0`–`0xd8`) in *opcode
+ * position*. Walks the script as an opcode stream and skips push payloads, so a
+ * `0xd0`–`0xd8` byte inside a 20-byte pubkey hash (which happens for ~51% of
+ * honest P2PKH addresses) is NOT misread as a ref opcode — a bare substring
+ * scan would false-positive there.
+ *
+ * Spending such a UTXO as ordinary RXD funding/change silently and
+ * irreversibly BURNS the token, so coin selection uses this as a backstop to
+ * keep token UTXOs out of the discretionary funding pool. Returns false for
+ * empty or malformed/truncated scripts: the funding pool is structurally plain
+ * P2PKH, so this guard only flags a *cleanly parsed* ref opcode and never
+ * blocks a send over an unparseable candidate.
+ */
+export function isTokenBearing(scriptHex: string): boolean {
+  if (!scriptHex) return false;
+  let bytes: Uint8Array;
+  try {
+    bytes = hexToBytes(scriptHex);
+  } catch {
+    return false;
+  }
+  const n = bytes.length;
+  let pos = 0;
+  while (pos < n) {
+    const op = bytes[pos];
+    if (op >= 0xd0 && op <= 0xd8) return true; // ref opcode in opcode position
+    let next: number;
+    if (op >= 0x01 && op <= 0x4b) {
+      next = pos + 1 + op; // direct push of `op` bytes
+    } else if (op === 0x4c) {
+      if (pos + 1 >= n) return false; // OP_PUSHDATA1, truncated
+      next = pos + 2 + bytes[pos + 1];
+    } else if (op === 0x4d) {
+      if (pos + 2 >= n) return false; // OP_PUSHDATA2 (LE), truncated
+      next = pos + 3 + (bytes[pos + 1] | (bytes[pos + 2] << 8));
+    } else if (op === 0x4e) {
+      if (pos + 4 >= n) return false; // OP_PUSHDATA4 (LE), truncated
+      const len =
+        (bytes[pos + 1] |
+          (bytes[pos + 2] << 8) |
+          (bytes[pos + 3] << 16) |
+          (bytes[pos + 4] << 24)) >>>
+        0;
+      next = pos + 5 + len;
+    } else {
+      next = pos + 1; // non-push opcode, no operand
+    }
+    if (next <= pos || next > n) return false; // truncated/overrun push
+    pos = next;
+  }
+  return false;
+}
+
 export function varIntSize(n: number) {
   if (n < 253) {
     return 1;

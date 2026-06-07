@@ -227,7 +227,7 @@ function TargetBox({
               {"Upload file"}
             </Text>
             <Text color="gray.300" fontSize="md">
-              Maximum {formatNumber(mintEmbedMaxBytes / 1000)}KB - Images,
+              Maximum {formatNumber(mintEmbedMaxBytes / 1024)}KB - Images,
               Files, URLs, or Text
             </Text>
           </>
@@ -591,7 +591,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           status: "error",
           title: "Text content is too large",
           description:
-            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1024)} KB",
         });
         return;
       }
@@ -604,7 +604,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           status: "error",
           title: "URL content is too large",
           description:
-            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1024)} KB",
         });
         return;
       }
@@ -626,7 +626,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           status: "error",
           title: "Combined file size is too large",
           description:
-            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+            "Maximum size is ${formatNumber(mintEmbedMaxBytes / 1024)} KB",
         });
         return;
       }
@@ -1399,7 +1399,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           toast({
             title: "Combined file size is too large",
             description:
-              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1024)} KB",
             status: "error",
           });
           return;
@@ -1449,7 +1449,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           toast({
             title: "Combined file size is too large",
             description:
-              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1000)} KB",
+              "Maximum is ${formatNumber(mintEmbedMaxBytes / 1024)} KB",
             status: "error",
           });
           return;
@@ -1662,7 +1662,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>{"File"}</FormLabel>
                     <FormHelperText mb={4}>
                       {
-                        "Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                        "Upload an image, text file or other content (max ${formatNumber(mintEmbedMaxBytes / 1024)} KB)"
                       }
                     </FormHelperText>
                     {fileState.file?.data ? (
@@ -1840,7 +1840,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>{"Preview Image + Content File"}</FormLabel>
                     <FormHelperText mb={4}>
                       {
-                        "Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB total)"
+                        "Upload a preview image (like book cover) and content file (max ${formatNumber(mintEmbedMaxBytes / 1024)} KB total)"
                       }
                     </FormHelperText>
                   </FormControl>
@@ -1957,7 +1957,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         <Text>
                           {`Combined size: ${
                             filesize(dualFileState.totalSize) as string
-                          } / ${formatNumber(mintEmbedMaxBytes / 1000)} KB`}
+                          } / ${formatNumber(mintEmbedMaxBytes / 1024)} KB`}
                         </Text>
                       </Alert>
                       <Alert status="warning" mt={2}>
@@ -1991,7 +1991,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>Text</FormLabel>
                     <FormHelperText mb={4}>
                       {
-                        "Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                        "Enter text content (max ${formatNumber(mintEmbedMaxBytes / 1024)} KB)"
                       }
                     </FormHelperText>
                     <Textarea
@@ -2009,7 +2009,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     <FormLabel>URL</FormLabel>
                     <FormHelperText mb={4}>
                       {
-                        "Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1000)} KB)"
+                        "Enter a URL (max ${formatNumber(mintEmbedMaxBytes / 1024)} KB)"
                       }
                     </FormHelperText>
                     <Input name="url" onChange={onFormChange} />
