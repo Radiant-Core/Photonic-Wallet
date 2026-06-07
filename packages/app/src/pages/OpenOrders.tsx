@@ -35,6 +35,7 @@ import {
   ButtonGroup,
   Tag,
   TagLabel,
+  Checkbox,
 } from "@chakra-ui/react";
 import {
   SearchIcon,
@@ -77,10 +78,11 @@ import {
   getOpenOrders,
   getOpenOrdersByWant,
   parsePriceTerms,
-  isSwapIndexAvailable,
+  getSwapIndexInfo,
   getSwapRpcConfig,
   setSwapRpcConfig,
 } from "@app/swapBroadcast";
+import { isOfferStale, offerAgeLabel } from "@app/swapExpiry";
 import { useLiveQuery } from "dexie-react-hooks";
 import { wallet, openModal, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -337,13 +339,17 @@ function OrderCard({
   order,
   onAccept,
   onCopy,
+  currentHeight = 0,
 }: {
   order: ParsedOrder;
   onAccept: (order: ParsedOrder) => void;
   onCopy: (text: string, label: string) => void;
+  currentHeight?: number;
 }) {
   const { offer, offeredGlyph, wantGlyph, wantValue } = order;
   const priceRatio = getPriceRatio(order);
+  const expired = isOfferStale(offer.block_height, currentHeight);
+  const ageLabel = offerAgeLabel(offer.block_height, currentHeight);
 
   return (
     <Card p={4}>
@@ -355,9 +361,16 @@ function OrderCard({
             <Icon as={MdOutlineSwapHoriz} boxSize={5} color="gray.400" />
             <TokenIcon glyph={wantGlyph} size={8} />
           </HStack>
-          <Badge colorScheme="blue" variant="subtle">
-            Block {offer.block_height.toLocaleString()}
-          </Badge>
+          <HStack spacing={1}>
+            {expired && (
+              <Badge colorScheme="red" variant="solid">
+                Expired
+              </Badge>
+            )}
+            <Badge colorScheme="blue" variant="subtle">
+              Block {offer.block_height.toLocaleString()}
+            </Badge>
+          </HStack>
         </Flex>
 
         {/* Token names */}
@@ -412,14 +425,22 @@ function OrderCard({
 
         <Divider />
 
+        {expired && (
+          <Text fontSize="xs" color="red.300">
+            This offer is {ageLabel ?? "old"}. The price may be outdated — the
+            maker has not cancelled it, so it can still execute at the original
+            terms.
+          </Text>
+        )}
+
         {/* Accept button */}
         <Button
           size="sm"
-          colorScheme="blue"
+          colorScheme={expired ? "red" : "blue"}
           width="100%"
           onClick={() => onAccept(order)}
         >
-          Accept Offer
+          {expired ? "Accept expired offer" : "Accept Offer"}
         </Button>
       </VStack>
     </Card>
@@ -430,13 +451,16 @@ function OrderRow({
   order,
   onAccept,
   onCopy,
+  currentHeight = 0,
 }: {
   order: ParsedOrder;
   onAccept: (order: ParsedOrder) => void;
   onCopy?: (text: string, label: string) => void;
+  currentHeight?: number;
 }) {
   const { offer, offeredGlyph, wantGlyph, wantValue } = order;
   const priceRatio = getPriceRatio(order);
+  const expired = isOfferStale(offer.block_height, currentHeight);
 
   return (
     <Tr>
@@ -491,25 +515,29 @@ function OrderRow({
       </Td>
       <Td display={{ base: "none", md: "table-cell" }}>
         <VStack align="start" spacing={0}>
-          <Text fontSize="xs" color="gray.500">
-            Block {offer.block_height.toLocaleString()}
-          </Text>
-          {offer.block_height > 0 && (
-            <Text fontSize="10px" color="gray.600">
-              ~
-              {Math.max(
-                0,
-                Math.floor(
-                  (Date.now() / 1000 - offer.block_height * 600) / 3600
-                )
-              )}
-              h ago
+          <HStack spacing={1}>
+            <Text fontSize="xs" color="gray.500">
+              Block {offer.block_height.toLocaleString()}
+            </Text>
+            {expired && (
+              <Badge colorScheme="red" variant="solid" fontSize="9px">
+                Expired
+              </Badge>
+            )}
+          </HStack>
+          {offerAgeLabel(offer.block_height, currentHeight) && (
+            <Text fontSize="10px" color={expired ? "red.300" : "gray.600"}>
+              {offerAgeLabel(offer.block_height, currentHeight)}
             </Text>
           )}
         </VStack>
       </Td>
       <Td>
-        <Button size="sm" colorScheme="blue" onClick={() => onAccept(order)}>
+        <Button
+          size="sm"
+          colorScheme={expired ? "red" : "blue"}
+          onClick={() => onAccept(order)}
+        >
           {"Accept"}
         </Button>
       </Td>
@@ -755,6 +783,11 @@ export default function OpenOrders({
   const [displayCount, setDisplayCount] = useState(20);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  // Chain tip reported by the swap index, used to date offers for soft expiry.
+  const [currentHeight, setCurrentHeight] = useState(0);
+  // Soft expiry: stale offers are hidden unless the user opts in. See
+  // swapExpiry.ts and docs/swap-offer-expiry-cancellation.md.
+  const [showExpired, setShowExpired] = useState(false);
 
   // Get all known glyphs for display
   const glyphs = useLiveQuery(() => db.glyph.toArray(), []);
@@ -787,9 +820,17 @@ export default function OpenOrders({
   };
 
   const checkIndexAvailability = useCallback(async () => {
-    const available = await isSwapIndexAvailable();
-    setIndexAvailable(available);
-    return available;
+    try {
+      const info = await getSwapIndexInfo();
+      setIndexAvailable(info.enabled);
+      if (typeof info.current_height === "number" && info.current_height > 0) {
+        setCurrentHeight(info.current_height);
+      }
+      return info.enabled;
+    } catch {
+      setIndexAvailable(false);
+      return false;
+    }
   }, []);
 
   const fetchOrders = useCallback(
@@ -1009,6 +1050,16 @@ export default function OpenOrders({
       });
     }
 
+    // Soft expiry: hide stale offers unless the user opts in. Only applies when
+    // we know the chain tip; an undateable offer is never hidden. This does not
+    // bind an attacker holding a raw PSRT (see swapExpiry.ts) — it is taker
+    // protection plus a cleaner default book.
+    if (!showExpired && currentHeight > 0) {
+      result = result.filter(
+        (order) => !isOfferStale(order.offer.block_height, currentHeight)
+      );
+    }
+
     // Apply sort
     result.sort((a, b) => {
       let comparison = 0;
@@ -1048,7 +1099,23 @@ export default function OpenOrders({
     });
 
     return result;
-  }, [mergedOrders, sortField, sortDirection, filterType]);
+  }, [
+    mergedOrders,
+    sortField,
+    sortDirection,
+    filterType,
+    showExpired,
+    currentHeight,
+  ]);
+
+  // Number of currently-loaded offers past the soft-expiry window, for the
+  // "Show expired" toggle caption.
+  const expiredCount = useMemo(() => {
+    if (currentHeight <= 0) return 0;
+    return mergedOrders.filter((o) =>
+      isOfferStale(o.offer.block_height, currentHeight)
+    ).length;
+  }, [mergedOrders, currentHeight]);
 
   // Paginated orders
   const displayedOrders = filteredAndSortedOrders.slice(0, displayCount);
@@ -1116,6 +1183,20 @@ export default function OpenOrders({
     if (wallet.value.locked || !wallet.value.wif) {
       openModal.value = { modal: "unlock" };
       return;
+    }
+
+    // Soft expiry: warn before filling a stale offer. The user must have toggled
+    // "Show expired" to reach this (stale offers are hidden by default), so this
+    // is a reminder, not a hard block — the offer is still on-chain and valid.
+    if (isOfferStale(order.offer.block_height, currentHeight)) {
+      const label = offerAgeLabel(order.offer.block_height, currentHeight);
+      toast({
+        status: "warning",
+        title: "Accepting an expired offer",
+        description: `This offer is ${
+          label ?? "old"
+        }. Its price may be outdated — confirm the terms before it broadcasts.`,
+      });
     }
 
     try {
@@ -1557,6 +1638,18 @@ export default function OpenOrders({
                     <option value="rxd-in">Buying RXD</option>
                     <option value="rxd-out">Selling RXD</option>
                   </Select>
+                  <Tooltip label="Offers older than ~30 days are hidden by default. They have no on-chain expiry and can still execute at the original price unless the maker cancels them.">
+                    <Box>
+                      <Checkbox
+                        size="sm"
+                        isChecked={showExpired}
+                        onChange={(e) => setShowExpired(e.target.checked)}
+                      >
+                        Show expired
+                        {expiredCount > 0 ? ` (${expiredCount})` : ""}
+                      </Checkbox>
+                    </Box>
+                  </Tooltip>
                 </HStack>
 
                 <ButtonGroup size="sm" isAttached variant="outline">
@@ -1671,6 +1764,7 @@ export default function OpenOrders({
                         order={order}
                         onAccept={handleAcceptOrder}
                         onCopy={copyToClipboard}
+                        currentHeight={currentHeight}
                       />
                     ))}
                   </Tbody>
@@ -1694,6 +1788,7 @@ export default function OpenOrders({
                       order={order}
                       onAccept={handleAcceptOrder}
                       onCopy={copyToClipboard}
+                      currentHeight={currentHeight}
                     />
                   </GridItem>
                 ))}

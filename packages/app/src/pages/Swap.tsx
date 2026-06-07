@@ -426,9 +426,8 @@ function Swap() {
   // action (e.g. the WAVE Names page passes the name's ref in route state).
   // SwapPage remounts this component per location.key, so this runs once.
   useEffect(() => {
-    const offerGlyphRef = (
-      location.state as { offerGlyphRef?: string } | null
-    )?.offerGlyphRef;
+    const offerGlyphRef = (location.state as { offerGlyphRef?: string } | null)
+      ?.offerGlyphRef;
     if (!offerGlyphRef) return;
     let cancelled = false;
     (async () => {
@@ -645,14 +644,21 @@ function Swap() {
       value: swapOutput.output.satoshis,
     };
 
-    // Build Partially Signed Radiant Transaction
-    // TODO(security): swap offers have no expiry or cancellation nonce. The PSRT
-    // signs with SIGHASH_SINGLE|ANYONECANPAY, so it stays live and broadcastable
-    // by anyone who holds it until the maker self-spends the reserved UTXO to
-    // cancel. A shared (public/broadcast) offer therefore remains executable
-    // indefinitely at the originally-signed price. Mitigating this needs a
-    // protocol change (e.g. an nLockTime/CLTV expiry or a per-offer nonce
-    // committed by the covenant) — not changed here.
+    // Build Partially Signed Radiant Transaction.
+    //
+    // SECURITY (swap-offer liveness): the PSRT is signed with
+    // SIGHASH_SINGLE|ANYONECANPAY, so it has no on-chain expiry and no per-offer
+    // cancellation nonce. It stays broadcastable by anyone who holds it — at the
+    // originally-signed price — until the maker self-spends the reserved UTXO to
+    // cancel it (see swap.ts `cancelSwap`, surfaced as one-click Cancel in the
+    // Pending Swaps and Open Orders > My Public Offers views). A consensus-level
+    // expiry (RSWP v3 `expiry_height` + a timelocked-refund covenant) is the
+    // documented follow-up. Until then the mitigations are:
+    //   1. a maker risk warning (below, esp. for public/broadcast offers),
+    //   2. one-click cancellation, and
+    //   3. a client/index *soft* expiry that hides + flags stale offers
+    //      (swapExpiry.ts, Open Orders book).
+    // See docs/swap-offer-expiry-cancellation.md for the full design.
     const rawPsrt = partiallySigned(
       wallet.value.swapAddress,
       input,
@@ -806,6 +812,16 @@ function Swap() {
             {broadcastTxid.substring(0, 16)}...
           </Alert>
         )}
+        <Alert status="warning" mb={4} fontSize="sm" alignItems="flex-start">
+          <AlertIcon />
+          <Box>
+            This offer stays fillable at the signed price until you cancel it.
+            Cancel it from <b>Pending Swaps</b>
+            {broadcastTxid ? " or Open Orders → My Public Offers" : ""} to
+            reclaim the reserved {send ? "asset" : "coins"} and revoke the
+            offer.
+          </Box>
+        </Alert>
         <ViewSwap
           from={send ? send : rxdToPhotons(sendRxd)}
           to={receive ? receive : rxdToPhotons(receiveRxd)}
@@ -857,6 +873,36 @@ function Swap() {
             <Radio value="broadcast">Public (Swap Index)</Radio>
           </Stack>
         </RadioGroup>
+        <Alert
+          status="warning"
+          mt={4}
+          fontSize="sm"
+          alignItems="flex-start"
+          borderRadius="md"
+        >
+          <AlertIcon />
+          <Box>
+            {mode === SwapMode.BROADCAST ? (
+              <>
+                This offer is signed at a <b>fixed price with no expiry</b>.
+                Once public, <b>anyone</b> can fill it at these exact terms —
+                even weeks later — until you <b>cancel</b> it. Cancel from{" "}
+                <b>Open Orders → My Public Offers</b> (or Pending Swaps) when
+                the offer is no longer wanted; that is the only way to revoke
+                it. The order book hides offers older than ~30 days, but that
+                does not stop someone who saved the signed offer.
+              </>
+            ) : (
+              <>
+                This offer is signed at a <b>fixed price with no expiry</b>.
+                Anyone you share the transaction with can fill it at these exact
+                terms at any time until you <b>cancel</b> it from Pending Swaps
+                — cancelling (self-spending the reserved coin) is the only way
+                to revoke it.
+              </>
+            )}
+          </Box>
+        </Alert>
         {mode === SwapMode.BROADCAST && (
           <Stack pt={6} spacing={3}>
             <Heading size="xs">Swap RPC endpoint</Heading>

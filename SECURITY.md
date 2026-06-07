@@ -108,6 +108,15 @@ Photonic Wallet is currently **alpha software**. While we take security seriousl
 2. **No Offline Signing**: Currently requires network connection
 3. **Session Persistence**: Seed may remain in memory during session
 4. **No 2FA**: Single-factor authentication via seed phrase only
+5. **Swap offers have no on-chain expiry (yet)**: Atomic-swap offers are signed
+   with `SIGHASH_SINGLE | SIGHASH_ANYONECANPAY`, so a shared or publicly
+   broadcast offer stays fillable at the originally-signed price by anyone who
+   holds the signed transaction until the maker **cancels** it (self-spends the
+   reserved coin). The wallet mitigates this with a maker warning, one-click
+   cancellation, and a client/index *soft* expiry that hides and flags offers
+   older than ~30 days — but a counterparty holding a saved offer is bound only
+   by cancellation. A consensus-level expiry is the planned follow-up. See
+   [docs/swap-offer-expiry-cancellation.md](docs/swap-offer-expiry-cancellation.md).
 
 ## Phishing Prevention
 

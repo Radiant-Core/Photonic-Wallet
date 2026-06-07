@@ -7,6 +7,9 @@ import {
   TokenSwap,
 } from "@app/types";
 import {
+  Alert,
+  AlertIcon,
+  Box,
   Button,
   Container,
   Modal,
@@ -143,7 +146,24 @@ export default function SwapPending() {
     <ModalContext.Provider value={openSwapModal}>
       <Container maxW="container.xl" px={4} gap={8}>
         {pending?.length ? (
-          <SwapTable swaps={pending} actions={Actions} />
+          <>
+            <Alert
+              status="warning"
+              mb={4}
+              fontSize="sm"
+              alignItems="flex-start"
+              borderRadius="md"
+            >
+              <AlertIcon />
+              <Box>
+                These offers have <b>no expiry</b>. Anyone holding the signed
+                transaction can still fill it at the original price until you{" "}
+                <b>cancel</b> it. Cancelling self-spends the reserved coin and
+                is the only way to revoke an offer.
+              </Box>
+            </Alert>
+            <SwapTable swaps={pending} actions={Actions} />
+          </>
         ) : (
           <Card>There are no pending swaps</Card>
         )}
