@@ -405,6 +405,26 @@ export default function ViewDigitalObject({
                   {"List with enforced royalty"}
                 </Button>
               )}
+              {/* General atomic-swap listing for any NFT. Mutually exclusive
+                  with the royalty path above: a royalty NFT is listed through
+                  its enforced-royalty covenant, so we don't surface a plain
+                  swap here that would bypass the royalty. Mirrors the WAVE
+                  Names "List for Sale" flow — pre-fills the Swap page with this
+                  token as the offered asset; signing happens there. */}
+              {!nft.royalty && (
+                <Button
+                  disabled={nft.swapPending}
+                  leftIcon={<ActionIcon as={MdSell} />}
+                  onClick={() =>
+                    navigate("/swap", {
+                      state: { offerGlyphRef: nft.ref },
+                    })
+                  }
+                  sx={{ gridColumn: "span 2 / span 2" }}
+                >
+                  {"List for sale"}
+                </Button>
+              )}
               {nft.type === "container" && (
                 <Button
                   as={Link}
