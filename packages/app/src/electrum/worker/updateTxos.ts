@@ -231,23 +231,35 @@ export const buildUpdateTXOs =
     }
 
     if (!emptyTxoTable) {
-      // Update confirmations and conflicting utxos
+      // SPV-verify the changed confirmations BEFORE opening the write
+      // transaction. verifyTxoInclusion makes a network round-trip
+      // (blockchain.transaction.get_merkle) and reads db.header; awaiting any
+      // non-db.txo promise *inside* the db.transaction below lets IndexedDB
+      // auto-commit it, so the next db.txo.update throws
+      // "TransactionInactiveError: Transaction has already completed or failed"
+      // — which fails the whole sync and (because the status is requeued) loops
+      // forever. Only triggers on wallets that have a coin newly transitioning
+      // to a confirmed height, which is why it's intermittent.
+      //
+      // FIX 1 (R14): a txo transitioning to (or between) confirmed heights must
+      // be re-verified against the header chain. `confs` only contains txos
+      // whose height actually changed, so already-verified txos at an unchanged
+      // height aren't re-proven every sync.
+      const confUpdates: { id: number; height: number; verified: 0 | 1 }[] = [];
+      for (const [id, utxo] of confs) {
+        const height = utxo.height || Infinity;
+        const verified =
+          height !== Infinity &&
+          (await verifyTxoInclusion(electrum.client, utxo.tx_hash, utxo.height))
+            ? 1
+            : 0;
+        confUpdates.push({ id, height, verified });
+      }
+
+      // Update confirmations and conflicting utxos in a single short
+      // transaction that performs ONLY db.txo writes (no foreign awaits inside).
       await db.transaction("rw", db.txo, async () => {
-        for (const [id, utxo] of confs) {
-          // FIX 1 (R14): a txo transitioning to (or between) confirmed heights
-          // must be re-verified against the header chain. Cache the result so
-          // already-verified txos at an unchanged height aren't re-proven every
-          // sync — `confs` only contains txos whose height actually changed.
-          const height = utxo.height || Infinity;
-          const verified =
-            height !== Infinity &&
-            (await verifyTxoInclusion(
-              electrum.client,
-              utxo.tx_hash,
-              utxo.height
-            ))
-              ? 1
-              : 0;
+        for (const { id, height, verified } of confUpdates) {
           await db.txo.update(id, {
             height,
             spent: 0,
