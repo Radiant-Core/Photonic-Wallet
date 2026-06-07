@@ -318,9 +318,24 @@ export class NFTWorker implements Subscription {
       // (reconciled on a prior pass). Only re-confirm stale/lost ones — e.g. a
       // just-seeded recovery (spent:1), or a row whose linked txo isn't a live
       // byRef singleton.
+      //
+      // A confirmed height is part of "healthy": a glyph first reconciled while
+      // its singleton was still in the mempool stored the byRef txo at
+      // height:Infinity (ref.get height 0). byRef singletons never appear in
+      // this address' listunspent, so the updateTxos confs path can't heal them
+      // — `reconcileRefTrackedNfts` is their ONLY height source. Without the
+      // height check below, such a glyph would be treated as "done" and latch at
+      // height:Infinity forever, showing PENDING even after the tx confirms.
+      // Keep re-resolving until we've recorded a real (non-Infinity) height.
       if (g.spent === 0 && g.lastTxoId !== undefined) {
         const cur = await db.txo.get(g.lastTxoId);
-        if (cur && cur.spent === 0 && cur.byRef === 1) continue;
+        if (
+          cur &&
+          cur.spent === 0 &&
+          cur.byRef === 1 &&
+          cur.height !== Infinity
+        )
+          continue;
       }
 
       // Resolve the live location of this singleton ref.
