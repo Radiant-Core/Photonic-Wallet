@@ -105,7 +105,10 @@ export default function ViewFungible({
   const airdropDisclosure = useDisclosure();
   const meltDisclosure = useDisclosure();
   const successDisclosure = useDisclosure();
-  const [token, author, container] = useLiveQuery(
+  // No default result: `undefined` means the live query hasn't resolved yet
+  // (loading), surfaced distinctly from a token that isn't in the wallet
+  // (resolved but missing).
+  const result = useLiveQuery(
     async () => {
       const token = await db.glyph.get({ ref: sref });
       const a = token?.author && (await db.glyph.get({ ref: token.author }));
@@ -113,17 +116,29 @@ export default function ViewFungible({
         token?.container && (await db.glyph.get({ ref: token.container }));
       return [token, a, c] as [SmartToken?, SmartToken?, SmartToken?];
     },
-    [sref],
-    []
+    [sref]
   );
+  const [token, author, container] = result ?? [];
   const txid = useRef("");
   const { onCopy: onLinkCopy } = useClipboard(token?.remote?.u || "");
 
-  // TODO show loading or 404
+  if (!result) {
+    return (
+      <ContentContainer>
+        <PageHeader />
+        <Box p={8} textAlign="center" color="gray.500">
+          {"Loading…"}
+        </Box>
+      </ContentContainer>
+    );
+  }
   if (!token) {
     return (
       <ContentContainer>
         <PageHeader />
+        <Box p={8} textAlign="center" color="gray.500">
+          {"Token not found"}
+        </Box>
       </ContentContainer>
     );
   }

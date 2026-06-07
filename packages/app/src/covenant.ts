@@ -156,8 +156,11 @@ export const syncCovenants = async () => {
         }
       }
     }
-  } catch {
-    // TODO surface error
+  } catch (e) {
+    // Background reconciliation — log for diagnosis rather than toasting on
+    // every transient electrum hiccup (which would spam the user). The loop
+    // retries on the next poll.
+    console.error("[covenant] reconcile failed", e);
   } finally {
     loading.value = false;
   }

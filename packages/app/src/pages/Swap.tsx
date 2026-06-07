@@ -409,7 +409,10 @@ const ViewFooter = ({ children }: PropsWithChildren) => {
 };
 
 function Swap() {
-  // TODO test swapAddress gets created for old wallets
+  // Old wallets (saved before swapAddress existed) are covered: decryptKeys()
+  // re-derives swapAddress from the HD seed on every unlock (keys.ts), so
+  // wallet.value.swapAddress is always populated by the time a swap can be
+  // signed — no per-page backfill needed here.
   const location = useLocation();
   const toast = useToast();
   const [send, setSend] = useState<Asset | null>(null);
@@ -589,7 +592,10 @@ function Swap() {
     }
 
     if (!tx) {
-      // TODO error handling
+      // Defensive: the prepare* helpers above either return a tx or throw (the
+      // throw is toasted in the catch). If we still have no tx, surface it
+      // rather than returning silently and leaving the button stuck.
+      toast({ status: "error", title: "Failed to create transaction" });
       return;
     }
 
