@@ -94,7 +94,7 @@ export default function BurnTokenModal({
         if (burnAmount <= 0 || burnAmount > tokenUtxo.value) {
           toast({
             title: "Invalid Amount",
-            description: "Burn amount must be between 1 and ${tokenUtxo.value}",
+            description: `Burn amount must be between 1 and ${tokenUtxo.value}`,
             status: "error",
           });
           setIsLoading(false);

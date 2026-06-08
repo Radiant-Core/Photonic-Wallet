@@ -165,7 +165,7 @@ export function TimelockSection({
                   type="number"
                   placeholder={
                     currentBlock
-                      ? "Current block: ${currentBlock}"
+                      ? `Current block: ${currentBlock}`
                       : "Enter block height"
                   }
                   value={state.unlockValue}
