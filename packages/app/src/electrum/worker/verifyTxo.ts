@@ -180,8 +180,12 @@ export async function verifyFtRefCommitment(
       "blockchain.transaction.get",
       utxo.tx_hash
     );
-  } catch {
-    return false;
+  } catch (err) {
+    // TRANSIENT failure (socket dropped / timeout) — NOT a token-identity
+    // problem. Returning false here would make updateTxos silently skip the
+    // UTXO and still persist the subscription status, stranding the token
+    // un-retryably. Propagate so the sync fails and retries (with backoff).
+    throw err;
   }
   if (!rawTx) return false;
 

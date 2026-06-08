@@ -177,13 +177,15 @@ export const buildUpdateTXOs =
       // actually commits to the claimed ref before counting it. A failed check
       // means the server lied about which token this UTXO is — skip it.
       if (scriptValidator) {
-        let ok = false;
-        try {
-          ok = await scriptValidator(utxo, script);
-        } catch (err) {
-          console.warn("[updateTxos] script validation threw, skipping", err);
-          ok = false;
-        }
+        // Contract: a THROW is transient (e.g. the validator couldn't fetch the
+        // raw tx — socket dropped); let it propagate so the whole sync fails and
+        // retries with backoff. Do NOT swallow it: skipping the UTXO here while
+        // the caller goes on to persist the subscription status would strand the
+        // token un-retryably (the next sync sees "status unchanged" and never
+        // re-pulls). A returned `false` is a deterministic rejection (the server
+        // mislabeled the token) — skip just this UTXO; the rest of the sync is
+        // still valid.
+        const ok = await scriptValidator(utxo, script);
         if (!ok) {
           console.warn(
             "[updateTxos] On-chain ref mismatch, skipping UTXO",

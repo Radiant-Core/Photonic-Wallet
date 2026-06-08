@@ -72,4 +72,19 @@ describe("verifyFtRefCommitment", () => {
     );
     expect(ok).toBe(false);
   });
+
+  it("propagates (throws on) a transient fetch failure instead of skipping", async () => {
+    // A dropped socket must NOT look like a deterministic rejection: returning
+    // false would make updateTxos skip the UTXO yet persist a "synced" status,
+    // stranding the token. The validator must throw so the sync retries.
+    const flaky = {
+      request: async () => {
+        throw new Error("socket closed");
+      },
+    };
+    const claimedScript = buildClaimedScript(utxo.refs[0].ref);
+    await expect(
+      verifyFtRefCommitment(flaky as never, utxo as never, ADDRESS, claimedScript)
+    ).rejects.toThrow("socket closed");
+  });
 });
