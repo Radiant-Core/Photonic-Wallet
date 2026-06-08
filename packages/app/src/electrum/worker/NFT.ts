@@ -32,18 +32,17 @@ import {
 import { bytesToHex } from "@noble/hashes/utils";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import opfs from "@app/opfs";
-import setSubscriptionStatus from "./setSubscriptionStatus";
+import setSubscriptionStatus, {
+  setSubscriptionError,
+} from "./setSubscriptionStatus";
 import { arrayChunks, batchRequests } from "@lib/util";
 import { GLYPH_FT, GLYPH_NFT, GLYPH_MUT } from "@lib/protocols";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
+import { SyncRetry } from "./syncRetry";
 
 // 512 KiB on-chain content limit (matches GLYPH_INSCRIPTION_MAX_SIZE / mintEmbedMaxBytes)
 const fileSizeLimit = 524_288;
-
-// Delay before re-running a sync that just failed, so a congested/timing-out
-// socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
-const RETRY_BACKOFF_MS = 3000;
 
 type TxIdHeight = {
   tx_hash: string;
@@ -68,6 +67,9 @@ export class NFTWorker implements Subscription {
   protected receivedStatuses: string[] = [];
   protected ready = true;
   protected address = "";
+  // Backoff + circuit breaker shared by NFT and FT (FTWorker extends this) so a
+  // persistent failure neither hammers the server nor spins "syncing" forever.
+  protected retry = new SyncRetry();
   protected scriptHash = "";
 
   constructor(worker: Worker, electrum: ElectrumManager) {
@@ -132,6 +134,7 @@ export class NFTWorker implements Subscription {
     this.ready = false;
     this.lastReceivedStatus = status;
     let failed = false;
+    let retryDelay = 0;
 
     // R10 follow-up: electrum requests reject pending promises on socket
     // close (the heavy-history "excessive resource usage" path drops the
@@ -249,11 +252,21 @@ export class NFTWorker implements Subscription {
       }
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.NFT);
+      // Full sync succeeded — clear the failure streak and any error state.
+      this.retry.reset();
     } catch (err) {
       console.warn("[NFT] subscription update failed:", err);
       // Queue the status so a future ready window retries it.
       if (status) this.receivedStatuses.push(status);
       failed = true;
+      retryDelay = this.retry.fail();
+      // After repeated consecutive failures, surface an error sync state so the
+      // UI stops showing an indefinite "syncing" spinner. We keep retrying
+      // (backed off, capped) so the wallet recovers on its own when the
+      // condition clears.
+      if (this.retry.tripped) {
+        await setSubscriptionError(scriptHash, ContractType.NFT);
+      }
     } finally {
       this.ready = true;
     }
@@ -266,9 +279,9 @@ export class NFTWorker implements Subscription {
           this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
             console.warn("[NFT] requeued sync failed:", e)
           );
-        // Back off after a failure; retry immediately when the requeue is just
-        // draining a status that arrived while we were busy.
-        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        // Exponential backoff after a failure; retry immediately when the
+        // requeue is just draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, retryDelay);
         else retry();
       }
     }

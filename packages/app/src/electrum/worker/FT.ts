@@ -5,16 +5,14 @@ import ElectrumManager from "@app/electrum/ElectrumManager";
 import { ftScript, ftScriptHash, parseFtScript } from "@lib/script";
 import db from "@app/db";
 import Outpoint, { reverseRef } from "@lib/Outpoint";
-import setSubscriptionStatus from "./setSubscriptionStatus";
+import setSubscriptionStatus, {
+  setSubscriptionError,
+} from "./setSubscriptionStatus";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 import { updateFtBalances } from "@app/utxos";
 import { arrayChunks } from "@lib/util";
 import { verifyFtRefCommitment } from "./verifyTxo";
-
-// Delay before re-running a sync that just failed, so a congested/timing-out
-// socket isn't retried in a tight loop (the Safari sync-storm feedback loop).
-const RETRY_BACKOFF_MS = 3000;
 
 export class FTWorker extends NFTWorker {
   protected ready = true;
@@ -79,6 +77,7 @@ export class FTWorker extends NFTWorker {
     this.ready = false;
     this.lastReceivedStatus = status;
     let failed = false;
+    let retryDelay = 0;
 
     try {
       const { added, spent } = await this.updateTXOs(
@@ -169,6 +168,8 @@ export class FTWorker extends NFTWorker {
       updateFtBalances(touched);
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.FT);
+      // Full sync succeeded — clear the failure streak and any error state.
+      this.retry.reset();
     } catch (error) {
       // R10 follow-up: on socket close the in-flight electrum request
       // rejects. Log it, mark the subscription failed, and let `finally`
@@ -176,12 +177,15 @@ export class FTWorker extends NFTWorker {
       console.warn("[FT] subscription update failed:", error);
       if (status) this.receivedStatuses.push(status);
       failed = true;
-      db.subscriptionStatus.put({
-        scriptHash,
-        status: "",
-        contractType: ContractType.FT,
-        sync: { done: true, error: true },
-      });
+      retryDelay = this.retry.fail();
+      // After repeated consecutive failures, surface an error sync state so the
+      // UI stops showing an indefinite "syncing" spinner. We keep retrying
+      // (backed off, capped) so the wallet recovers on its own when the
+      // condition clears. Not persisting a status keeps the next retry a real
+      // re-sync (status stays != newStatus).
+      if (this.retry.tripped) {
+        await setSubscriptionError(scriptHash, ContractType.FT);
+      }
     } finally {
       this.ready = true;
     }
@@ -194,9 +198,9 @@ export class FTWorker extends NFTWorker {
           this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
             console.warn("[FT] requeued sync failed:", e)
           );
-        // Back off after a failure; retry immediately when the requeue is just
-        // draining a status that arrived while we were busy.
-        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        // Exponential backoff after a failure; retry immediately when the
+        // requeue is just draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, retryDelay);
         else retry();
       }
     }

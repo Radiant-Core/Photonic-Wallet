@@ -8,16 +8,14 @@ import {
 import { buildUpdateTXOs } from "./updateTxos";
 import db from "@app/db";
 import ElectrumManager from "@app/electrum/ElectrumManager";
-import setSubscriptionStatus from "./setSubscriptionStatus";
+import setSubscriptionStatus, {
+  setSubscriptionError,
+} from "./setSubscriptionStatus";
 import { Worker } from "./electrumWorker";
 import { consolidationCheck } from "./consolidationCheck";
 import { updateRxdBalances } from "@app/utxos";
 import { arrayChunks } from "@lib/util";
-
-// Delay before re-running a sync that just failed. Without it a congested or
-// timing-out socket gets retried in a tight loop, piling more requests onto
-// the connection that's already failing (the Safari sync-storm feedback loop).
-const RETRY_BACKOFF_MS = 3000;
+import { SyncRetry } from "./syncRetry";
 
 export class RXDWorker implements Subscription {
   protected worker: Worker;
@@ -28,6 +26,9 @@ export class RXDWorker implements Subscription {
   protected receivedStatuses: string[] = [];
   protected address = "";
   protected scriptHash = "";
+  // Backoff + circuit breaker so a persistent failure neither hammers the
+  // server in a tight loop nor spins the UI "syncing" forever (see syncRetry).
+  protected retry = new SyncRetry();
 
   constructor(worker: Worker, electrum: ElectrumManager) {
     this.worker = worker;
@@ -82,6 +83,7 @@ export class RXDWorker implements Subscription {
     this.ready = false;
     this.lastReceivedStatus = status;
     let failed = false;
+    let retryDelay = 0;
 
     // R10 follow-up: electrum requests reject pending promises when the
     // socket closes mid-flight (heavy-history accounts trigger this when
@@ -104,11 +106,21 @@ export class RXDWorker implements Subscription {
       updateRxdBalances(this.address);
 
       setSubscriptionStatus(scriptHash, status, false, ContractType.RXD);
+      // Full sync succeeded — clear the failure streak and any error state.
+      this.retry.reset();
     } catch (err) {
       console.warn("[RXD] subscription update failed:", err);
       // Queue this status so the next ready window retries it.
       if (status) this.receivedStatuses.push(status);
       failed = true;
+      retryDelay = this.retry.fail();
+      // After repeated consecutive failures, surface an error sync state so the
+      // UI stops showing an indefinite "syncing" spinner. We keep retrying
+      // (backed off, capped) so the wallet still recovers on its own when the
+      // underlying condition clears.
+      if (this.retry.tripped) {
+        await setSubscriptionError(scriptHash, ContractType.RXD);
+      }
     } finally {
       this.ready = true;
     }
@@ -121,9 +133,9 @@ export class RXDWorker implements Subscription {
           this.onSubscriptionReceived(scriptHash, lastStatus).catch((e) =>
             console.warn("[RXD] requeued sync failed:", e)
           );
-        // Back off after a failure; retry immediately when the requeue is just
-        // draining a status that arrived while we were busy.
-        if (failed) setTimeout(retry, RETRY_BACKOFF_MS);
+        // Exponential backoff after a failure; retry immediately when the
+        // requeue is just draining a status that arrived while we were busy.
+        if (failed) setTimeout(retry, retryDelay);
         else retry();
       }
     }
