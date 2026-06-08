@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   VStack,
+  Box,
   FormControl,
   FormLabel,
   FormHelperText,
@@ -95,6 +96,11 @@ export default function AuthorityConfig({
               Tags this NFT with the Authority protocol. Keep it safe — whoever
               holds it can mint items gated on its reference. Select it later
               under “Authority gating” when minting those items.
+              <Box as="strong" display="block" mt={2}>
+                {
+                  "Soulbound authority can't be co-spent to gate mints — mint non-soulbound if you want to use it for authority gating."
+                }
+              </Box>
             </AlertDescription>
           </Alert>
 
