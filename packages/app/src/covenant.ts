@@ -30,6 +30,7 @@ import { reverseRef } from "@lib/Outpoint";
 import { Transaction } from "@radiant-core/radiantjs";
 import {
   ElectrumStatus,
+  ContractType,
   CovenantRecord,
   CovenantStatus,
   CovenantType,
@@ -102,6 +103,59 @@ export function listingDescriptorFromCovenant(
     terms: cov.terms,
   };
 }
+
+/**
+ * Make a covenant-held token render in the wallet NFT grid.
+ *
+ * The grid only shows glyphs that have `spent:0`, a `lastTxoId`, AND a matching
+ * `db.txo` row (see Wallet.tsx). A covenant token is never produced by the
+ * by-owner NFT subscription (it rests in a covenant script, not the plain
+ * nftScript), so it has no txo and would be invisible. We synthesise a `byRef`
+ * txo for the covenant UTXO and link the glyph to it — the same shape
+ * reconcileRefTrackedNfts uses for mutable singletons. `byRef:1` + the glyph's
+ * `swapPending` flag keep the scripthash sweep from re-marking it spent.
+ */
+export const materializeCovenantUtxo = async (o: {
+  ref: string; // BE display form
+  txid: string;
+  vout: number;
+  script: string;
+  value: number;
+  height?: number;
+}): Promise<void> => {
+  const height = o.height && o.height > 0 ? o.height : Infinity;
+  const existing = await db.txo
+    .where({ txid: o.txid, vout: o.vout })
+    .first()
+    .catch(() => undefined);
+  let txoId: number;
+  if (existing?.id !== undefined) {
+    await db.txo.update(existing.id, {
+      script: o.script,
+      value: o.value,
+      height,
+      spent: 0,
+      contractType: ContractType.NFT,
+      byRef: 1,
+    });
+    txoId = existing.id;
+  } else {
+    txoId = (await db.txo.put({
+      txid: o.txid,
+      vout: o.vout,
+      script: o.script,
+      value: o.value,
+      height,
+      spent: 0,
+      contractType: ContractType.NFT,
+      byRef: 1,
+    })) as number;
+  }
+  await db.glyph
+    .where({ ref: o.ref })
+    .modify({ lastTxoId: txoId, spent: 0, swapPending: true })
+    .catch(() => undefined);
+};
 
 /** Insert/replace a covenant record. Dedups on the unique [txid+vout] index. */
 export const recordCovenant = async (
@@ -239,7 +293,12 @@ export const discoverCovenants = async (address: string) => {
   ];
 
   for (const t of templates) {
-    let utxos: { tx_hash: string; tx_pos: number; value: number }[] = [];
+    let utxos: {
+      tx_hash: string;
+      tx_pos: number;
+      value: number;
+      height: number;
+    }[] = [];
     try {
       utxos = (await worker.getUtxosByScriptHash(t.scriptHash)) as typeof utxos;
     } catch {
@@ -247,13 +306,24 @@ export const discoverCovenants = async (address: string) => {
     }
 
     for (const u of utxos) {
-      // Skip outpoints we already track (steady state makes no tx fetches).
       const known = await db.covenant
         .where("[txid+vout]")
         .equals([u.tx_hash, u.tx_pos])
         .first()
         .catch(() => undefined);
-      if (known) continue;
+
+      // Already tracked: just heal visibility + height (no tx fetch needed).
+      if (known) {
+        await materializeCovenantUtxo({
+          ref: known.ref,
+          txid: u.tx_hash,
+          vout: u.tx_pos,
+          script: known.script,
+          value: u.value,
+          height: u.height,
+        });
+        continue;
+      }
 
       // Fetch the tx (hash-verified by the worker) and read the real script.
       let script: string | undefined;
@@ -294,11 +364,15 @@ export const discoverCovenants = async (address: string) => {
         ownerAddress: address,
       });
 
-      // Un-hide and mark covenant-held so the token shows in the wallet.
-      await db.glyph
-        .where({ ref: refBE })
-        .modify({ spent: 0, swapPending: true })
-        .catch(() => undefined);
+      // Synthesise the txo + link the glyph so the token renders in the grid.
+      await materializeCovenantUtxo({
+        ref: refBE,
+        txid: u.tx_hash,
+        vout: u.tx_pos,
+        script,
+        value: u.value,
+        height: u.height,
+      });
     }
   }
 };

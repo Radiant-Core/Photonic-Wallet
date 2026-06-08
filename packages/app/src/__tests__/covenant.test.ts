@@ -247,10 +247,17 @@ it("discoverCovenants adopts an owned soulbound UTXO and un-hides its glyph", as
   expect(cov?.txid).toBe(txid);
   expect(cov?.script).toBe(soulScript);
   expect(cov?.status).toBe(CovenantStatus.ACTIVE);
-  // ...and the glyph is now visible + flagged covenant-held.
+  // ...a byRef txo was synthesised for the covenant UTXO (so the grid renders it)...
+  const txo = await db.txo.where({ txid, vout: 0 }).first();
+  expect(txo).toBeTruthy();
+  expect(txo?.value).toBe(1);
+  expect(txo?.height).toBe(50);
+  expect(txo?.byRef).toBe(1);
+  // ...and the glyph is visible, linked to that txo, and flagged covenant-held.
   const glyph = await db.glyph.where({ ref: refBE }).first();
   expect(glyph?.spent).toBe(0);
   expect(glyph?.swapPending).toBe(true);
+  expect(glyph?.lastTxoId).toBe(txo?.id);
 
   // Idempotent: a second sweep doesn't create a duplicate (outpoint known).
   await discoverCovenants(owner);

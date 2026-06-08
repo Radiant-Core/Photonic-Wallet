@@ -63,7 +63,7 @@ import AuthorityConfig, {
   AuthorityTokenConfig,
 } from "@app/components/AuthorityConfig";
 import { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
-import { recordCovenant } from "@app/covenant";
+import { recordCovenant, materializeCovenantUtxo } from "@app/covenant";
 import { sanitizeSvgBytes, looksLikeSvg } from "@app/svgSanitize";
 //import { encodeCid, upload } from "@lib/ipfs";
 import { photonsToRXD } from "@lib/format";
@@ -1253,6 +1253,17 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           } catch (error) {
             console.debug("[Mint] covenant glyph fetch failed", error);
           }
+          // Synthesise a txo for the covenant UTXO + link the glyph so the
+          // token renders immediately in the NFT grid (a covenant token has no
+          // by-owner txo). Just-broadcast → mempool → height Infinity → shows
+          // "Pending" until a discovery sweep records the confirmed height.
+          await materializeCovenantUtxo({
+            ref: refBE,
+            txid: revealTxId,
+            vout: 0,
+            script: revealTx.outputs[0].script.toHex(),
+            value: revealTx.outputs[0].satoshis,
+          });
         }
 
         // If this mint had a timelock, persist the CEK locally so the owner
