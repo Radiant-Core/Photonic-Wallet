@@ -29,7 +29,6 @@ import { ElectrumUtxo } from "@lib/types";
 import { verifyTxInclusion } from "@lib/spv";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 import { ftScript, parseFtScript } from "@lib/script";
-import { reverseRef } from "@lib/Outpoint";
 import type { ElectrumRequester } from "@app/verifier";
 
 /**
@@ -218,8 +217,15 @@ export async function verifyFtRefCommitment(
   // Belt-and-braces: rebuilding the expected script from the on-chain ref and
   // our address must reproduce the exact on-chain script. This also pins the
   // P2PKH (address) portion, so a server can't swap the recipient either.
+  //
+  // `onChainRefLE` is returned by parseFtScript in the SAME byte orientation it
+  // is embedded in the script, and ftScript() embeds the ref it is given
+  // verbatim — so the ref must be passed through as-is. Do NOT reverseRef() it:
+  // that flips it to big-endian, the rebuilt script never matches, and EVERY
+  // legitimate FT UTXO is silently rejected (skipped in updateTxos), so FT
+  // balances vanish ecosystem-wide while NFT/RXD/WAVE (no such check) are fine.
   try {
-    const expected = ftScript(address, reverseRef(onChainRefLE));
+    const expected = ftScript(address, onChainRefLE);
     if (expected.toLowerCase() !== onChainScriptHex.toLowerCase()) {
       return false;
     }
