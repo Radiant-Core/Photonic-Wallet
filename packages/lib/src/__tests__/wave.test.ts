@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { encode, decode } from "cbor-x";
 import { GLYPH_NFT, GLYPH_MUT, GLYPH_WAVE } from "../protocols";
 import {
   isWaveDuplicate,
   getWaveDuplicateWarning,
   isWaveNameGlyph,
   getWaveDisplay,
+  createWaveNameMetadata,
 } from "../wave";
 
 describe("isWaveDuplicate", () => {
@@ -91,6 +93,38 @@ describe("isWaveNameGlyph", () => {
     expect(isWaveNameGlyph(null)).toBe(false);
     expect(isWaveNameGlyph(undefined)).toBe(false);
     expect(isWaveNameGlyph({})).toBe(false);
+  });
+});
+
+describe("createWaveNameMetadata desc handling", () => {
+  // Regression: a bare `desc: options?.desc` used to write an explicit `desc`
+  // key with value `undefined` when no description was supplied. cbor-x encodes
+  // JS `undefined` as CBOR simple value 23 (byte 0xf7), which JSON can't
+  // represent and which broke the downstream indexer (RXinDexer). This is the
+  // real-world `glyphgalaxy.rxd` bug — minted via the reveal path, which never
+  // passes `desc`.
+
+  it("omits the desc key entirely when no description is supplied", () => {
+    const meta = createWaveNameMetadata("glyphgalaxy.rxd", "1QEhBj9vj9mB2X93QaaxpELvrfbjtiwmeQ");
+    expect("desc" in meta).toBe(false);
+    expect(meta.desc).toBeUndefined();
+  });
+
+  it("includes desc when one is supplied", () => {
+    const meta = createWaveNameMetadata("alice.rxd", "addr1", { desc: "hello" });
+    expect(meta.desc).toBe("hello");
+  });
+
+  it("does not emit CBOR undefined (0xf7) and round-trips without undefined values", () => {
+    const meta = createWaveNameMetadata("glyphgalaxy.rxd", "addr1", {
+      data: { commitment: "ab", salt: "cd", commit_ref: "ef" },
+    });
+    const encoded: Uint8Array = encode(meta);
+    // 0xf7 is CBOR simple value 23 ("undefined"). It must never appear.
+    expect(Array.from(encoded)).not.toContain(0xf7);
+    const decoded = decode(encoded) as Record<string, unknown>;
+    expect(Object.values(decoded)).not.toContain(undefined);
+    expect("desc" in decoded).toBe(false);
   });
 });
 

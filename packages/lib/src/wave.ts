@@ -90,7 +90,12 @@ export function createWaveNameMetadata(
     v: 2,
     p: [GLYPH_NFT, GLYPH_MUT, GLYPH_WAVE],
     name: fullName,
-    desc: options?.desc,
+    // Only include `desc` when one was actually supplied. A bare `desc:
+    // options?.desc` writes an explicit `desc` key whose value is `undefined`
+    // when none is passed; cbor-x encodes JS `undefined` as CBOR simple value
+    // 23 (byte 0xf7), which is unrepresentable in JSON and breaks downstream
+    // indexers (RXinDexer). Spread-conditional keeps the key off entirely.
+    ...(options?.desc !== undefined && { desc: options.desc }),
     type: "wave_name",
     attrs: {
       name,
