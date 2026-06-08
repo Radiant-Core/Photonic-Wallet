@@ -185,6 +185,45 @@ export class Database extends Dexie {
     this.version(16).stores({
       covenant: "++id, type, ref, status, &[txid+vout], [status+type]",
     });
+
+    // Upgrade any saved direct-port radiantcore endpoints (50010/50011/50012)
+    // to the :443 endpoint. Those direct ElectrumX ports are firewalled to the
+    // public internet (2026-06-08) and routinely blocked on mobile/corporate
+    // networks; only wss://electrumx.radiantcore.org (Caddy :443) is reliably
+    // reachable. Older default lists shipped `:50011`, so existing wallets carry
+    // a stale, now-dead entry that the connection shuffle keeps retrying →
+    // "can't establish a connection" / FT balances never load. Rewrite + dedupe.
+    this.version(17).upgrade(async (transaction) => {
+      const current = (await transaction.table("kvp").get("servers")) as
+        | { mainnet?: string[]; testnet?: string[] }
+        | undefined;
+      if (!current) return;
+
+      const upgrade = (list: string[] = []) => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const s of list) {
+          const u =
+            /^wss?:\/\/(electrumx\.)?radiantcore\.org:(50010|50011|50012)$/.test(
+              s.trim()
+            )
+              ? "wss://electrumx.radiantcore.org"
+              : s;
+          if (!seen.has(u)) {
+            seen.add(u);
+            out.push(u);
+          }
+        }
+        return out;
+      };
+
+      transaction
+        .table("kvp")
+        .put(
+          { mainnet: upgrade(current.mainnet), testnet: current.testnet },
+          "servers"
+        );
+    });
   }
 }
 
