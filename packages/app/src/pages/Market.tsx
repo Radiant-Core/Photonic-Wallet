@@ -56,6 +56,7 @@ import {
   listingDescriptorFromCovenant,
   loading as covenantLoading,
   syncCovenants,
+  discoverCovenants,
 } from "@app/covenant";
 
 function royaltyTotal(terms?: CovenantRecord["terms"]): number {
@@ -199,6 +200,9 @@ export default function Market() {
 
   useEffect(() => {
     syncCovenants();
+    // Adopt covenant tokens (soulbound / authority-gated) owned by this wallet
+    // that aren't yet tracked locally (e.g. after a re-import).
+    discoverCovenants(wallet.value.address);
   }, [electrumStatus.value]);
 
   const buy = async () => {

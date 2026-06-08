@@ -250,6 +250,29 @@ export function authorityGatedNftScript(
   return script.toHex();
 }
 
+// Layout: OP_REQUIREINPUTREF <authRef> OP_DROP OP_PUSHINPUTREFSINGLETON <ref>
+// OP_DROP <P2PKH>  →  d1<authRef72>75 d8<ref72>75 76a914<pkh40>88ac
+const AUTHORITY_GATED_RE =
+  /^d1([0-9a-f]{72})75d8([0-9a-f]{72})7576a914([0-9a-f]{40})88ac$/;
+
+/** True if `scriptHex` is an authority-gated NFT covenant. */
+export function isAuthorityGatedScript(scriptHex: string): boolean {
+  return AUTHORITY_GATED_RE.test(scriptHex);
+}
+
+/**
+ * Parse an authority-gated NFT covenant into its parts. All refs are returned in
+ * the little-endian script form they appear in the script.
+ */
+export function parseAuthorityGatedScript(scriptHex: string): {
+  authorityRef?: string;
+  ref?: string;
+  pkh?: string;
+} {
+  const m = scriptHex.match(AUTHORITY_GATED_RE);
+  return { authorityRef: m?.[1], ref: m?.[2], pkh: m?.[3] };
+}
+
 /**
  * Check if token is an authority token
  */

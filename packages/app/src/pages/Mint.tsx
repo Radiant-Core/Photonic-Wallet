@@ -59,6 +59,9 @@ import Outpoint, { reverseRef } from "@lib/Outpoint";
 import { mintToken, RevealCovenant } from "@lib/mint";
 import RoyaltyConfig from "@app/components/RoyaltyConfig";
 import PolicyConfig from "@app/components/PolicyConfig";
+import AuthorityConfig, {
+  AuthorityTokenConfig,
+} from "@app/components/AuthorityConfig";
 import { GlyphV2Royalty, GlyphV2Policy } from "@lib/v2metadata";
 import { recordCovenant } from "@app/covenant";
 import { sanitizeSvgBytes, looksLikeSvg } from "@app/svgSanitize";
@@ -385,6 +388,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
     useState<GlyphV2Policy | undefined>(undefined)
   );
   const [authorityId, setAuthorityId] = reset(useState<string>(""));
+  // When set, mint this NFT AS an issuer authority token (adds GLYPH_AUTHORITY +
+  // authority attrs). Distinct from `authorityId`, which gates the mint on an
+  // EXISTING authority token.
+  const [authorityToken, setAuthorityToken] = reset(
+    useState<AuthorityTokenConfig | undefined>(undefined)
+  );
   const attrName = useRef<HTMLInputElement>(null);
   const attrValue = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = reset(
@@ -830,6 +839,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       protocols.push(GLYPH_MUT);
     }
 
+    // Mint this NFT as an issuer authority token (NFT only). PROTOCOL_DEPS
+    // requires GLYPH_NFT, which is always present here for non-fungible tokens.
+    if (tokenType !== "fungible" && authorityToken) {
+      protocols.push(GLYPH_AUTHORITY);
+    }
+
     if (encryptionResult) {
       protocols.push(GLYPH_ENCRYPTED);
       if (timelockState.enabled) {
@@ -1026,11 +1041,37 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         policy.executable === true ||
         policy.renderable === false);
 
+    // When minting an authority token, fold its attributes (issuer = this
+    // wallet) into the metadata `attrs`, where verifyAuthorityChain /
+    // validateAuthority read them. Merged OVER any user-supplied attrs.
+    const authorityAttrs =
+      tokenType !== "fungible" && authorityToken
+        ? {
+            issuer: wallet.value.address,
+            ...(authorityToken.scope ? { scope: authorityToken.scope } : {}),
+            ...(authorityToken.permissions?.length
+              ? { permissions: authorityToken.permissions }
+              : {}),
+            ...(authorityToken.expires
+              ? { expires: authorityToken.expires }
+              : {}),
+            revocable: authorityToken.revocable ?? true,
+          }
+        : undefined;
+
     const payload: SmartTokenPayload = {
       v: 2, // Glyph v2 version
       p: protocols,
       ...(Object.keys(args).length ? args : undefined),
       ...meta,
+      ...(authorityAttrs
+        ? {
+            attrs: {
+              ...((meta as { attrs?: Record<string, unknown> }).attrs ?? {}),
+              ...authorityAttrs,
+            },
+          }
+        : undefined),
       ...(royalty ? { royalty } : undefined),
       ...(includePolicy ? { policy } : undefined),
       ...(encryptedFileObj ?? fileObj),
@@ -2154,6 +2195,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     }
                   </FormHelperText>
                   <RoyaltyConfig value={royalty} onChange={setRoyalty} />
+                </FormControl>
+                <Divider />
+                <FormControl>
+                  <FormLabel>{"Authority token"}</FormLabel>
+                  <FormHelperText mb={3}>
+                    {
+                      "Mint this NFT as an issuer authority. You can then require it to be co-spent when minting gated items (Authority gating), so only its holder can mint them."
+                    }
+                  </FormHelperText>
+                  <AuthorityConfig
+                    value={authorityToken}
+                    onChange={setAuthorityToken}
+                  />
                 </FormControl>
                 <Divider />
                 {formData.immutable === "1" ? (

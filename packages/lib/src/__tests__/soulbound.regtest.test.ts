@@ -117,6 +117,23 @@ it.skipIf(process.env.REGTEST_E2E !== "1")(
     const other = newKey();
     await fund(owner.address, 100);
 
+    // Owner-stability for indexer discovery: the soulbound script must carry
+    // exactly ONE ref operand (the leading singleton). The indexer's zero_refs()
+    // zeroes INPUT_REF_OP operands but NOT PUSHDATA, so a second literal ref
+    // would make every token hash uniquely (undiscoverable by owner). Two
+    // soulbound scripts for the same owner must therefore be identical except
+    // for the 72 hex chars immediately after the leading d8.
+    {
+      const rA = "11".repeat(32) + "00000000";
+      const rB = "22".repeat(32) + "00000000";
+      const sA = soulboundNftScript(owner.address, rA);
+      const sB = soulboundNftScript(owner.address, rB);
+      expect(sA.slice(0, 2)).toBe("d8");
+      expect(sA.slice(2, 74)).toBe(rA);
+      expect(sB.slice(2, 74)).toBe(rB);
+      expect(sA.slice(74)).toBe(sB.slice(74)); // no other ref bytes differ
+    }
+
     // mint NFT to owner
     const mintRes = mintToken(
       "nft",

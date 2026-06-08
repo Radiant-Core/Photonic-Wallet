@@ -111,15 +111,27 @@ listing model chosen here.
 **Proof:** `soulbound.regtest.test.ts` ✅
 
 ```
-d8 <ref> 75                       OP_PUSHINPUTREFSINGLETON ref ; OP_DROP
+d8 <ref> 7c                       OP_PUSHINPUTREFSINGLETON ref ; OP_SWAP (lift the selector above the ref)
 63                                OP_IF      ── MOVE (selector OP_1)
+   75                               OP_DROP   (the ref)
    76 a914 <pkh> 88 ad              owner P2PKH (CHECKSIGVERIFY)
    00 ea c0 e9 87                   output[0] codescript == this input codescript (induction)
 67                                OP_ELSE    ── BURN (selector OP_0)
+   de 00 9c 69                      OP_REFOUTPUTCOUNT_OUTPUTS(ref)==0 VERIFY  (consumes the on-stack ref)
    76 a914 <pkh> 88 ad              owner P2PKH (CHECKSIGVERIFY)
-   <ref> de 00 9c                   OP_REFOUTPUTCOUNT_OUTPUTS(ref) == 0  (singleton destroyed)
+   51                               OP_1
 68                                OP_ENDIF
 ```
+
+**Owner-stable for indexer discovery:** the leading singleton is the **only** ref
+operand — the burn branch consumes that same on-stack ref rather than pushing a
+second literal. RXinDexer's `zero_refs()` zeroes `INPUT_REF_OP` operands but not
+`PUSHDATA`, so with a single ref operand every one of an owner's soulbound tokens
+collapses to one owner-stable scripthash (see §5.1). (The earlier draft pushed a
+second literal ref in the burn branch, which `zero_refs` would have left intact,
+giving each token a unique scripthash — fixed.) A regtest assertion checks two
+soulbound scripts for the same owner differ only in the 72 hex after the leading
+`d8`.
 
 The owner must sign on **both** paths. The MOVE path uses
 `OP_CODESCRIPTBYTECODE_OUTPUT(0) == OP_CODESCRIPTBYTECODE_UTXO(inputIndex)`
@@ -221,12 +233,45 @@ tracks covenant UTXOs **locally**, exactly the way PSRT swaps are tracked in
 Covenant tokens are managed from the **Marketplace** page (My Listings; a
 "Covenant tokens" section lists soulbound/authority-gated holdings).
 
-> **Indexer follow-up (full cross-device coverage):** local tracking covers
-> tokens this wallet listed/minted. Discovering covenant tokens received by, or
-> restored to, *another* wallet still requires RXinDexer to recognise the
-> covenant patterns (`isRoyaltySaleScript` / `isSoulboundScript` /
-> `authorityGatedNftScript`) and index them by owner. Tracked separately; the
-> wallet behaviour above is complete and self-contained without it.
+> **Indexer follow-up (full cross-device coverage) — investigated 2026-06-07.**
+> Local tracking covers tokens this wallet listed/minted. For discovering
+> covenant tokens on *another* / re-imported wallet, the good news is RXinDexer
+> needs **no new pattern code**: `electrumx/lib/script.py` `zero_refs()` is
+> **generic** — it zeroes every `INPUT_REF_OP` operand (`d0/d8/d1/d2/d3`) in any
+> script that contains a CHECKSIG-family op (incl. `OP_CHECKSIGVERIFY`), then
+> indexes the UTXO under `sha256(zero_refs(script))` (`block_processor.py`
+> `add_utxo_reads`). So each covenant template already collapses to **one
+> owner-stable scripthash**, and `base_locking_script()` additionally records
+> per-owner glyph ownership for templates ending in a standard P2PKH
+> (`…88ac` — royalty cancel branch, authority-gated).
+>
+> Two real caveats found:
+>   1. `zero_refs` does **not** zero `PUSHDATA`. The soulbound covenant therefore
+>      had to carry its ref **only** in `OP_PUSHINPUTREFSINGLETON` (no second
+>      literal) to be owner-stable — **fixed** in this repo (see §2).
+>   2. The covenant templates hash to scripthashes **different** from the plain
+>      `nftScript` one. **Shipped:** `discoverCovenants(address)` in
+>      `packages/app/src/covenant.ts` now sweeps the two owner-stable covenant
+>      scripthashes — `scriptHash(soulboundNftScript(addr, ZERO))` and
+>      `scriptHash(authorityGatedNftScript(addr, ZERO, ZERO))` — via
+>      `getUtxosByScriptHash`, verifies each hit by rebuilding the covenant from
+>      `(addr, parsed ref)` and byte-comparing the on-chain script (rejecting
+>      foreign/tampered entries), then seeds the glyph + `recordCovenant` +
+>      un-hides it. Run at connect-time (`electrum/Electrum.tsx`, main + swap
+>      address) and on the Marketplace page. No indexer change. Royalty
+>      *listings* stay on local tracking (their terms aren't zeroed, so each has
+>      a unique scripthash that can't be enumerated by owner). Unit-tested in
+>      `__tests__/covenant.test.ts` (adopts an owned soulbound UTXO + un-hides
+>      its glyph; rejects a foreign-owner script; idempotent).
+>
+> **Live-verified 2026-06-07** against the running RXinDexer (regtest, synced to
+> the local node): `lib/src/__tests__/covenantDiscovery.regtest.test.ts` mints a
+> soulbound and an authority-gated token and confirms the indexer's
+> `blockchain.scripthash.listunspent` returns each under exactly the owner-stable
+> scripthash `discoverCovenants()` computes — and that the soulbound is NOT
+> returned under the plain `nftScript` scripthash. So the full chain is proven:
+> indexer indexes covenant UTXOs by owner (live) + the app adopts/verifies them
+> (unit). No indexer code change was needed (RXinDexer `zero_refs` is generic).
 
 ### 5.2 Royalty marketplace UI
 
@@ -249,3 +294,23 @@ input and re-created as an output. Threaded from `Mint.tsx` (policy toggle +
 authority selector; immutable NFTs only). Minted covenant tokens are recorded via
 §5.1 so they stay visible. Proven on-chain in
 `mintCovenant.regtest.test.ts` (direct soulbound + authority mint emission).
+
+### 5.4 Authority-token creation in the NFT flow
+
+Creating the issuer **authority token itself** is now part of the normal NFT
+creation flow (previously only the standalone `AuthorityManager` page). A reusable
+`components/AuthorityConfig.tsx` ("Make this an Authority token" + scope /
+permissions / expires / revocable) is rendered in `Mint.tsx`'s NFT section; when
+on, the mint adds `GLYPH_AUTHORITY` to the protocol list and folds
+`{ issuer: <this wallet>, scope?, permissions?, expires?, revocable }` into the
+metadata `attrs` (where `verifyAuthorityChain` / `validateAuthority` read them).
+The result is an ordinary `nftScript` NFT (no covenant needed to *create* an
+authority) — its power is that other mints can require it via §5.3's "Authority
+gating", and it then appears in that selector (the dropdown filters glyphs whose
+`p` includes `GLYPH_AUTHORITY`).
+
+Tested: `AuthorityConfig.test.tsx` (toggle/parse/ISO/revocable → emitted config)
+and `lib/.../authorityToken.regtest.test.ts` (mints the exact flow payload;
+confirms it confirms on-chain, decodes back as `p:[NFT, AUTHORITY]` + issuer, and
+that `verifyAuthorityChain` accepts an item issued by it while rejecting a forged
+claim).

@@ -14,15 +14,24 @@ import { ElectrumStatus } from "@app/types";
 vi.unmock("@app/db");
 
 // Mock the electrum worker proxy (real module spins up a Worker, unavailable in
-// jsdom). syncCovenants only calls getUtxosByScriptHash. vi.hoisted lets the
-// mock factory (hoisted to the top) reference the fn safely.
-const { getUtxosByScriptHash } = vi.hoisted(() => ({
+// jsdom). syncCovenants uses getUtxosByScriptHash; discoverCovenants also uses
+// getTransaction + fetchGlyph. vi.hoisted lets the mock factory (hoisted to the
+// top) reference the fns safely.
+const { getUtxosByScriptHash, getTransaction, fetchGlyph } = vi.hoisted(() => ({
   getUtxosByScriptHash: vi.fn(),
+  getTransaction: vi.fn(),
+  fetchGlyph: vi.fn(),
 }));
 vi.mock("@app/electrum/Electrum", () => ({
-  electrumWorker: { value: { getUtxosByScriptHash } },
+  electrumWorker: {
+    value: { getUtxosByScriptHash, getTransaction, fetchGlyph },
+  },
 }));
 
+import rjs from "@radiant-core/radiantjs";
+import { soulboundNftScript } from "@lib/soulbound";
+import { reverseRef } from "@lib/Outpoint";
+import { scriptHash as scriptToHash } from "@lib/script";
 import db from "@app/db";
 import { electrumStatus } from "@app/signals";
 import {
@@ -34,11 +43,36 @@ import {
 import {
   recordCovenant,
   syncCovenants,
+  discoverCovenants,
   encodeListingDescriptor,
   decodeListingDescriptor,
   listingDescriptorFromCovenant,
   ListingDescriptor,
 } from "@app/covenant";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const { PrivateKey, Networks } = rjs as any;
+
+// Minimal valid serialized tx (1 dummy input, 1 output) carrying `scriptHex` at
+// vout 0 — enough for `new Transaction(hex).outputs[0].script`.
+function makeTxHex(scriptHex: string, value: number): string {
+  const valueLE = Buffer.alloc(8);
+  valueLE.writeBigUInt64LE(BigInt(value));
+  const scriptBuf = Buffer.from(scriptHex, "hex");
+  return (
+    "01000000" + // version
+    "01" + // vin count
+    "00".repeat(32) + // prev txid
+    "ffffffff" + // prev vout
+    "00" + // scriptSig len 0
+    "ffffffff" + // sequence
+    "01" + // vout count
+    valueLE.toString("hex") +
+    scriptBuf.length.toString(16).padStart(2, "0") + // scriptPubKey len (<253)
+    scriptHex +
+    "00000000" // locktime
+  );
+}
 
 // A well-formed (non-empty) script hex; scriptHash() only needs valid hex.
 const SCRIPT = "d8" + "ab".repeat(36) + "75ac";
@@ -58,6 +92,8 @@ beforeEach(async () => {
   await db.covenant.clear();
   await db.glyph.clear();
   getUtxosByScriptHash.mockReset();
+  getTransaction.mockReset();
+  fetchGlyph.mockReset();
   electrumStatus.value = ElectrumStatus.CONNECTED;
 });
 
@@ -167,6 +203,76 @@ it("syncCovenants resolves a listing whose covenant UTXO is gone and clears the 
   expect(row.status).toBe(CovenantStatus.RESOLVED);
   const glyph = await db.glyph.where({ ref: REF }).first();
   expect(glyph?.swapPending).toBe(false);
+});
+
+it("discoverCovenants adopts an owned soulbound UTXO and un-hides its glyph", async () => {
+  // A real, valid address so soulboundNftScript() can build its P2PKH branches.
+  const owner = PrivateKey.fromRandom(Networks.testnet)
+    .toAddress(Networks.testnet)
+    .toString();
+  const refLE = "ab".repeat(32) + "00000000";
+  const refBE = reverseRef(refLE);
+  const soulScript = soulboundNftScript(owner, refLE);
+  const txid = "f0".repeat(32);
+
+  // Pre-seed a HIDDEN glyph row (as if seen once then lost from the active set).
+  await db.glyph.put({
+    ref: refBE,
+    tokenType: SmartTokenType.NFT,
+    spent: 1,
+    fresh: 0,
+    name: "Soulbound",
+    type: "object",
+    description: "",
+    author: "",
+    container: "",
+    attrs: {},
+    swapPending: false,
+  });
+
+  // Indexer returns the soulbound UTXO under the owner-stable scripthash; the
+  // authority sweep's scripthash returns nothing.
+  const soulHash = scriptToHash(soulboundNftScript(owner, "00".repeat(36)));
+  getUtxosByScriptHash.mockImplementation(async (sh: string) =>
+    sh === soulHash ? [{ tx_hash: txid, tx_pos: 0, height: 50, value: 1 }] : []
+  );
+  getTransaction.mockResolvedValue(makeTxHex(soulScript, 1));
+  fetchGlyph.mockResolvedValue(undefined);
+
+  await discoverCovenants(owner);
+
+  // A covenant record was adopted...
+  const cov = await db.covenant.where({ ref: refBE }).first();
+  expect(cov?.type).toBe(CovenantType.SOULBOUND);
+  expect(cov?.txid).toBe(txid);
+  expect(cov?.script).toBe(soulScript);
+  expect(cov?.status).toBe(CovenantStatus.ACTIVE);
+  // ...and the glyph is now visible + flagged covenant-held.
+  const glyph = await db.glyph.where({ ref: refBE }).first();
+  expect(glyph?.spent).toBe(0);
+  expect(glyph?.swapPending).toBe(true);
+
+  // Idempotent: a second sweep doesn't create a duplicate (outpoint known).
+  await discoverCovenants(owner);
+  expect(await db.covenant.where({ ref: refBE }).count()).toBe(1);
+});
+
+it("discoverCovenants ignores a UTXO whose script isn't our covenant", async () => {
+  const owner = PrivateKey.fromRandom(Networks.testnet)
+    .toAddress(Networks.testnet)
+    .toString();
+  const attacker = PrivateKey.fromRandom(Networks.testnet)
+    .toAddress(Networks.testnet)
+    .toString();
+  // A soulbound script for a DIFFERENT owner (rebuild check must reject it).
+  const foreign = soulboundNftScript(attacker, "cc".repeat(32) + "00000000");
+  getUtxosByScriptHash.mockResolvedValue([
+    { tx_hash: "ab".repeat(32), tx_pos: 0, height: 1, value: 1 },
+  ]);
+  getTransaction.mockResolvedValue(makeTxHex(foreign, 1));
+
+  await discoverCovenants(owner);
+  expect(await db.covenant.count()).toBe(0);
 });
 
 it("syncCovenants leaves a listing ACTIVE while its covenant UTXO is still unspent", async () => {

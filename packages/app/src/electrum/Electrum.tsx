@@ -9,6 +9,7 @@ import { wrap } from "comlink";
 import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
 import type { VaultRecord } from "@app/types";
+import { discoverCovenants } from "@app/covenant";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
 // TEMP: Force dedicated worker for debugging (SharedWorker logs go to separate console)
@@ -195,6 +196,20 @@ export default function Electrum() {
               `[Electrum] Discovered ${swapCount} vault(s) on swap address`
             );
           }
+        }
+
+        // Discover covenant-held tokens (soulbound / authority-gated) owned by
+        // this wallet from the indexer, so they appear after a re-import / on a
+        // fresh device even without local covenant tracking. Owner-stable
+        // scripthashes only — royalty listings stay on local tracking. Failures
+        // are non-fatal (best-effort, retried on next connect).
+        try {
+          await discoverCovenants(wallet.value.address);
+          if (wallet.value.swapAddress) {
+            await discoverCovenants(wallet.value.swapAddress);
+          }
+        } catch (covErr) {
+          console.warn("[Electrum] Covenant discovery failed:", covErr);
         }
       } catch (error) {
         console.warn("[Electrum] Vault discovery failed:", error);

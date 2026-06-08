@@ -19,15 +19,27 @@
  */
 import { signal } from "@preact/signals-react";
 import { scriptHash as scriptToHash } from "@lib/script";
+import { soulboundNftScript, parseSoulboundRef } from "@lib/soulbound";
+import {
+  authorityGatedNftScript,
+  parseAuthorityGatedScript,
+} from "@lib/authority";
+import { reverseRef } from "@lib/Outpoint";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — radiantjs ships partial types
+import { Transaction } from "@radiant-core/radiantjs";
 import {
   ElectrumStatus,
   CovenantRecord,
   CovenantStatus,
+  CovenantType,
   CovenantRoyaltyTerms,
 } from "./types";
 import db from "./db";
 import { electrumWorker } from "./electrum/Electrum";
 import { electrumStatus } from "./signals";
+
+const ZERO_REF = "00".repeat(36);
 
 /**
  * A shareable royalty listing. The royalty covenant needs no maker signature —
@@ -163,5 +175,130 @@ export const syncCovenants = async () => {
     console.error("[covenant] reconcile failed", e);
   } finally {
     loading.value = false;
+  }
+};
+
+/**
+ * Discover covenant-held tokens this wallet OWNS from the indexer — the
+ * cross-device / re-import counterpart to local `recordCovenant` tracking.
+ *
+ * Why this works without any indexer change: RXinDexer indexes every UTXO under
+ * `sha256(zero_refs(script))`, and `zero_refs` zeroes every input-ref OPERAND in
+ * any CHECKSIG-bearing script. The *soulbound* and *authority-gated* covenants
+ * carry their ref(s) only in `OP_PUSHINPUTREFSINGLETON`/`OP_REQUIREINPUTREF`
+ * (no second literal push), so every one of an owner's tokens of a given
+ * covenant template collapses to ONE owner-stable scripthash — exactly the
+ * scripthash of the template built with a zero ref. We subscribe-by-poll to
+ * those two scripthashes and adopt anything found that we don't already track.
+ *
+ * Royalty *listings* are intentionally excluded: their terms (price, royalty
+ * amount/recipient) are baked into the script and are NOT zeroed, so each
+ * listing has a unique scripthash that can't be enumerated by owner. Listings
+ * are recovered from local tracking (`db.covenant`) + their shareable
+ * descriptors instead.
+ *
+ * Each candidate is verified by rebuilding the covenant from `(this address,
+ * parsed ref)` and byte-comparing it to the actual on-chain output script, so a
+ * hostile/buggy indexer can't inject foreign or malformed entries.
+ */
+export const discoverCovenants = async (address: string) => {
+  if (!address) return;
+  if (electrumStatus.value !== ElectrumStatus.CONNECTED) return;
+  const worker = electrumWorker.value;
+
+  const templates: {
+    type: CovenantType;
+    scriptHash: string;
+    // Returns the LE ref iff `script` is genuinely our covenant for `address`.
+    verify: (script: string) => string | undefined;
+  }[] = [
+    {
+      type: CovenantType.SOULBOUND,
+      scriptHash: scriptToHash(soulboundNftScript(address, ZERO_REF)),
+      verify: (script) => {
+        const ref = parseSoulboundRef(script);
+        return ref && soulboundNftScript(address, ref) === script
+          ? ref
+          : undefined;
+      },
+    },
+    {
+      type: CovenantType.AUTHORITY_GATED,
+      scriptHash: scriptToHash(
+        authorityGatedNftScript(address, ZERO_REF, ZERO_REF)
+      ),
+      verify: (script) => {
+        const { ref, authorityRef } = parseAuthorityGatedScript(script);
+        return ref &&
+          authorityRef &&
+          authorityGatedNftScript(address, ref, authorityRef) === script
+          ? ref
+          : undefined;
+      },
+    },
+  ];
+
+  for (const t of templates) {
+    let utxos: { tx_hash: string; tx_pos: number; value: number }[] = [];
+    try {
+      utxos = (await worker.getUtxosByScriptHash(t.scriptHash)) as typeof utxos;
+    } catch {
+      continue; // transient — retry next sweep
+    }
+
+    for (const u of utxos) {
+      // Skip outpoints we already track (steady state makes no tx fetches).
+      const known = await db.covenant
+        .where("[txid+vout]")
+        .equals([u.tx_hash, u.tx_pos])
+        .first()
+        .catch(() => undefined);
+      if (known) continue;
+
+      // Fetch the tx (hash-verified by the worker) and read the real script.
+      let script: string | undefined;
+      try {
+        const hex = await worker.getTransaction(u.tx_hash);
+        if (!hex) continue;
+        script = new Transaction(hex).outputs[u.tx_pos]?.script?.toHex();
+      } catch {
+        continue;
+      }
+      if (!script) continue;
+
+      const refLE = t.verify(script);
+      if (!refLE) continue; // not our covenant / tampered — never adopt
+
+      const refBE = reverseRef(refLE);
+
+      // Seed glyph metadata if we've never seen this token.
+      const existing = await db.glyph
+        .where({ ref: refBE })
+        .first()
+        .catch(() => undefined);
+      if (!existing) {
+        try {
+          await worker.fetchGlyph(refBE);
+        } catch {
+          // Metadata is best-effort; the covenant row below still records it.
+        }
+      }
+
+      await recordCovenant({
+        type: t.type,
+        ref: refBE,
+        txid: u.tx_hash,
+        vout: u.tx_pos,
+        script,
+        value: u.value,
+        ownerAddress: address,
+      });
+
+      // Un-hide and mark covenant-held so the token shows in the wallet.
+      await db.glyph
+        .where({ ref: refBE })
+        .modify({ spent: 0, swapPending: true })
+        .catch(() => undefined);
+    }
   }
 };

@@ -20,6 +20,9 @@ const OP_HASH160 = "a9";
 const OP_EQUAL = "87";
 const OP_EQUALVERIFY = "88";
 const OP_NUMEQUAL = "9c";
+const OP_VERIFY = "69";
+const OP_SWAP = "7c";
+const OP_1 = "51";
 const OP_CHECKSIGVERIFY = "ad";
 const OP_0 = "00";
 const OP_INPUTINDEX = "c0";
@@ -79,27 +82,41 @@ export function soulboundNftScript(ownerAddress: string, ref: string): string {
   const ownerAuth =
     OP_DUP + OP_HASH160 + pushData(pkh) + OP_EQUALVERIFY + OP_CHECKSIGVERIFY;
 
-  // MOVE: output[0] code == this input's code (re-lock to same soulbound).
+  // MOVE branch (selector OP_1): drop the ref, require the owner's signature,
+  // then output[0] code == this input's code (induction → re-lock to the SAME
+  // soulbound script for the SAME owner).
   const moveBranch =
+    OP_DROP +
+    ownerAuth +
     OP_0 +
     OP_CODESCRIPTBYTECODE_OUTPUT +
     OP_INPUTINDEX +
     OP_CODESCRIPTBYTECODE_UTXO +
     OP_EQUAL;
 
-  // BURN: the singleton ref must not appear in any output.
+  // BURN branch (selector OP_0): consume the on-stack singleton ref to assert it
+  // appears in zero outputs (token destroyed), then require the owner's signature.
   const burnBranch =
-    pushData(ref) + OP_REFOUTPUTCOUNT_OUTPUTS + OP_0 + OP_NUMEQUAL;
+    OP_REFOUTPUTCOUNT_OUTPUTS +
+    OP_0 +
+    OP_NUMEQUAL +
+    OP_VERIFY +
+    ownerAuth +
+    OP_1;
 
+  // The leading singleton ref is the ONLY ref operand in the whole script (no
+  // second literal push). The indexer's zero_refs() zeroes INPUT_REF_OP operands
+  // (not PUSHDATA), so keeping the ref solely in OP_PUSHINPUTREFSINGLETON makes
+  // every owner's soulbound token collapse to ONE owner-stable scripthash —
+  // discoverable by a per-owner subscription, not just local tracking. OP_SWAP
+  // lifts the scriptSig selector above the pushed ref so OP_IF consumes it.
   const hex =
     OP_PUSHINPUTREFSINGLETON +
     ref +
-    OP_DROP +
+    OP_SWAP +
     OP_IF +
-    ownerAuth +
     moveBranch +
     OP_ELSE +
-    ownerAuth +
     burnBranch +
     OP_ENDIF;
 
@@ -108,7 +125,7 @@ export function soulboundNftScript(ownerAddress: string, ref: string): string {
 }
 
 // Recognise a soulbound covenant and recover its ref (for wallet discovery).
-const SOULBOUND_RE = /^d8([0-9a-f]{72})7563(?:.|\n)*68$/;
+const SOULBOUND_RE = /^d8([0-9a-f]{72})7c63(?:.|\n)*68$/;
 export function isSoulboundScript(scriptHex: string): boolean {
   return SOULBOUND_RE.test(scriptHex);
 }
