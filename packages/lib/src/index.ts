@@ -42,6 +42,7 @@ export {
   getWaveDuplicateWarning,
 } from "./wave";
 export * from "./crypto";
+export * from "./sign";
 export * from "./encryption";
 export * from "./timelock";
 export * from "./reveal";

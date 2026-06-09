@@ -16,6 +16,7 @@
     "./types": "./src/types.ts",
     "./protocols": "./src/protocols.ts",
     "./transfer": "./src/transfer.ts",
+    "./sign": "./src/sign.ts",
     "./electrumWsClient": "./src/electrumWsClient.ts"
   },
   "scripts": {

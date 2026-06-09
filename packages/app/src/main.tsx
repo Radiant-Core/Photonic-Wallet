@@ -56,6 +56,7 @@ import VaultPage from "./pages/Vault";
 import Market from "./pages/Market";
 import WaveRegister from "./pages/WaveRegister";
 import WaveNames from "./pages/WaveNames";
+import Connect from "./pages/Connect";
 
 dayjs.extend(localizedFormat);
 
@@ -427,6 +428,10 @@ const router = createHashRouter([
           {
             path: "/market",
             element: <Market />,
+          },
+          {
+            path: "/connect",
+            element: <Connect />,
           },
           {
             path: "/history",

@@ -13,7 +13,7 @@ import StatusBar from "./StatusBar";
 import { language, openMenu } from "@app/signals";
 import { RiSwap2Line } from "react-icons/ri";
 import { HiOutlineAtSymbol } from "react-icons/hi";
-import { MdHome, MdSell, MdStorefront } from "react-icons/md";
+import { MdHome, MdSell, MdStorefront, MdLink } from "react-icons/md";
 import {
   TbTriangleSquareCircle,
   TbCoins,
@@ -120,6 +120,9 @@ export default function SideBar({ ...rest }: GridProps) {
         </MenuButton>
         <MenuButton to="/vault" leftIcon={<Icon as={TbLock} boxSize={5} />}>
           {"Vault"}
+        </MenuButton>
+        <MenuButton to="/connect" leftIcon={<Icon as={MdLink} boxSize={5} />}>
+          {"Connect & Sign"}
         </MenuButton>
       </SimpleGrid>
       <Box />
