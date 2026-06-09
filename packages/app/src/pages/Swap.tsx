@@ -61,12 +61,41 @@ import {
   getSwapRpcConfig,
   isSwapIndexAvailable,
   setSwapRpcConfig,
+  RSWP_VERSION_V2,
+  RSWP_VERSION_V3,
+  RSWP_FLAG_HAS_EXPIRY,
 } from "@app/swapBroadcast";
+import { encodeExpiryHeight } from "@lib/swapRefundCovenant";
 import rjs from "@radiant-core/radiantjs";
 import { buildTx } from "@lib/tx";
 import { findTokenOutput } from "@lib/tx";
 import { Buffer } from "buffer";
 import Big from "big.js";
+
+// Number of blocks ahead (~30 days at ~600s/block) used as the default
+// maker-chosen consensus expiry for RSWP v3 offers. Mirrors the soft-expiry
+// window in swapExpiry.ts so the on-chain and client expiries line up.
+const SWAP_DEFAULT_EXPIRY_AHEAD_BLOCKS = 4320;
+
+// Whether to reserve the offered asset into the RSWP v3 timelocked-refund
+// COVENANT (@lib/swapRefundCovenant) rather than the plain swap-address script.
+//
+// OFF by default and intentionally so: reserving into the covenant changes the
+// reserved UTXO's on-chain shape, which the wallet's existing swap *discovery*
+// (electrumWorker.findSwaps), maker *cancellation* (swap.ts cancelSwap),
+// pending-swap *reconciliation* (swap.ts syncSwaps), and the taker *completion*
+// path (SwapLoad.tsx, which reuses the maker scriptSig verbatim) all assume to
+// be a plain ftScript/nftScript/p2pkh at the swap address. Those paths must be
+// made covenant-aware (and the Radiant Core swapindex + RXinDexer v3 parsers
+// shipped) BEFORE this is flipped on — see the cross-repo coordination note in
+// docs/swap-offer-expiry-cancellation.md §4. The covenant + v3 wire format are
+// fully implemented and regtest-proven (packages/lib/src/swapRefundCovenant.ts
+// + its .regtest.test.ts); only the wallet-wide migration of those four v2
+// assumptions remains, which is deliberately out of scope for this change.
+//
+// While OFF, the maker publishes a plain v2 advertisement (no on-chain expiry)
+// and the existing soft expiry (swapExpiry.ts) applies, exactly as before.
+const SWAP_RESERVE_INTO_REFUND_COVENANT = false;
 
 // Decimal-safe RXD -> photons conversion. Plain `rxd * 100000000` on a JS float
 // yields non-integer photon values (e.g. 0.07 -> 7000000.000000001); Big()
@@ -290,6 +319,24 @@ function encodeScriptNum(value: number) {
   return Buffer.from(result);
 }
 
+/**
+ * Build the RSWP swap advertisement OP_RETURN.
+ *
+ * v2 layout (legacy, no expiry):
+ *   "RSWP" 0x02 <flags:1> <offeredType:1> 0x01 <tokenid:32LE>
+ *     [wantTokenid:32LE if flags&0x01] <txid:32LE> <vout> <priceTerms> <signature>
+ *
+ * v3 layout (this build) — adds a 4-byte LE `expiry_height` immediately AFTER
+ * the want-token id (i.e. before the outpoint) and sets flag bit 0x02:
+ *   "RSWP" 0x03 <flags:1> <offeredType:1> 0x01 <tokenid:32LE>
+ *     [wantTokenid:32LE if flags&0x01] <expiry_height:4LE if flags&0x02>
+ *     <txid:32LE> <vout> <priceTerms> <signature>
+ *
+ * Parsers that understand only v2 will see version byte 0x03 and must skip the
+ * advertisement (forward-incompatible) — hence the cross-repo coordination note
+ * in docs/swap-offer-expiry-cancellation.md §4: land the index/RXinDexer v3
+ * parsers BEFORE makers publish v3. `signature` is read to the end of payload.
+ */
 function buildSwapAdvertisementScript({
   offeredType,
   offeredTokenId,
@@ -298,6 +345,7 @@ function buildSwapAdvertisementScript({
   offeredVout,
   priceTerms,
   signature,
+  expiryHeight,
 }: {
   offeredType: ContractType;
   offeredTokenId: string;
@@ -306,19 +354,34 @@ function buildSwapAdvertisementScript({
   offeredVout: number;
   priceTerms: string;
   signature: string;
+  /** Absolute block height for RSWP v3; omit/undefined to emit a v2 advert. */
+  expiryHeight?: number;
 }) {
   const hasWantToken = wantTokenId !== "00".repeat(32);
+  const hasExpiry =
+    expiryHeight !== undefined && Number.isInteger(expiryHeight) && expiryHeight > 0;
+  const version = hasExpiry ? RSWP_VERSION_V3 : RSWP_VERSION_V2;
+  const flags =
+    (hasWantToken ? 0x01 : 0x00) | (hasExpiry ? RSWP_FLAG_HAS_EXPIRY : 0x00);
+
   const script = new Script()
     .add(Opcode.OP_RETURN)
     .add(Buffer.from("RSWP"))
-    .add(Buffer.from([0x02]))
-    .add(Buffer.from([hasWantToken ? 0x01 : 0x00]))
+    .add(Buffer.from([version]))
+    .add(Buffer.from([flags]))
     .add(Buffer.from([offeredType]))
     .add(Buffer.from([0x01]))
     .add(Buffer.from(offeredTokenId, "hex").reverse());
 
   if (hasWantToken) {
     script.add(Buffer.from(wantTokenId, "hex").reverse());
+  }
+
+  if (hasExpiry) {
+    // 4-byte little-endian unsigned block height.
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(expiryHeight, 0);
+    script.add(buf);
   }
 
   return script
@@ -657,9 +720,17 @@ function Swap() {
     // cancellation nonce. It stays broadcastable by anyone who holds it — at the
     // originally-signed price — until the maker self-spends the reserved UTXO to
     // cancel it (see swap.ts `cancelSwap`, surfaced as one-click Cancel in the
-    // Pending Swaps and Open Orders > My Public Offers views). A consensus-level
-    // expiry (RSWP v3 `expiry_height` + a timelocked-refund covenant) is the
-    // documented follow-up. Until then the mitigations are:
+    // Pending Swaps and Open Orders > My Public Offers views).
+    //
+    // The consensus-level expiry (RSWP v3 `expiry_height` + a timelocked-refund
+    // covenant) is now IMPLEMENTED and regtest-proven in @lib/swapRefundCovenant,
+    // and the taker side hard-refuses past-expiry offers (OpenOrders +
+    // swapBroadcast `isOfferExpiredOnChain`). Reserving INTO that covenant here
+    // is still gated OFF (SWAP_RESERVE_INTO_REFUND_COVENANT) until the wallet's
+    // discovery/cancel/sync/load paths are made covenant-aware and the Radiant
+    // Core swapindex / RXinDexer v3 parsers ship — see
+    // docs/swap-offer-expiry-cancellation.md §7. While gated off, the live
+    // mitigations remain:
     //   1. a maker risk warning (below, esp. for public/broadcast offers),
     //   2. one-click cancellation, and
     //   3. a client/index *soft* expiry that hides + flags stale offers
@@ -703,6 +774,29 @@ function Swap() {
         const makerOutputs = [
           { script: psrtOutput.script, value: psrtOutput.value },
         ];
+
+        // RSWP v3 consensus expiry. We only ADVERTISE an `expiry_height` when
+        // the reserved UTXO is actually held in the timelocked-refund covenant
+        // that enforces it — otherwise the offer would claim an on-chain expiry
+        // it cannot keep. Until the covenant reservation + the cancel/sync/load
+        // migration land (see SWAP_RESERVE_INTO_REFUND_COVENANT), this resolves
+        // to `undefined` and the advertisement is emitted as v2 (the existing
+        // soft expiry in swapExpiry.ts continues to apply).
+        let expiryHeight: number | undefined;
+        if (SWAP_RESERVE_INTO_REFUND_COVENANT) {
+          try {
+            const tip = await electrumWorker.value.getBlockHeight();
+            const candidate = tip + SWAP_DEFAULT_EXPIRY_AHEAD_BLOCKS;
+            // Validate against the covenant's encoder (rejects timestamp-range
+            // / non-positive heights) so the advert and covenant never diverge.
+            encodeExpiryHeight(candidate);
+            expiryHeight = candidate;
+          } catch (e) {
+            console.debug("[swap] could not derive v3 expiry height; v2 advert", e);
+            expiryHeight = undefined;
+          }
+        }
+
         const advertisementScript = buildSwapAdvertisementScript({
           offeredType: from,
           offeredTokenId,
@@ -711,6 +805,7 @@ function Swap() {
           offeredVout: input.vout,
           priceTerms: encodePriceTermsOutputs(makerOutputs),
           signature: new rjs.Transaction(rawPsrt).inputs[0].script.toHex(),
+          expiryHeight,
         }).toHex();
 
         const funded = fundTx(

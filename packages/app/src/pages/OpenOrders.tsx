@@ -81,6 +81,7 @@ import {
   getSwapIndexInfo,
   getSwapRpcConfig,
   setSwapRpcConfig,
+  isOfferExpiredOnChain,
 } from "@app/swapBroadcast";
 import { isOfferStale, offerAgeLabel } from "@app/swapExpiry";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -1054,9 +1055,15 @@ export default function OpenOrders({
     // we know the chain tip; an undateable offer is never hidden. This does not
     // bind an attacker holding a raw PSRT (see swapExpiry.ts) — it is taker
     // protection plus a cleaner default book.
+    //
+    // RSWP v3 consensus expiry: an offer past its on-chain `expiry_height` is
+    // hidden by the SAME toggle (it is at least as stale as a soft-expired one);
+    // unlike soft expiry, it is also hard-blocked at fill time (handleAcceptOrder).
     if (!showExpired && currentHeight > 0) {
       result = result.filter(
-        (order) => !isOfferStale(order.offer.block_height, currentHeight)
+        (order) =>
+          !isOfferStale(order.offer.block_height, currentHeight) &&
+          !isOfferExpiredOnChain(order.offer, currentHeight)
       );
     }
 
@@ -1182,6 +1189,21 @@ export default function OpenOrders({
   const handleAcceptOrder = async (order: ParsedOrder) => {
     if (wallet.value.locked || !wallet.value.wif) {
       openModal.value = { modal: "unlock" };
+      return;
+    }
+
+    // RSWP v3 CONSENSUS expiry (hard block). An offer carrying an
+    // `expiry_height` is held in a timelocked-refund covenant and becomes
+    // unfillable once the chain reaches that height — the maker can (and will)
+    // reclaim the reserved asset, so any completion we build would be a
+    // guaranteed double-spend race we should never broadcast. Refuse outright.
+    // (v2 offers have no expiry_height and fall through to the soft check.)
+    if (isOfferExpiredOnChain(order.offer, currentHeight)) {
+      toast({
+        status: "error",
+        title: "Offer has expired",
+        description: `This offer expired at block ${order.offer.expiry_height?.toLocaleString()} (chain tip ${currentHeight.toLocaleString()}). The maker can reclaim the reserved asset, so it can no longer be filled.`,
+      });
       return;
     }
 

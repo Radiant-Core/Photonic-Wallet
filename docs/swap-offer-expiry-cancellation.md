@@ -1,6 +1,8 @@
 # Swap-offer expiry & cancellation
 
-Status: **Phase 1 shipped (this PR). Phase 2 = follow-up protocol change.**
+Status: **Phase 1 shipped. Phase 2 protocol primitives implemented +
+regtest-proven (RSWP v3 wire format + timelocked-refund covenant); the wallet
+covenant-reservation migration + cross-repo index parsers remain (see §7).**
 
 This document resolves the `TODO(security)` previously at
 `packages/app/src/pages/Swap.tsx` (PSRT construction) and records the design for
@@ -163,6 +165,58 @@ Bumping the version without updating a consumer will make that consumer drop or
 misparse v3 offers. Land the parsers first (v2 + v3 accepted), then the wallet
 builder, then enable maker-chosen expiry in the UI.
 
+### Implemented RSWP v3 wire layout (this change)
+
+`buildSwapAdvertisementScript` (`packages/app/src/pages/Swap.tsx`) now emits v3
+when an `expiry_height` is supplied, keeping the v2 path byte-for-byte:
+
+```
+OP_RETURN "RSWP" <version:1> <flags:1> <offeredType:1> 0x01 <tokenid:32LE>
+  [wantTokenid:32LE   if flags & 0x01]
+  [expiry_height:4LE  if flags & 0x02]      <-- NEW in v3
+  <txid:32LE> <vout> <priceTerms> <signature>
+```
+
+- `version` = `0x03` when an expiry is present, else `0x02`.
+- `flags` bit `0x01` = has want token (v2, unchanged); bit `0x02` = has
+  `expiry_height` (new). The two bits do not collide.
+- `expiry_height` is an unsigned 4-byte little-endian absolute block height,
+  inserted immediately AFTER the want-token id and BEFORE the outpoint, so a v3
+  parser reads it positionally; `signature` is still read to end-of-payload.
+- Constants: `RSWP_VERSION_V2/V3`, `RSWP_FLAG_HAS_EXPIRY` in
+  `packages/app/src/swapBroadcast.ts`.
+
+### Implemented refund covenant (this change)
+
+`packages/lib/src/swapRefundCovenant.ts` — hex-opcode builder, round-tripped
+through the radiantjs parser (same style as `royaltyCovenant.ts` /
+`soulbound.ts`). The reserved UTXO scriptPubKey is the covenant itself (native,
+not P2SH — like ftScript/nftScript):
+
+```
+OP_IF
+  <inner-swap-script>                                  ; SWAP branch (anytime)
+OP_ELSE
+  <expiry_height> OP_CHECKLOCKTIMEVERIFY OP_DROP
+  <inner-swap-script>                                  ; REFUND branch (>= expiry)
+OP_ENDIF
+```
+
+where `<inner-swap-script>` is byte-identical to the ordinary swap-address
+script (`p2pkhScript` for RXD, `ftScript`/`nftScript` for tokens) — so the
+maker's existing SIGHASH_SINGLE|ANYONECANPAY pre-signature is produced exactly
+as today. Branch selectors (appended to the inner `<sig> <pubkey>` scriptSig):
+`OP_1` (0x51) → SWAP, `OP_0` (0x00) → REFUND. The refund-claim builder
+(`buildSwapRefundClaimTx`) sets `nLockTime = expiry_height` and the input
+`nSequence = 0xfffffffe`.
+
+CLTV is "valid-from", so this gives the maker a guaranteed auto-reclaim at the
+deadline; it does NOT make the SWAP branch invalid after expiry (that would need
+a tx-locktime-introspection opcode for an UPPER bound — see §2 Option 1). The
+unfillability of a past-expiry offer is therefore enforced cooperatively: the
+wallet hard-refuses to complete an expired offer (`OpenOrders.handleAcceptOrder`
++ `isOfferExpiredOnChain`) and the index hides it.
+
 ## 5. Testing
 
 - **Phase 1 (this PR):** unit tests for the soft-expiry math
@@ -172,10 +226,28 @@ builder, then enable maker-chosen expiry in the UI.
   (`packages/lib/src/__tests__/swap-load-flow.regtest.test.ts`,
   `wave-swap-regtest.test.ts`, `swap-load-output-order.test.ts`) continues to
   cover the load/complete path unchanged.
-- **Phase 2:** add regtest matrix cases for: (a) refund branch rejected before
-  `expiry_height`; (b) refund branch accepted at/after `expiry_height`; (c) swap
-  branch still completes before expiry; (d) v3 advertisement round-trips through
-  the index and the wallet refuses to complete a past-expiry offer.
+- **Phase 2 (implemented):**
+  - `packages/lib/src/__tests__/swapRefundCovenant.test.ts` (18 unit tests) —
+    expiry-height encoding, inner-script equivalence to ftScript/nftScript/p2pkh,
+    covenant layout + round-trip parse (incl. rejecting a tampered covenant whose
+    two inner branches differ), scriptSig/selector builders, and the
+    `isOfferExpiredByHeight` boundary.
+  - `packages/lib/src/__tests__/swapRefundCovenant.regtest.test.ts` (RXD) — runs
+    the v3.0.0 interpreter and proves on-chain: **(a)** SWAP branch fills BEFORE
+    expiry (taker pays maker via the OP_1 branch); **(b)** REFUND branch BEFORE
+    expiry is REJECTED (`bad-txns-nonfinal`); **(c)** REFUND branch AT/AFTER
+    expiry is ACCEPTED and the maker reclaims the RXD. Run with
+    `REGTEST_E2E=1 pnpm --filter @photonic/lib exec vitest run
+    src/__tests__/swapRefundCovenant.regtest.test.ts --testTimeout=600000`
+    against the local regtest stack (radiantd RPC 127.0.0.1:17443). Verified
+    PASSING 2026-06-09.
+  - `packages/app/src/__tests__/swapBroadcastExpiry.test.ts` (5 tests) — RSWP
+    version/flag constants and `isOfferExpiredOnChain` (taker-side boundary,
+    fail-open on unknown tip).
+- **Phase 2 (not yet covered — see §7):** v3 advertisement round-trip through
+  the live Radiant Core `swapindex` / RXinDexer (those parsers are not in this
+  repo); FT/NFT covenant regtest cases (only RXD is proven on-chain so far,
+  though the covenant builder is asset-type-generic and unit-tested for FT/NFT).
 
 ## 6. Files touched (Phase 1)
 
@@ -187,3 +259,56 @@ builder, then enable maker-chosen expiry in the UI.
   stale offers, "Show expired" toggle.
 - `packages/app/src/pages/SwapPending.tsx` — risk banner above pending offers.
 - `SECURITY.md` — known-limitation entry for swap-offer liveness.
+
+## 6b. Files touched (Phase 2 — this change)
+
+- `packages/lib/src/swapRefundCovenant.ts` — RSWP v3 timelocked-refund covenant:
+  `swapRefundScript` (builder), `parseSwapRefundScript`/`isSwapRefundScript`,
+  `encodeExpiryHeight`, `innerSwapScript`, `buildRefundScriptSig` /
+  `appendSwapSelector`, `buildSwapRefundClaimTx` (maker auto-reclaim tx), and
+  `isOfferExpiredByHeight`. (new)
+- `packages/lib/src/__tests__/swapRefundCovenant.test.ts` — 18 unit tests. (new)
+- `packages/lib/src/__tests__/swapRefundCovenant.regtest.test.ts` — on-chain
+  proof of swap-before / refund-rejected-before / refund-accepted-after. (new)
+- `packages/app/src/swapBroadcast.ts` — `expiry_height` on `SwapOffer`;
+  `RSWP_VERSION_V2/V3`, `RSWP_FLAG_HAS_EXPIRY`; `isOfferExpiredOnChain`.
+- `packages/app/src/pages/Swap.tsx` — v3 advertisement builder (adds
+  `expiry_height`, keeps v2); derives the expiry height from the chain tip; the
+  covenant-reservation path is gated behind `SWAP_RESERVE_INTO_REFUND_COVENANT`
+  (see §7).
+- `packages/app/src/pages/OpenOrders.tsx` — hard-refuses to fill an offer past
+  its on-chain `expiry_height`, and hides expired offers from the book.
+- `packages/app/src/__tests__/swapBroadcastExpiry.test.ts` — 5 unit tests. (new)
+
+## 7. Remaining work / known gaps (human review)
+
+These are deliberately out of scope for this change and must be completed before
+the consensus expiry is *enabled* end-to-end:
+
+1. **Wallet covenant-reservation migration (gated OFF).** Reserving the offered
+   asset into the refund covenant changes the reserved UTXO's on-chain shape.
+   Four existing v2-shaped paths assume a plain `ftScript`/`nftScript`/`p2pkh`
+   at the swap address and must be made covenant-aware first:
+   - swap *discovery* — `electrumWorker.findSwaps(swapAddress)`;
+   - maker *cancellation* — `packages/app/src/swap.ts` `cancelSwap`;
+   - pending-swap *reconciliation* — `swap.ts` `syncSwaps`;
+   - taker *completion* — `SwapLoad.tsx` (reuses the maker scriptSig verbatim and
+     would need to append the `OP_1` SWAP selector + recognise the covenant
+     UTXO).
+   Until then `SWAP_RESERVE_INTO_REFUND_COVENANT = false` in `Swap.tsx`, so the
+   wallet publishes a plain **v2** advert (no `expiry_height`) and never claims
+   an on-chain expiry it cannot enforce. The covenant + v3 format are fully
+   implemented and regtest-proven; flipping the flag is the remaining work.
+2. **Cross-repo v3 parsers (CONSENSUS-relevant for the index, not the chain).**
+   Radiant Core `swapindex` (C++) and RXinDexer must parse RSWP **v3** (accept
+   the new `expiry_height` field, expose/filter on it) before makers broadcast
+   v3 adverts — otherwise those consumers drop or misparse v3 offers (§4). The
+   wire layout to implement is in §4 "Implemented RSWP v3 wire layout".
+3. **FT/NFT refund regtest.** Only the RXD covenant is proven on-chain. The
+   builder is asset-type-generic and unit-tested for FT/NFT, but an on-chain
+   FT/NFT refund (preserving token conservation through the covenant) should be
+   added when the reservation path is wired.
+4. **No atomic upper-bound expiry.** CLTV cannot invalidate the SWAP branch
+   after expiry; unfillability past `expiry_height` is enforced cooperatively
+   (wallet refuses + index hides). A truly atomic expiry needs a Radiant
+   tx-locktime-introspection opcode (§2 Option 1). Documented, not a regression.

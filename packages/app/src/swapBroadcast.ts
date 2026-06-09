@@ -19,6 +19,45 @@ export interface SwapOffer {
   price_terms: string; // hex-encoded serialized output
   signature: string; // hex-encoded partial signature
   block_height: number;
+  // RSWP v3 (Phase 2): consensus-level expiry. Absolute block height at/after
+  // which the offer is unfillable and the maker's timelocked-refund covenant
+  // lets them reclaim the reserved asset. Absent / 0 for v2 offers (no on-chain
+  // expiry). See docs/swap-offer-expiry-cancellation.md §4 and
+  // @lib/swapRefundCovenant. The index populates this from the RSWP v3
+  // advertisement; the wallet treats a missing value as "no expiry".
+  expiry_height?: number;
+}
+
+/**
+ * RSWP advertisement format version bytes. v2 is the legacy format (no
+ * on-chain expiry); v3 adds a maker-chosen `expiry_height`. The wallet builds
+ * v3 and accepts both when reading offers from the index.
+ */
+export const RSWP_VERSION_V2 = 0x02;
+export const RSWP_VERSION_V3 = 0x03;
+
+/**
+ * RSWP v3 flag bit indicating the offer carries an on-chain `expiry_height`
+ * (and the reserved UTXO is held in a timelocked-refund covenant). Bit 1 in the
+ * advertisement flags byte (bit 0 = "has want token", already used by v2).
+ */
+export const RSWP_FLAG_HAS_EXPIRY = 0x02;
+
+/**
+ * Whether a (possibly v3) offer is past its on-chain expiry given the current
+ * chain tip. v2 offers (no `expiry_height`) are never on-chain-expired — the
+ * client SOFT expiry (swapExpiry.ts) still applies to them. Mirrors
+ * @lib/swapRefundCovenant `isOfferExpiredByHeight` so the wallet and the
+ * covenant agree on the boundary (filled-iff height < expiry).
+ */
+export function isOfferExpiredOnChain(
+  offer: Pick<SwapOffer, "expiry_height">,
+  currentHeight: number
+): boolean {
+  const expiry = offer.expiry_height;
+  if (!expiry || expiry <= 0) return false;
+  if (!Number.isFinite(currentHeight) || currentHeight <= 0) return false;
+  return currentHeight >= expiry;
 }
 
 export interface SwapOrderCounts {
