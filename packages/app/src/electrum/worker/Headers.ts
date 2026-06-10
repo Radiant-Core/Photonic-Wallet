@@ -310,3 +310,171 @@ export class HeadersSubscription implements Subscription {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Backward header backfill (pre-checkpoint SPV).
+//
+// The forward sync above only ever extends the header chain from the pinned
+// checkpoint toward the tip, so a coin confirmed BELOW the checkpoint can
+// never find its block header locally: verifyTxoInclusion fails on every
+// sync and the coin is surfaced as "pending" forever (R14 made confirmed =
+// SPV-verified). backfillHeaders walks the chain DOWNWARD from the earliest
+// trusted header in bounded chunks, validating each chunk by prev-hash
+// linkage up to that trusted anchor. The anchor hash commits to its entire
+// ancestry, so linkage alone is sufficient — no backward ASERT target
+// recomputation is needed; per-header PoW is still checked as cheap sanity.
+// A chunk is persisted only after the whole chunk links, so db.header never
+// holds an unvalidated header.
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize backfill runs. Concurrent FT/NFT/RXD syncs all funnel through
+ * reverifyPendingTxos and may request overlapping ranges; chaining them keeps
+ * exactly one fetch loop alive and lets each run see the previous run's
+ * headers in its own coverage check.
+ */
+let backfillChain: Promise<void> = Promise.resolve();
+
+/**
+ * Extend the locally stored header chain downward until it covers
+ * `targetHeight`, so SPV proofs for coins confirmed at or above that height
+ * can be checked. No-op when headers already reach that far. Never throws —
+ * on any failure (disconnected, malformed or truncated response, linkage or
+ * PoW mismatch) it logs, leaves the remaining range unfetched, and lets the
+ * caller's next sync retry.
+ *
+ * `chunkSize` exists for tests; it is clamped to the ElectrumX protocol cap.
+ */
+export function backfillHeaders(
+  electrum: ElectrumManager,
+  targetHeight: number,
+  chunkSize = MAX_HEADERS_PER_REQUEST
+): Promise<void> {
+  const run = backfillChain.then(() =>
+    doBackfillHeaders(electrum, targetHeight, chunkSize)
+  );
+  // doBackfillHeaders never rejects, but never let the chain die regardless.
+  backfillChain = run.catch(() => {});
+  return run;
+}
+
+async function doBackfillHeaders(
+  electrum: ElectrumManager,
+  targetHeight: number,
+  chunkSize: number
+): Promise<void> {
+  try {
+    if (!Number.isSafeInteger(targetHeight) || targetHeight < 0) {
+      return;
+    }
+    const maxPerRequest = Math.max(
+      2,
+      Math.min(chunkSize, MAX_HEADERS_PER_REQUEST)
+    );
+
+    // The earliest stored, non-reorged header is trusted: it either chains up
+    // to headers validated by the forward sync, or was itself linkage-checked
+    // by a previous backfill chunk. Fall back to the pinned checkpoint for a
+    // fresh database.
+    let anchor = await getEarliestTrustedBlock();
+
+    // Terminates: every iteration moves `anchor.height` down by at least one
+    // (start < anchor.height always), and a server that won't or can't supply
+    // a full, linking chunk aborts the loop instead of stalling it.
+    while (anchor.height > targetHeight) {
+      const start = Math.max(
+        targetHeight,
+        anchor.height - (maxPerRequest - 1)
+      );
+      // Request the anchor height too — the fetched chunk must reproduce the
+      // anchor hash for the linkage walk below to prove anything.
+      const count = anchor.height - start + 1;
+
+      const response = (await electrum.client?.request(
+        "blockchain.block.headers",
+        start,
+        count
+      )) as ElectrumHeadersResponse;
+
+      // Deep-history requests must return exactly the requested chunk; a
+      // truncated, padded, or malformed response is refused, not linked.
+      const hex = typeof response?.hex === "string" ? response.hex : "";
+      if (hex.length !== count * HEADER_HEX_LEN) {
+        console.warn(
+          `[Headers] backfill aborted: requested ${count} headers from ${start}, got ${
+            hex.length / HEADER_HEX_LEN
+          }`
+        );
+        return;
+      }
+
+      const chunk = hex.match(/.{160}/g) || [];
+      const parsed = chunk.map((headerHex) =>
+        RadJSBlockHeader.fromString(headerHex)
+      );
+
+      // The top of the chunk must BE our trusted anchor header.
+      if (parsed[count - 1].hash !== anchor.hash) {
+        console.warn(
+          `[Headers] backfill aborted: header at ${anchor.height} does not match the trusted chain`
+        );
+        return;
+      }
+
+      // Walk down: each header must be the parent of the (already linked)
+      // header above it, and carry valid PoW for its own claimed target.
+      for (let i = count - 2; i >= 0; i--) {
+        const parentOfAbove = Buffer.from(parsed[i + 1].prevHash)
+          .reverse()
+          .toString("hex");
+        if (parsed[i].hash !== parentOfAbove || !parsed[i].validProofOfWork()) {
+          console.warn(
+            `[Headers] backfill aborted: header at ${
+              start + i
+            } failed linkage/PoW validation`
+          );
+          return;
+        }
+      }
+
+      await db.header.bulkPut(
+        chunk.map((headerHex, i) => {
+          const bytes = Buffer.from(headerHex, "hex");
+          return {
+            hash: parsed[i].hash,
+            height: start + i,
+            reorg: false,
+            // Slice to exactly the 80 header bytes — Buffer.from may pool
+            // small allocations, so .buffer alone can be a shared pool far
+            // larger than the header.
+            buffer: bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength
+            ),
+          };
+        })
+      );
+
+      console.debug(
+        `[Headers] backfilled headers ${start}..${anchor.height - 1}`
+      );
+      anchor = { height: start, hash: parsed[0].hash };
+    }
+  } catch (error) {
+    console.warn("[Headers] backfill failed, will retry on next sync:", error);
+  }
+}
+
+async function getEarliestTrustedBlock(): Promise<{
+  height: number;
+  hash: string;
+}> {
+  const dbBlock = await db.header
+    .orderBy("height")
+    .filter((block) => !block.reorg)
+    .first();
+  if (dbBlock) {
+    return { height: dbBlock.height, hash: dbBlock.hash };
+  }
+  return { height: checkpoint.height, hash: checkpoint.hash };
+}

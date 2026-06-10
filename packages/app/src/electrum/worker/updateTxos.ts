@@ -8,6 +8,7 @@ import { ContractType, TxO } from "@app/types";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import { ElectrumUtxo } from "@lib/types";
 import { validateElectrumUtxo, verifyTxoInclusion } from "./verifyTxo";
+import { backfillHeaders } from "./Headers";
 import { updateFtBalances } from "@app/utxos";
 
 export type ElectrumTxMap = {
@@ -166,6 +167,19 @@ export const buildUpdateTXOs =
       });
     }
 
+    // Ensure the header chain reaches down to the oldest confirmed coin we're
+    // about to SPV-verify. The forward header sync never fetches below its
+    // pinned checkpoint, so without this a coin confirmed before the
+    // checkpoint is unprovable forever and stays "pending". No-op when the
+    // chain already covers the height.
+    const minNewHeight = newUtxos.reduce(
+      (min, utxo) => (utxo.height > 0 ? Math.min(min, utxo.height) : min),
+      Infinity
+    );
+    if (Number.isFinite(minNewHeight)) {
+      await backfillHeaders(electrum, minNewHeight);
+    }
+
     // Serialize to avoid Safari IndexedDB "out of memory" from concurrent transactions
     const added: VerifiableTxO[] = [];
     for (const utxo of newUtxos) {
@@ -316,6 +330,20 @@ async function reverifyPendingTxos(
       txo.verified !== 1
   );
   if (toVerify.length === 0) return;
+
+  // Headers below the pinned checkpoint are never fetched by the forward
+  // catchup, so a coin confirmed before it could otherwise never be proven:
+  // verifyTxoInclusion finds no header, returns false, and the coin is
+  // surfaced as "pending" on every sync, forever. Extend the header chain
+  // down to the oldest height we're about to prove first (no-op when the
+  // chain already covers it).
+  const minHeight = toVerify.reduce(
+    (min, txo) => Math.min(min, txo.height as number),
+    Infinity
+  );
+  if (Number.isFinite(minHeight)) {
+    await backfillHeaders(electrum, minHeight);
+  }
 
   const changedScripts = new Set<string>();
   for (const txo of toVerify) {
