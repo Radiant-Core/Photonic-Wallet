@@ -76,9 +76,13 @@ const wrapped = wrap<{
     address: string
   ): { contractType: ContractType; utxo: ElectrumUtxo }[];
   isUtxoUnspent: (txid: string, vout: number, scriptHash: string) => boolean;
-  getUtxosByScriptHash: (
-    scriptHash: string
-  ) => { tx_hash: string; tx_pos: number; height: number; value: number }[];
+  getUtxosByScriptHash: (scriptHash: string) => {
+    tx_hash: string;
+    tx_pos: number;
+    height: number;
+    value: number;
+    refs?: { ref: string; type: string }[];
+  }[];
   getBlockHeight: () => number;
   getSwapOrderbook: (
     baseRef: string,

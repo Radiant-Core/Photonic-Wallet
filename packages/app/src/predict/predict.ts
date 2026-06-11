@@ -23,8 +23,7 @@ import {
   fillSellOrder,
   buildShareTransfer,
   findMarketBeacon,
-  marketStateFromScript,
-  parseStatefulOutput,
+  encodeState,
   impliedProbability,
   oracle as swapOracle,
   rswp,
@@ -152,6 +151,7 @@ export function scriptsOf(t: TrackedMarket): MarketScripts {
   return buildMarketScripts(refsOf(t));
 }
 
+
 function outputScripts(rawTx: string): { scripts: Buffer[]; values: number[] } {
   const tx = new Transaction(rawTx);
   return {
@@ -188,11 +188,65 @@ export async function openMarketByCreateTxid(
   };
 }
 
-async function unspentByScript(lock: Buffer): Promise<Utxo[]> {
+// Mirror of RXinDexer's Script.zero_refs (electrumx/lib/script.py): the indexer keys a UTXO's
+// scripthash on the script with every 36-byte ref operand ZEROED — but only for scripts that
+// contain a checksig opcode (so one watch key covers a wallet's holdings across all refs).
+// ShareToken code checks signatures, so anchors/positions index under their zeroed form; the
+// resulting hash collides across markets and across YES/NO, hence the ref filter below.
+const INPUT_REF_OPS = new Set([0xd0, 0xd1, 0xd2, 0xd3, 0xd8]);
+const CHECKSIG_OPS = new Set([0xac, 0xad, 0xae, 0xaf]);
+
+function zeroRefs(script: Buffer): Buffer {
+  const out = Buffer.from(script);
+  let requiresSig = false;
+  let n = 0;
+  while (n < script.length) {
+    const op = script[n];
+    n += 1;
+    if (CHECKSIG_OPS.has(op)) {
+      requiresSig = true;
+    } else if (op <= 0x4e) {
+      let dlen = op;
+      if (op === 0x4c) {
+        dlen = script[n];
+        n += 1;
+      } else if (op === 0x4d) {
+        dlen = script.readUInt16LE(n);
+        n += 2;
+      } else if (op === 0x4e) {
+        dlen = script.readUInt32LE(n);
+        n += 4;
+      }
+      n += dlen;
+    } else if (INPUT_REF_OPS.has(op)) {
+      out.fill(0, n, n + 36);
+      n += 36;
+    }
+  }
+  return requiresSig ? out : script;
+}
+
+/** List unspent outputs locked by `lock`, keyed the way the indexer keys them (zero_refs), and
+ *  filtered to entries actually carrying `expectRef` (the zeroed hash collides across markets). */
+async function unspentByScript(lock: Buffer, expectRef?: Buffer): Promise<Utxo[]> {
   const utxos = await electrumWorker.value.getUtxosByScriptHash(
-    scriptHash(lock.toString("hex"))
+    scriptHash(zeroRefs(lock).toString("hex"))
   );
-  return utxos.map((u) => ({
+  let filtered = utxos;
+  if (expectRef) {
+    const displayTxid = Buffer.from(expectRef.subarray(0, 32))
+      .reverse()
+      .toString("hex");
+    const refVout = expectRef.readUInt32LE(32);
+    filtered = utxos.filter((u) =>
+      (u.refs || []).some(
+        (r) =>
+          r.ref.startsWith(displayTxid) &&
+          parseInt(r.ref.substring(65), 10) === refVout
+      )
+    );
+  }
+  return filtered.map((u) => ({
     txid: u.tx_hash,
     vout: u.tx_pos,
     satoshis: u.value,
@@ -200,44 +254,58 @@ async function unspentByScript(lock: Buffer): Promise<Utxo[]> {
   }));
 }
 
-/** Fetch the live on-chain view of a tracked market. */
+/** Fetch the live on-chain view of a tracked market.
+ *
+ *  The singleton is located via `scripthash.listunspent` over the four status-variant locking
+ *  scripts: a market's lock bytes are CONSTANT while its status byte is unchanged (expiry, grace
+ *  and oracle never change; collateral lives in the UTXO value), and exactly one variant can be
+ *  unspent at a time. This avoids `blockchain.ref.get`, whose per-session response cache can
+ *  serve a stale location after the singleton moves (RXinDexer cache-invalidation bug). */
 export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
   const scripts = scriptsOf(t);
-  const [refRes, height] = await Promise.all([
-    electrumWorker.value.getRef(t.marketRef),
+  const baseState = {
+    expiry: t.expiry,
+    grace: t.grace,
+    oracle: Buffer.from(t.oracle, "hex"),
+  };
+  const statuses = [
+    Status.OPEN,
+    Status.RESOLVED_YES,
+    Status.RESOLVED_NO,
+    Status.REVERTED,
+  ];
+  const [height, ...byStatus] = await Promise.all([
     electrumWorker.value.getBlockHeight(),
+    ...statuses.map((status) =>
+      unspentByScript(
+        buildStatefulOutput(
+          encodeState({ status, ...baseState }),
+          scripts.marketCode
+        ),
+        refsOf(t).marketRef
+      )
+    ),
   ]);
-  const last = refRes?.[1]?.tx_hash;
-  if (!last) throw new Error("Market singleton not found on chain");
-  const raw = await electrumWorker.value.getTransaction(last);
-  if (!raw) throw new Error("Market transaction not found");
-  const { scripts: outScripts, values } = outputScripts(raw);
   let market: Utxo | null = null;
   let state: MarketState | null = null;
-  for (let vout = 0; vout < outScripts.length; vout++) {
-    const parsed = parseStatefulOutput(outScripts[vout]);
-    if (!parsed || !parsed.code.equals(scripts.marketCode)) continue;
-    const s = marketStateFromScript(outScripts[vout]);
-    if (!s) continue;
-    market = {
-      txid: last,
-      vout,
-      satoshis: values[vout],
-      script: outScripts[vout].toString("hex"),
-    };
-    state = s;
-    break;
+  for (let i = 0; i < statuses.length; i++) {
+    if (byStatus[i].length > 0) {
+      market = byStatus[i][0];
+      state = { status: statuses[i], ...baseState };
+      break;
+    }
   }
   if (!market || !state) {
-    throw new Error("Market output not found in its latest transaction");
+    throw new Error("Market singleton not found on chain");
   }
 
   const pkh = walletPkh();
+  const refs = refsOf(t);
   const [yesAnchors, noAnchors, myYes, myNo] = await Promise.all([
-    unspentByScript(buildStatefulOutput(MARKER, scripts.yesCode)),
-    unspentByScript(buildStatefulOutput(MARKER, scripts.noCode)),
-    unspentByScript(buildStatefulOutput(pkh, scripts.yesCode)),
-    unspentByScript(buildStatefulOutput(pkh, scripts.noCode)),
+    unspentByScript(buildStatefulOutput(MARKER, scripts.yesCode), refs.yesRef),
+    unspentByScript(buildStatefulOutput(MARKER, scripts.noCode), refs.noRef),
+    unspentByScript(buildStatefulOutput(pkh, scripts.yesCode), refs.yesRef),
+    unspentByScript(buildStatefulOutput(pkh, scripts.noCode), refs.noRef),
   ]);
 
   return {
@@ -288,6 +356,14 @@ async function selectFunding(target: number): Promise<KeyedUtxo> {
   };
 }
 
+/** Upper-bound fee allowance for coin selection. Covenant transactions run multiple KB (the
+ *  Market/Share locking scripts are large), so at the default 10,000 photons/byte a single
+ *  action can cost >100M photons — selection must reserve for that; sized() then pays the
+ *  exact byte fee and the surplus returns as change. */
+function feeHeadroom(): number {
+  return Math.ceil(16_000 * feeRate.value * 1.05) + 100_000;
+}
+
 /** Two-pass fee sizing: build once with a guess, rebuild with fee = bytes × feeRate (+5%). */
 function sized<T extends { hex: string }>(build: (feeSats: number) => T): T {
   const draft = build(1_000_000);
@@ -320,11 +396,12 @@ export async function createMarketAction(p: {
     : swapOracle.soloOracle(Buffer.from(priv.toPublicKey().toBuffer()));
 
   // The create tx needs three distinct funding outpoints (they induce the refs), so first build
-  // a preparation tx fanning one coin into three P2PKH outputs to ourselves.
+  // a preparation tx fanning one coin into three P2PKH outputs to ourselves. The first output
+  // must cover the create tx's own fee (multi-KB covenant outputs — see feeHeadroom).
   const p2pkh = Script.buildPublicKeyHashOut(Address.fromString(address));
-  const PREP = [3_000_000, 300_000, 300_000];
+  const PREP = [feeHeadroom() + 500_000, 300_000, 300_000];
   const prepFunding = await selectFunding(
-    PREP.reduce((a, b) => a + b, 0) + 2_000_000
+    PREP.reduce((a, b) => a + b, 0) + feeHeadroom()
   );
   const prep = sized((feeSats) => {
     const tx = new Transaction();
@@ -395,7 +472,7 @@ export async function splitAction(
   if (!live.yesAnchor || !live.noAnchor) {
     throw new Error("Share anchors not found on chain");
   }
-  const funding = await selectFunding(3 * amount + 10_000_000);
+  const funding = await selectFunding(3 * amount + feeHeadroom());
   const built = sized((feeSats) =>
     buildSplit({
       scripts: scriptsOf(t),
@@ -420,7 +497,7 @@ export async function mergeAction(
   no: Utxo
 ): Promise<string> {
   const { address, wif } = requireWallet();
-  const funding = await selectFunding(10_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildMerge({
       market: live.market,
@@ -442,7 +519,7 @@ export async function redeemAction(
   winningShare: Utxo
 ): Promise<string> {
   const { address, wif } = requireWallet();
-  const funding = await selectFunding(10_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildRedeem({
       market: live.market,
@@ -498,7 +575,7 @@ export async function resolveAction(
   const signerWifs = committeeInput?.signerWifs?.length
     ? committeeInput.signerWifs
     : [wif];
-  const funding = await selectFunding(10_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildResolve({
       scripts: scriptsOf(t),
@@ -522,7 +599,7 @@ export async function revertAction(
   live: LiveMarket
 ): Promise<string> {
   const { address } = requireWallet();
-  const funding = await selectFunding(10_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildRevert({
       scripts: scriptsOf(t),
@@ -566,7 +643,7 @@ export async function postOrderAction(
     side === "yes" ? refs.yesRef : refs.noRef
   );
 
-  const funding = await selectFunding(5_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) => {
     const tx = new Transaction();
     tx.from({
@@ -652,6 +729,19 @@ export async function indexedOrderbook(
       });
     }
   });
+  // The indexer currently reports `amount` as the priceTerms total (== price) for sells, so
+  // resolve the true offered quantity from each ad's backing outpoint (capped to keep the
+  // book render cheap); failures keep the indexer value.
+  await Promise.all(
+    asks.slice(0, 25).map(async (a) => {
+      try {
+        const { order } = await orderFromAdTxid(t, a.adTxid);
+        a.amount = order.share.satoshis;
+      } catch {
+        /* keep indexer-reported amount */
+      }
+    })
+  );
   asks.sort(
     (a, b) =>
       askProbability(a.priceSats, a.amount) -
@@ -703,7 +793,7 @@ export async function fillOrderAction(
 ): Promise<string> {
   const { address } = requireWallet();
   const scripts = scriptsOf(t);
-  const funding = await selectFunding(order.payment.satoshis + 10_000_000);
+  const funding = await selectFunding(order.payment.satoshis + feeHeadroom());
   const built = sized((feeSats) =>
     fillSellOrder({
       order,
@@ -720,7 +810,7 @@ export async function fillOrderAction(
 /** Cancel a posted order by moving the share to ourselves (spends the order's bound UTXO). */
 export async function cancelOrderAction(posted: PostedOrder): Promise<string> {
   const { address, wif } = requireWallet();
-  const funding = await selectFunding(10_000_000);
+  const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildShareTransfer({
       share: posted.order.share,

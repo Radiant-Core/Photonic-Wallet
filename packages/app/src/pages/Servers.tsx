@@ -36,13 +36,27 @@ function validateServerUrl(url: string): { valid: boolean; error?: string } {
 
   url = url.trim();
 
-  // Must use secure WebSocket scheme
+  // Must use secure WebSocket scheme. Sole exception: plain ws:// to the local
+  // loopback, for development against a local regtest/testnet indexer — TLS is
+  // impossible there without trusting a self-signed cert, and browsers already
+  // exempt loopback from mixed-content rules. Never allowed for remote hosts.
   if (!url.startsWith("wss://")) {
     if (url.startsWith("ws://")) {
+      try {
+        const { hostname, protocol } = new URL(url);
+        if (
+          protocol === "ws:" &&
+          ["127.0.0.1", "localhost", "[::1]", "::1"].includes(hostname)
+        ) {
+          return { valid: true };
+        }
+      } catch {
+        return { valid: false, error: "Invalid URL format" };
+      }
       return {
         valid: false,
         error:
-          "Insecure WebSocket (ws://) is not allowed. Use wss:// for secure connections.",
+          "Insecure WebSocket (ws://) is only allowed for loopback (127.0.0.1 / localhost). Use wss:// for remote servers.",
       };
     }
     return {

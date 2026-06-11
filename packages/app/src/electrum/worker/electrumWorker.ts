@@ -357,6 +357,8 @@ const worker = {
         tx_pos: number;
         height: number;
         value: number;
+        // Radiant extension: refs carried by the output, as `<display txid>i<vout>`
+        refs?: { ref: string; type: string }[];
       }[]) || []
     );
   },

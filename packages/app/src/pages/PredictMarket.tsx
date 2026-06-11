@@ -123,7 +123,9 @@ function OrdersPanel({
       );
       setOpenMap(Object.fromEntries(entries));
     })();
-  }, [myOrders]);
+    // `live` in deps: re-check open/closed whenever the market view refreshes —
+    // a fill or cancel spends the bound share UTXO without touching the list.
+  }, [myOrders, live]);
 
   const post = () => {
     const pos = positions[parseInt(posIdx, 10)];
