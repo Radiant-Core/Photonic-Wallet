@@ -19,10 +19,15 @@ import {
   buildRedeem,
   buildResolve,
   buildRevert,
+  buildSellOrder,
+  fillSellOrder,
+  buildShareTransfer,
   findMarketBeacon,
   marketStateFromScript,
   parseStatefulOutput,
+  impliedProbability,
   oracle as swapOracle,
+  rswp,
   Status,
   MARKER,
   type MarketRefs,
@@ -31,6 +36,7 @@ import {
   type KeyedUtxo,
   type Utxo,
   type Outcome,
+  type SellOrder,
 } from "radiantswap";
 import { scriptHash } from "@lib/script";
 import db from "@app/db";
@@ -51,7 +57,22 @@ export interface TrackedMarket {
   expiry: number;
   grace: number;
   oracle: string; // 33-byte descriptor hex
+  /** Committee member pubkeys (33-byte hex, slot order) — known only to the creator (the beacon
+   *  carries just the hash descriptor). Needed to prefill resolution for committee markets. */
+  committeeKeys?: string[];
+  threshold?: number;
   addedAt: number;
+}
+
+/** A sell order this wallet posted (the ad is on-chain; the signed order is kept locally too). */
+export interface PostedOrder {
+  adTxid: string;
+  marketCreateTxid: string;
+  side: "yes" | "no";
+  amount: number; // share photons offered
+  priceSats: number; // RXD photons asked
+  order: SellOrder;
+  createdAt: number;
 }
 
 /** Live, chain-derived view of a tracked market. */
@@ -90,6 +111,30 @@ export async function untrackMarket(createTxid: string): Promise<void> {
   await db.kvp.put(
     rows.filter((r) => r.createTxid !== createTxid),
     KVP_KEY
+  );
+}
+
+const ORDERS_KEY = "predictMyOrders";
+
+export async function listMyOrders(
+  marketCreateTxid?: string
+): Promise<PostedOrder[]> {
+  const rows = ((await db.kvp.get(ORDERS_KEY)) as PostedOrder[]) || [];
+  return marketCreateTxid
+    ? rows.filter((r) => r.marketCreateTxid === marketCreateTxid)
+    : rows;
+}
+
+async function saveMyOrder(o: PostedOrder): Promise<void> {
+  const rows = await listMyOrders();
+  await db.kvp.put([o, ...rows], ORDERS_KEY);
+}
+
+export async function removeMyOrder(adTxid: string): Promise<void> {
+  const rows = await listMyOrders();
+  await db.kvp.put(
+    rows.filter((r) => r.adTxid !== adTxid),
+    ORDERS_KEY
   );
 }
 
@@ -257,17 +302,22 @@ async function broadcast(hex: string): Promise<string> {
 
 /* ------------------------------- lifecycle actions ------------------------------- */
 
-/** Create a market with the wallet as 1-of-1 oracle (operator model; committee importable later). */
+/** Create a market. Default oracle = this wallet's key as 1-of-1 operator; pass `committee`
+ *  (33-byte pubkey hexes in slot order + threshold) for an N-of-M committee market. */
 export async function createMarketAction(p: {
   question: string;
   expiry: number;
   grace: number;
+  committee?: { keys: string[]; threshold: number };
 }): Promise<TrackedMarket> {
   const { address, wif } = requireWallet();
   const priv = PrivateKey.fromWIF(wif);
-  const committee = swapOracle.soloOracle(
-    Buffer.from(priv.toPublicKey().toBuffer())
-  );
+  const committee = p.committee
+    ? {
+        keys: p.committee.keys.map((k) => Buffer.from(k, "hex")),
+        threshold: p.committee.threshold,
+      }
+    : swapOracle.soloOracle(Buffer.from(priv.toPublicKey().toBuffer()));
 
   // The create tx needs three distinct funding outpoints (they induce the refs), so first build
   // a preparation tx fanning one coin into three P2PKH outputs to ourselves.
@@ -327,6 +377,8 @@ export async function createMarketAction(p: {
     expiry: p.expiry,
     grace: p.grace,
     oracle: created.state.oracle.toString("hex"),
+    committeeKeys: committee.keys.map((k) => k.toString("hex")),
+    threshold: committee.threshold,
     addedAt: Date.now(),
   };
   await trackMarket(tracked);
@@ -405,17 +457,47 @@ export async function redeemAction(
   return await broadcast(built.hex);
 }
 
-/** Resolve with the wallet key (only valid when the wallet is the 1-of-1 operator oracle). */
+/** True when this wallet's key alone matches the market's oracle descriptor (operator market). */
+export function walletIsSoloOracle(t: TrackedMarket): boolean {
+  const w = wallet.value;
+  if (!w.wif || w.locked) return false;
+  const pk = Buffer.from(
+    PrivateKey.fromWIF(w.wif.toString()).toPublicKey().toBuffer()
+  );
+  return (
+    swapOracle.committeeDescriptor(swapOracle.soloOracle(pk)).toString("hex") ===
+    t.oracle
+  );
+}
+
+/** Resolve the market. Defaults to the wallet key as 1-of-1 operator; committee markets pass the
+ *  member pubkeys (slot order) + ≥threshold member WIFs. The committee is validated against the
+ *  on-chain descriptor before building, so a wrong keyset fails fast with a clear error. */
 export async function resolveAction(
   t: TrackedMarket,
   live: LiveMarket,
-  outcome: Outcome
+  outcome: Outcome,
+  committeeInput?: { keys: string[]; threshold: number; signerWifs: string[] }
 ): Promise<string> {
   const { address, wif } = requireWallet();
   const priv = PrivateKey.fromWIF(wif);
-  const committee = swapOracle.soloOracle(
-    Buffer.from(priv.toPublicKey().toBuffer())
-  );
+  const committee = committeeInput
+    ? {
+        keys: committeeInput.keys.map((k) => Buffer.from(k, "hex")),
+        threshold: committeeInput.threshold,
+      }
+    : swapOracle.soloOracle(Buffer.from(priv.toPublicKey().toBuffer()));
+  const descriptor = swapOracle.committeeDescriptor(committee).toString("hex");
+  if (descriptor !== t.oracle) {
+    throw new Error(
+      committeeInput
+        ? "Committee keys/threshold do not match this market's oracle descriptor (check slot order)"
+        : "This wallet is not the market's operator oracle — supply the committee keys and member WIFs"
+    );
+  }
+  const signerWifs = committeeInput?.signerWifs?.length
+    ? committeeInput.signerWifs
+    : [wif];
   const funding = await selectFunding(10_000_000);
   const built = sized((feeSats) =>
     buildResolve({
@@ -425,7 +507,7 @@ export async function resolveAction(
       state: live.state,
       outcome,
       committee,
-      signerWifs: [wif],
+      signerWifs,
       funding,
       changeAddress: address,
       feeSats,
@@ -452,4 +534,204 @@ export async function revertAction(
     })
   );
   return await broadcast(built.hex);
+}
+
+/* ------------------------------- order layer ------------------------------- */
+
+/** Probability implied by an ask: (price − carrier) / claim, both = the share amount. */
+export function askProbability(priceSats: number, amount: number): number {
+  return impliedProbability(priceSats, amount, amount);
+}
+
+/** Sign a sell order for one of the wallet's positions and broadcast its RSWP advertisement. */
+export async function postOrderAction(
+  t: TrackedMarket,
+  side: "yes" | "no",
+  share: Utxo,
+  priceSats: number
+): Promise<PostedOrder> {
+  const { address, wif } = requireWallet();
+  const order = buildSellOrder({
+    side,
+    share,
+    makerWif: wif,
+    price: priceSats,
+    paymentScriptHex: Script.buildPublicKeyHashOut(
+      Address.fromString(address)
+    ).toHex() as string,
+  });
+  const refs = refsOf(t);
+  const adScript = rswp.buildAdvertisementScript(
+    order,
+    side === "yes" ? refs.yesRef : refs.noRef
+  );
+
+  const funding = await selectFunding(5_000_000);
+  const built = sized((feeSats) => {
+    const tx = new Transaction();
+    tx.from({
+      txId: funding.txid,
+      outputIndex: funding.vout,
+      script: funding.script,
+      satoshis: funding.satoshis,
+    });
+    tx.addOutput(
+      new Transaction.Output({
+        script: Script.fromHex(adScript.toString("hex")),
+        satoshis: 0,
+      })
+    );
+    const change = funding.satoshis - feeSats;
+    if (change < 0) throw new Error("Funding coin too small");
+    if (change > 0) tx.to(address, change);
+    tx.sign(PrivateKey.fromWIF(funding.wif));
+    tx.seal();
+    return { hex: tx.toString() as string, txid: tx.id as string };
+  });
+  await broadcast(built.hex);
+
+  const posted: PostedOrder = {
+    adTxid: built.txid,
+    marketCreateTxid: t.createTxid,
+    side,
+    amount: share.satoshis,
+    priceSats,
+    order,
+    createdAt: Date.now(),
+  };
+  await saveMyOrder(posted);
+  return posted;
+}
+
+/** Is the share UTXO behind an order still unspent (order still fillable)? */
+export async function orderIsOpen(order: SellOrder): Promise<boolean> {
+  return await electrumWorker.value.isUtxoUnspent(
+    order.share.txid,
+    order.share.vout,
+    scriptHash(order.share.script)
+  );
+}
+
+/** One ask in the market's (share → RXD) book, as the indexer reports it. */
+export interface IndexedAsk {
+  side: "yes" | "no";
+  /** The RSWP advertisement txid (display order) — resolve to a fillable order
+   *  with orderFromAdTxid. */
+  adTxid: string;
+  amount: number;
+  priceSats: number;
+  makerAddress: string | null;
+}
+
+/** Query the indexer's swap index for both share books. `available: false` means the connected
+ *  indexer has no swap index (not an empty book). */
+export async function indexedOrderbook(
+  t: TrackedMarket
+): Promise<{ available: boolean; asks: IndexedAsk[] }> {
+  const refs = refsOf(t);
+  const pairs = [
+    { side: "yes" as const, ...rswp.orderbookPair(refs.yesRef) },
+    { side: "no" as const, ...rswp.orderbookPair(refs.noRef) },
+  ];
+  const books = await Promise.all(
+    pairs.map((p) =>
+      electrumWorker.value.getSwapOrderbook(p.base_ref, p.quote_ref)
+    )
+  );
+  if (books.every((b) => b === null)) return { available: false, asks: [] };
+  const asks: IndexedAsk[] = [];
+  books.forEach((book, i) => {
+    for (const o of book?.asks || []) {
+      if (o.status !== "open" || !o.tx_hash) continue;
+      asks.push({
+        side: pairs[i].side,
+        adTxid: o.tx_hash,
+        amount: o.amount,
+        priceSats: o.price,
+        makerAddress: o.maker_address,
+      });
+    }
+  });
+  asks.sort(
+    (a, b) =>
+      askProbability(a.priceSats, a.amount) -
+      askProbability(b.priceSats, b.amount)
+  );
+  return { available: true, asks };
+}
+
+/** Reconstruct a fillable SellOrder from an on-chain RSWP advertisement transaction. */
+export async function orderFromAdTxid(
+  t: TrackedMarket,
+  adTxid: string
+): Promise<{ order: SellOrder; side: "yes" | "no"; open: boolean }> {
+  const raw = await electrumWorker.value.getTransaction(adTxid.trim());
+  if (!raw) throw new Error("Advertisement transaction not found");
+  const { scripts } = outputScripts(raw);
+  let ad: ReturnType<typeof rswp.parseAdvertisementScript> = null;
+  for (const s of scripts) {
+    ad = rswp.parseAdvertisementScript(s);
+    if (ad) break;
+  }
+  if (!ad) throw new Error("No RSWP advertisement in that transaction");
+  const refs = refsOf(t);
+  const side =
+    ad.offeredTokenId === rswp.swapTokenId(refs.yesRef)
+      ? "yes"
+      : ad.offeredTokenId === rswp.swapTokenId(refs.noRef)
+      ? "no"
+      : null;
+  if (!side) throw new Error("Advertisement is not for this market's shares");
+
+  const shareRaw = await electrumWorker.value.getTransaction(ad.outpoint.txid);
+  if (!shareRaw) throw new Error("Offered share transaction not found");
+  const shareTx = outputScripts(shareRaw);
+  const shareScript = shareTx.scripts[ad.outpoint.vout];
+  if (!shareScript) throw new Error("Offered share output not found");
+  const order = rswp.sellOrderFromAdvertisement(ad, side, {
+    script: shareScript.toString("hex"),
+    satoshis: shareTx.values[ad.outpoint.vout],
+  });
+  return { order, side, open: await orderIsOpen(order) };
+}
+
+/** Atomically fill a sell order: pay the maker's pre-signed price, take the shares. Reconstruct
+ *  the order first via orderFromAdTxid (book entries carry the ad txid as `adTxid`). */
+export async function fillOrderAction(
+  t: TrackedMarket,
+  order: SellOrder
+): Promise<string> {
+  const { address } = requireWallet();
+  const scripts = scriptsOf(t);
+  const funding = await selectFunding(order.payment.satoshis + 10_000_000);
+  const built = sized((feeSats) =>
+    fillSellOrder({
+      order,
+      shareCode: order.side === "yes" ? scripts.yesCode : scripts.noCode,
+      takerRecipientPkh: walletPkh(),
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Cancel a posted order by moving the share to ourselves (spends the order's bound UTXO). */
+export async function cancelOrderAction(posted: PostedOrder): Promise<string> {
+  const { address, wif } = requireWallet();
+  const funding = await selectFunding(10_000_000);
+  const built = sized((feeSats) =>
+    buildShareTransfer({
+      share: posted.order.share,
+      shareWif: wif,
+      recipientPkh: walletPkh(),
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  const txid = await broadcast(built.hex);
+  await removeMyOrder(posted.adTxid);
+  return txid;
 }

@@ -14,7 +14,9 @@ import {
   Input,
   InputGroup,
   InputRightAddon,
+  Select,
   Spinner,
+  Textarea,
   Stat,
   StatLabel,
   StatNumber,
@@ -27,18 +29,31 @@ import {
   Tr,
   useToast,
 } from "@chakra-ui/react";
-import { Status, type Utxo } from "radiantswap";
+import { Status, type SellOrder, type Utxo } from "radiantswap";
 import Photons from "@app/components/Photons";
+import { useLiveQuery } from "dexie-react-hooks";
+import { wallet } from "@app/signals";
 import {
+  askProbability,
+  cancelOrderAction,
   fetchLiveMarket,
+  fillOrderAction,
+  indexedOrderbook,
+  listMyOrders,
   listTracked,
   mergeAction,
+  orderFromAdTxid,
+  orderIsOpen,
+  postOrderAction,
   redeemAction,
   resolveAction,
   revertAction,
   splitAction,
   statusLabel,
+  walletIsSoloOracle,
+  type IndexedAsk,
   type LiveMarket,
+  type PostedOrder,
   type TrackedMarket,
 } from "@app/predict/predict";
 
@@ -58,6 +73,274 @@ function completeSets(yes: Utxo[], no: Utxo[]): { yes: Utxo; no: Utxo }[] {
   return sets;
 }
 
+const pct = (p: number) => `${Math.round(p * 100)}%`;
+
+/** Peer-to-peer order trading: post asks for own positions, browse the indexed book, fill ads. */
+function OrdersPanel({
+  tracked,
+  live,
+  busy,
+  run,
+}: {
+  tracked: TrackedMarket;
+  live: LiveMarket;
+  busy: string;
+  run: (label: string, fn: () => Promise<string>) => Promise<void>;
+}) {
+  const toast = useToast();
+  const positions = [
+    ...live.myYes.map((u) => ({ u, side: "yes" as const })),
+    ...live.myNo.map((u) => ({ u, side: "no" as const })),
+  ];
+  const [posIdx, setPosIdx] = useState("0");
+  const [priceRxd, setPriceRxd] = useState("");
+  const [book, setBook] = useState<{ available: boolean; asks: IndexedAsk[] } | null>(null);
+  const [adTxid, setAdTxid] = useState("");
+  const [preview, setPreview] = useState<{ order: SellOrder; side: "yes" | "no"; open: boolean } | null>(null);
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
+  const myOrders = useLiveQuery(
+    () => listMyOrders(tracked.createTxid),
+    [tracked.createTxid],
+    [] as PostedOrder[]
+  );
+
+  const loadBook = async () => {
+    try {
+      setBook(await indexedOrderbook(tracked));
+    } catch {
+      setBook({ available: false, asks: [] });
+    }
+  };
+  useEffect(() => {
+    loadBook();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracked.createTxid]);
+
+  useEffect(() => {
+    (async () => {
+      const entries = await Promise.all(
+        myOrders.map(async (o) => [o.adTxid, await orderIsOpen(o.order)] as const)
+      );
+      setOpenMap(Object.fromEntries(entries));
+    })();
+  }, [myOrders]);
+
+  const post = () => {
+    const pos = positions[parseInt(posIdx, 10)];
+    const price = Math.round(parseFloat(priceRxd) * 100_000_000);
+    if (!pos) {
+      toast({ title: "Pick a position to sell", status: "warning" });
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      toast({ title: "Enter an asking price in RXD", status: "warning" });
+      return;
+    }
+    run("Post order", async () => {
+      const posted = await postOrderAction(tracked, pos.side, pos.u, price);
+      return posted.adTxid;
+    });
+  };
+
+  const lookupAd = async () => {
+    setPreview(null);
+    try {
+      setPreview(await orderFromAdTxid(tracked, adTxid));
+    } catch (e) {
+      toast({ title: "Ad lookup failed", description: (e as Error).message, status: "error" });
+    }
+  };
+
+  const fillFromBook = (ask: IndexedAsk) => {
+    run("Fill", async () => {
+      const { order, open } = await orderFromAdTxid(tracked, ask.adTxid);
+      if (!open) throw new Error("Order already filled or cancelled");
+      return await fillOrderAction(tracked, order);
+    });
+  };
+
+  return (
+    <Box mb={6}>
+      <Heading size="sm" mb={2}>
+        Orders
+      </Heading>
+
+      {positions.length > 0 && live.state.status === Status.OPEN && (
+        <Flex gap={2} mb={4} maxW="3xl" wrap="wrap">
+          <Select
+            maxW="64"
+            value={posIdx}
+            onChange={(e) => setPosIdx(e.target.value)}
+          >
+            {positions.map((p, i) => (
+              <option key={`${p.u.txid}:${p.u.vout}`} value={i}>
+                {p.side.toUpperCase()} {(p.u.satoshis / 100_000_000).toLocaleString()} RXD ({p.u.txid.substring(0, 6)}…:{p.u.vout})
+              </option>
+            ))}
+          </Select>
+          <InputGroup maxW="56">
+            <Input
+              type="number"
+              placeholder="ask price"
+              value={priceRxd}
+              onChange={(e) => setPriceRxd(e.target.value)}
+            />
+            <InputRightAddon>RXD</InputRightAddon>
+          </InputGroup>
+          <Button minW="28" isLoading={busy === "Post order"} onClick={post}>
+            Post sell order
+          </Button>
+        </Flex>
+      )}
+
+      {myOrders.length > 0 && (
+        <Box mb={4}>
+          <Text fontSize="sm" color="gray.400" mb={1}>
+            My posted orders
+          </Text>
+          <Table size="sm" maxW="3xl">
+            <Tbody fontFamily="mono">
+              {myOrders.map((o) => (
+                <Tr key={o.adTxid}>
+                  <Td>
+                    <Badge colorScheme={o.side === "yes" ? "green" : "red"}>
+                      {o.side.toUpperCase()}
+                    </Badge>
+                  </Td>
+                  <Td textAlign="right">
+                    <Photons value={o.amount} />
+                  </Td>
+                  <Td>
+                    for <Photons value={o.priceSats} /> ({pct(askProbability(o.priceSats, o.amount))})
+                  </Td>
+                  <Td>
+                    <Badge colorScheme={openMap[o.adTxid] ? "blue" : "gray"} fontSize="xs">
+                      {openMap[o.adTxid] === undefined ? "…" : openMap[o.adTxid] ? "open" : "closed"}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    {openMap[o.adTxid] && (
+                      <Button
+                        size="xs"
+                        isLoading={busy === "Cancel order"}
+                        onClick={() => run("Cancel order", () => cancelOrderAction(o))}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </Box>
+      )}
+
+      <Flex align="center" gap={2} mb={1}>
+        <Text fontSize="sm" color="gray.400">
+          Open orders (indexer)
+        </Text>
+        <Button size="xs" onClick={loadBook}>
+          Refresh
+        </Button>
+      </Flex>
+      {book === null ? (
+        <Spinner size="sm" />
+      ) : !book.available ? (
+        <Text fontSize="sm" color="gray.500" mb={4}>
+          The connected indexer has no swap index — orders can still be filled
+          from an advertisement txid below.
+        </Text>
+      ) : book.asks.length === 0 ? (
+        <Text fontSize="sm" color="gray.500" mb={4}>
+          No open orders for this market.
+        </Text>
+      ) : (
+        <Table size="sm" maxW="3xl" mb={4}>
+          <Thead>
+            <Tr>
+              <Th>Side</Th>
+              <Th textAlign="right">Amount</Th>
+              <Th textAlign="right">Price</Th>
+              <Th textAlign="right">Implied</Th>
+              <Th>Maker</Th>
+              <Th />
+            </Tr>
+          </Thead>
+          <Tbody fontFamily="mono">
+            {book.asks.map((a) => (
+              <Tr key={a.adTxid}>
+                <Td>
+                  <Badge colorScheme={a.side === "yes" ? "green" : "red"}>
+                    {a.side.toUpperCase()}
+                  </Badge>
+                </Td>
+                <Td textAlign="right">
+                  <Photons value={a.amount} />
+                </Td>
+                <Td textAlign="right">
+                  <Photons value={a.priceSats} />
+                </Td>
+                <Td textAlign="right">{pct(askProbability(a.priceSats, a.amount))}</Td>
+                <Td>
+                  {a.makerAddress === wallet.value.address ? (
+                    <Badge fontSize="xs">you</Badge>
+                  ) : (
+                    `${a.makerAddress?.substring(0, 8) ?? "?"}…`
+                  )}
+                </Td>
+                <Td>
+                  {a.makerAddress !== wallet.value.address && (
+                    <Button size="xs" isLoading={busy === "Fill"} onClick={() => fillFromBook(a)}>
+                      Fill
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      )}
+
+      <Flex gap={2} maxW="3xl" wrap="wrap">
+        <Input
+          maxW="md"
+          fontFamily="mono"
+          placeholder="Fill from advertisement txid"
+          value={adTxid}
+          onChange={(e) => setAdTxid(e.target.value)}
+        />
+        <Button minW="24" onClick={lookupAd}>
+          Look up
+        </Button>
+      </Flex>
+      {preview && (
+        <Flex align="center" gap={3} mt={2} fontSize="sm">
+          <Badge colorScheme={preview.side === "yes" ? "green" : "red"}>
+            {preview.side.toUpperCase()}
+          </Badge>
+          <Photons value={preview.order.share.satoshis} />
+          <Text>for</Text>
+          <Photons value={preview.order.payment.satoshis} />
+          <Text>({pct(askProbability(preview.order.payment.satoshis, preview.order.share.satoshis))})</Text>
+          <Badge colorScheme={preview.open ? "blue" : "gray"}>
+            {preview.open ? "open" : "closed"}
+          </Badge>
+          {preview.open && (
+            <Button
+              size="xs"
+              isLoading={busy === "Fill"}
+              onClick={() => run("Fill", () => fillOrderAction(tracked, preview.order))}
+            >
+              Fill
+            </Button>
+          )}
+        </Flex>
+      )}
+    </Box>
+  );
+}
+
 export default function PredictMarket() {
   const { createTxid } = useParams<{ createTxid: string }>();
   const toast = useToast();
@@ -66,14 +349,37 @@ export default function PredictMarket() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [splitRxd, setSplitRxd] = useState("1");
+  const [ckeys, setCkeys] = useState("");
+  const [cwifs, setCwifs] = useState("");
 
   useEffect(() => {
     listTracked().then((rows) => {
       const t = rows.find((r) => r.createTxid === createTxid) || null;
       setTracked(t);
+      if (t?.committeeKeys?.length) setCkeys(t.committeeKeys.join("\n"));
       if (!t) setError("Market not tracked — import it from the Markets page");
     });
   }, [createTxid]);
+
+  const soloOracle = useMemo(
+    () => (tracked ? walletIsSoloOracle(tracked) : false),
+    [tracked]
+  );
+  const threshold = tracked ? parseInt(tracked.oracle.substring(0, 2), 16) : 1;
+  const committeeInput = () =>
+    soloOracle || !tracked
+      ? undefined
+      : {
+          keys: ckeys
+            .split("\n")
+            .map((k) => k.trim().toLowerCase())
+            .filter(Boolean),
+          threshold,
+          signerWifs: cwifs
+            .split("\n")
+            .map((w) => w.trim())
+            .filter(Boolean),
+        };
 
   const refresh = useCallback(async () => {
     if (!tracked) return;
@@ -290,9 +596,36 @@ export default function PredictMarket() {
             </Box>
           )}
 
+          <OrdersPanel tracked={tracked} live={live} busy={busy} run={run} />
+
           <Heading size="sm" mb={2}>
             Resolution
           </Heading>
+          {open && !soloOracle && (
+            <Box mb={2} maxW="2xl">
+              <Text fontSize="sm" color="gray.400" mb={1}>
+                Committee market ({threshold}-of-N). Member pubkeys in slot
+                order and ≥{threshold} member WIFs:
+              </Text>
+              <Textarea
+                fontFamily="mono"
+                fontSize="xs"
+                rows={3}
+                mb={2}
+                placeholder={"member pubkeys, one per line (slot order)"}
+                value={ckeys}
+                onChange={(e) => setCkeys(e.target.value)}
+              />
+              <Textarea
+                fontFamily="mono"
+                fontSize="xs"
+                rows={2}
+                placeholder={"signing member WIFs, one per line"}
+                value={cwifs}
+                onChange={(e) => setCwifs(e.target.value)}
+              />
+            </Box>
+          )}
           <HStack wrap="wrap" mb={2}>
             {open && (
               <>
@@ -302,7 +635,7 @@ export default function PredictMarket() {
                   isLoading={busy === "Resolve YES"}
                   onClick={() =>
                     run("Resolve YES", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_YES)
+                      resolveAction(tracked, live, Status.RESOLVED_YES, committeeInput())
                     )
                   }
                 >
@@ -314,7 +647,7 @@ export default function PredictMarket() {
                   isLoading={busy === "Resolve NO"}
                   onClick={() =>
                     run("Resolve NO", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_NO)
+                      resolveAction(tracked, live, Status.RESOLVED_NO, committeeInput())
                     )
                   }
                 >
@@ -334,10 +667,11 @@ export default function PredictMarket() {
             {!open && <Text fontSize="sm" color="gray.400">Final.</Text>}
           </HStack>
           <Text fontSize="xs" color="gray.500" maxW="2xl">
-            Resolving requires this wallet to hold the market's oracle key
-            (1-of-1 operator markets). Revert is permissionless once the chain
-            passes expiry + grace, and leaves every complete set reclaimable
-            via merge.
+            {soloOracle
+              ? "This wallet holds the market's operator oracle key."
+              : "Resolution needs the committee threshold; the chain stores only the keyset hash, so the member pubkeys must be supplied in their original slot order."}{" "}
+            Revert is permissionless once the chain passes expiry + grace, and
+            leaves every complete set reclaimable via merge.
           </Text>
 
           <Button size="sm" mt={6} onClick={refresh}>

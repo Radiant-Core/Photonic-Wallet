@@ -80,6 +80,13 @@ const wrapped = wrap<{
     scriptHash: string
   ) => { tx_hash: string; tx_pos: number; height: number; value: number }[];
   getBlockHeight: () => number;
+  getSwapOrderbook: (
+    baseRef: string,
+    quoteRef: string
+  ) => {
+    bids: import("./worker/electrumWorker").SwapIndexOrder[];
+    asks: import("./worker/electrumWorker").SwapIndexOrder[];
+  } | null;
   resolveWaveName: (name: string) => { target: string } | null;
   checkWaveAvailable: (name: string) => boolean;
 }>(worker);

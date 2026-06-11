@@ -117,6 +117,17 @@ async function resolveWaveRaw(
   }
 }
 
+/** One side-entry of the RXinDexer swap-index orderbook (swap.get_orders with both refs). */
+export interface SwapIndexOrder {
+  order_id: string; // 72-hex backing outpoint (byte-reversed by hash_to_hex_str)
+  tx_hash: string; // the RSWP advertisement txid, display order — fillable via its ad
+  price: number;
+  amount: number;
+  side: "buy" | "sell";
+  maker_address: string | null;
+  status: string; // "open" | ...
+}
+
 const worker = {
   ready: false,
   active: true,
@@ -357,6 +368,28 @@ const worker = {
       return result?.height ?? 0;
     } catch {
       return 0;
+    }
+  },
+  // RXinDexer swap-index orderbook for a (base, quote) pair. Both refs are the
+  // `<sha256-of-ref hex>_0` query form. Returns null when the server lacks the
+  // swap index (older indexers / not yet deployed) so callers can degrade.
+  async getSwapOrderbook(baseRef: string, quoteRef: string) {
+    try {
+      const result = (await electrum.client?.request(
+        "swap.get_orders",
+        baseRef,
+        quoteRef
+      )) as
+        | {
+            bids: SwapIndexOrder[];
+            asks: SwapIndexOrder[];
+          }
+        | { error: string }
+        | undefined;
+      if (!result || "error" in result) return null;
+      return result;
+    } catch {
+      return null;
     }
   },
   async resolveWaveName(name: string): Promise<{
