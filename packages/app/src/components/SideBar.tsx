@@ -19,6 +19,7 @@ import {
   TbCoins,
   TbStack2,
   TbLock,
+  TbChartLine,
 } from "react-icons/tb";
 import MenuButton from "./MenuButton";
 import SyncBar from "./SyncBar";
@@ -114,6 +115,13 @@ export default function SideBar({ ...rest }: GridProps) {
           leftIcon={<Icon as={RiSwap2Line} boxSize={5} />}
         >
           {"Swap"}
+        </MenuButton>
+        <MenuButton
+          to="/predict"
+          match={["/predict"]}
+          leftIcon={<Icon as={TbChartLine} boxSize={5} />}
+        >
+          {"Predict"}
         </MenuButton>
         <MenuButton to="/market" leftIcon={<Icon as={MdSell} boxSize={5} />}>
           {"Marketplace"}

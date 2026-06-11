@@ -64,6 +64,7 @@
     "match-sorter": "^8.0.0",
     "mime": "^3.0.0",
     "qrcode.react": "^3.2.0",
+    "radiantswap": "link:../../../RadiantSwap",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.2.9",

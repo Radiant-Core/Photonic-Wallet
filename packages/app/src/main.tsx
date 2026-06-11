@@ -43,6 +43,10 @@ import Fungible from "./pages/Fungible";
 import SetupLayout from "./layouts/SetupLayout";
 import Swap from "./pages/Swap";
 import SwapLayout from "./layouts/SwapLayout";
+import PredictLayout from "./layouts/PredictLayout";
+import Predict from "./pages/Predict";
+import PredictCreate from "./pages/PredictCreate";
+import PredictMarket from "./pages/PredictMarket";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/source-code-pro";
 import "./index.css";
@@ -463,6 +467,23 @@ const router = createHashRouter([
               {
                 path: "/swap/orders",
                 element: <OpenOrders />,
+              },
+            ],
+          },
+          {
+            element: <PredictLayout />,
+            children: [
+              {
+                path: "/predict",
+                element: <Predict />,
+              },
+              {
+                path: "/predict/create",
+                element: <PredictCreate />,
+              },
+              {
+                path: "/predict/m/:createTxid",
+                element: <PredictMarket />,
               },
             ],
           },

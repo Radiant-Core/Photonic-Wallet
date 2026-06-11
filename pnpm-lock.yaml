@@ -159,6 +159,9 @@ importers:
       qrcode.react:
         specifier: ^3.2.0
         version: 3.2.0(react@18.3.1)
+      radiantswap:
+        specifier: link:../../../RadiantSwap
+        version: link:../../../RadiantSwap
       react:
         specifier: ^18.3.1
         version: 18.3.1
