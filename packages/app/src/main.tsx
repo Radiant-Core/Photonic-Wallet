@@ -43,10 +43,12 @@ import Fungible from "./pages/Fungible";
 import SetupLayout from "./layouts/SetupLayout";
 import Swap from "./pages/Swap";
 import SwapLayout from "./layouts/SwapLayout";
-import PredictLayout from "./layouts/PredictLayout";
-import Predict from "./pages/Predict";
-import PredictCreate from "./pages/PredictCreate";
-import PredictMarket from "./pages/PredictMarket";
+// Predict (RadiantSwap prediction markets) is lazy-loaded in the router below.
+// Importing predict.ts -> radiantswap eagerly at app init pulled that heavy
+// module graph into the initial evaluation and reordered the prod bundle,
+// breaking a latent init cycle (a shared effect callback ended up undefined ->
+// "e is not a function" white-screen, prod-build only). Deferring execution to
+// route-visit time restores the working init order and code-splits the feature.
 import "@fontsource-variable/inter";
 import "@fontsource-variable/source-code-pro";
 import "./index.css";
@@ -471,22 +473,31 @@ const router = createHashRouter([
             ],
           },
           {
-            element: <PredictLayout />,
+            lazy: async () => ({
+              Component: (await import("./layouts/PredictLayout")).default,
+            }),
             children: [
               {
                 path: "/predict",
-                element: <Predict />,
+                lazy: async () => ({
+                  Component: (await import("./pages/Predict")).default,
+                }),
               },
               {
                 path: "/predict/create",
-                element: <PredictCreate />,
+                lazy: async () => ({
+                  Component: (await import("./pages/PredictCreate")).default,
+                }),
               },
               {
                 path: "/predict/m/:createTxid",
-                element: <PredictMarket />,
+                lazy: async () => ({
+                  Component: (await import("./pages/PredictMarket")).default,
+                }),
               },
             ],
           },
+
           {
             path: "/mint/user",
             element: <Mint tokenType="user" />,

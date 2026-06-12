@@ -112,6 +112,11 @@ export default defineConfig({
     APP_VERSION: JSON.stringify(process.env.npm_package_version),
   },
   resolve: {
+    // Force a single radiantjs instance across the whole graph (including the
+    // linked `radiantswap` package, which otherwise pulls its OWN copy). One
+    // shared copy = the patched one (see patches/), so the code-split /predict
+    // chunk can't bundle a second, unpatched radiantjs.
+    dedupe: ["@radiant-core/radiantjs"],
     alias: {
       "@app": path.resolve(__dirname, "./src"),
       "@lib": path.resolve(__dirname, "../lib/src"),

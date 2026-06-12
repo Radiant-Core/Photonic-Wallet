@@ -7,6 +7,9 @@ settings:
 overrides:
   protobufjs: ^7.5.5
 
+patchedDependencies:
+  '@radiant-core/radiantjs@2.0.5': 58c1e535c5688147c1146c30c02c06567dc7c494eeaa14ef49c28a04aa17175a
+
 importers:
 
   .:
@@ -92,7 +95,7 @@ importers:
         version: 0.3.2(@babel/core@7.29.0)(react@18.3.1)
       '@radiant-core/radiantjs':
         specifier: 2.0.5
-        version: 2.0.5
+        version: 2.0.5(patch_hash=58c1e535c5688147c1146c30c02c06567dc7c494eeaa14ef49c28a04aa17175a)
       '@rollup/plugin-inject':
         specifier: ^5.0.5
         version: 5.0.5(rollup@4.60.4)
@@ -276,7 +279,7 @@ importers:
         version: 1.8.0
       '@radiant-core/radiantjs':
         specifier: 2.0.5
-        version: 2.0.5
+        version: 2.0.5(patch_hash=58c1e535c5688147c1146c30c02c06567dc7c494eeaa14ef49c28a04aa17175a)
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
@@ -369,7 +372,7 @@ importers:
         version: 0.4.1
       '@radiant-core/radiantjs':
         specifier: 2.0.5
-        version: 2.0.5
+        version: 2.0.5(patch_hash=58c1e535c5688147c1146c30c02c06567dc7c494eeaa14ef49c28a04aa17175a)
       '@scure/base':
         specifier: 1.2.6
         version: 1.2.6
@@ -7042,7 +7045,7 @@ snapshots:
       react: 18.3.1
       use-sync-external-store: 1.6.0(react@18.3.1)
 
-  '@radiant-core/radiantjs@2.0.5':
+  '@radiant-core/radiantjs@2.0.5(patch_hash=58c1e535c5688147c1146c30c02c06567dc7c494eeaa14ef49c28a04aa17175a)':
     dependencies:
       '@noble/hashes': 1.8.0
       '@noble/secp256k1': 3.1.0

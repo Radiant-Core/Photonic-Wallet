@@ -20,3 +20,5 @@ minimumReleaseAgeExclude:
   - '@radiant-core/radiantjs@2.0.5'
 overrides:
   protobufjs: ^7.5.5
+patchedDependencies:
+  '@radiant-core/radiantjs@2.0.5': patches/@radiant-core__radiantjs@2.0.5.patch
