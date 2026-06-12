@@ -113,9 +113,10 @@ export default defineConfig({
   },
   resolve: {
     // Force a single radiantjs instance across the whole graph (including the
-    // linked `radiantswap` package, which otherwise pulls its OWN copy). One
-    // shared copy = the patched one (see patches/), so the code-split /predict
-    // chunk can't bundle a second, unpatched radiantjs.
+    // linked `radiantswap` package, which otherwise pulls its OWN copy). Without
+    // this the code-split /predict chunk bundles a second ~600KB radiantjs copy;
+    // deduping also kept the init-order crash class from recurring (fixed
+    // upstream in radiantjs 2.0.6, but one shared instance is correct regardless).
     dedupe: ["@radiant-core/radiantjs"],
     alias: {
       "@app": path.resolve(__dirname, "./src"),

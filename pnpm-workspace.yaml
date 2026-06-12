@@ -17,8 +17,6 @@ minimumReleaseAgeExclude:
   # until the policy window naturally clears each one. Older versions are
   # pruned once they're well past the window — no point listing exclusions
   # the policy already accepts on its own.
-  - '@radiant-core/radiantjs@2.0.5'
+  - '@radiant-core/radiantjs@2.0.6'
 overrides:
   protobufjs: ^7.5.5
-patchedDependencies:
-  '@radiant-core/radiantjs@2.0.5': patches/@radiant-core__radiantjs@2.0.5.patch
