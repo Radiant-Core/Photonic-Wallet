@@ -37,20 +37,24 @@ import {
   askProbability,
   cancelOrderAction,
   fetchLiveMarket,
+  fillBidAction,
   fillOrderAction,
   indexedOrderbook,
   listMyOrders,
   listTracked,
   mergeAction,
-  orderFromAdTxid,
-  orderIsOpen,
+  postBidAction,
+  postedKind,
+  postedOrderIsOpen,
   postOrderAction,
   redeemAction,
   resolveAction,
   revertAction,
   splitAction,
   statusLabel,
+  tradeFromAdTxid,
   walletIsSoloOracle,
+  type AdTrade,
   type IndexedAsk,
   type LiveMarket,
   type PostedOrder,
@@ -94,9 +98,12 @@ function OrdersPanel({
   ];
   const [posIdx, setPosIdx] = useState("0");
   const [priceRxd, setPriceRxd] = useState("");
+  const [bidSide, setBidSide] = useState<"yes" | "no">("yes");
+  const [bidAmountRxd, setBidAmountRxd] = useState("1");
+  const [bidTotalRxd, setBidTotalRxd] = useState("");
   const [book, setBook] = useState<{ available: boolean; asks: IndexedAsk[] } | null>(null);
   const [adTxid, setAdTxid] = useState("");
-  const [preview, setPreview] = useState<{ order: SellOrder; side: "yes" | "no"; open: boolean } | null>(null);
+  const [preview, setPreview] = useState<AdTrade | null>(null);
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
   const myOrders = useLiveQuery(
     () => listMyOrders(tracked.createTxid),
@@ -119,12 +126,14 @@ function OrdersPanel({
   useEffect(() => {
     (async () => {
       const entries = await Promise.all(
-        myOrders.map(async (o) => [o.adTxid, await orderIsOpen(o.order)] as const)
+        myOrders.map(
+          async (o) => [o.adTxid, await postedOrderIsOpen(o)] as const
+        )
       );
       setOpenMap(Object.fromEntries(entries));
     })();
     // `live` in deps: re-check open/closed whenever the market view refreshes —
-    // a fill or cancel spends the bound share UTXO without touching the list.
+    // a fill or cancel spends the bound UTXO without touching the list.
   }, [myOrders, live]);
 
   const post = () => {
@@ -147,17 +156,36 @@ function OrdersPanel({
   const lookupAd = async () => {
     setPreview(null);
     try {
-      setPreview(await orderFromAdTxid(tracked, adTxid));
+      setPreview(await tradeFromAdTxid(tracked, adTxid));
     } catch (e) {
       toast({ title: "Ad lookup failed", description: (e as Error).message, status: "error" });
     }
   };
 
+  const fillTrade = async (trade: AdTrade): Promise<string> => {
+    if (!trade.open) throw new Error("Order already filled or cancelled");
+    if (trade.kind === "bid") return await fillBidAction(tracked, live, trade.buy!);
+    return await fillOrderAction(tracked, trade.sell!);
+  };
+
   const fillFromBook = (ask: IndexedAsk) => {
-    run("Fill", async () => {
-      const { order, open } = await orderFromAdTxid(tracked, ask.adTxid);
-      if (!open) throw new Error("Order already filled or cancelled");
-      return await fillOrderAction(tracked, order);
+    run("Fill", async () => fillTrade(await tradeFromAdTxid(tracked, ask.adTxid)));
+  };
+
+  const postBid = () => {
+    const amount = Math.round(parseFloat(bidAmountRxd) * 100_000_000);
+    const total = Math.round(parseFloat(bidTotalRxd) * 100_000_000);
+    if (!Number.isFinite(amount) || amount < 546) {
+      toast({ title: "Enter a share amount ≥ 546 photons", status: "warning" });
+      return;
+    }
+    if (!Number.isFinite(total) || total <= 0) {
+      toast({ title: "Enter the RXD you are offering", status: "warning" });
+      return;
+    }
+    run("Post bid", async () => {
+      const posted = await postBidAction(tracked, bidSide, amount, total);
+      return posted.adTxid;
     });
   };
 
@@ -168,7 +196,7 @@ function OrdersPanel({
       </Heading>
 
       {positions.length > 0 && live.state.status === Status.OPEN && (
-        <Flex gap={2} mb={4} maxW="3xl" wrap="wrap">
+        <Flex gap={2} mb={3} maxW="3xl" wrap="wrap">
           <Select
             maxW="64"
             value={posIdx}
@@ -195,6 +223,40 @@ function OrdersPanel({
         </Flex>
       )}
 
+      {live.state.status === Status.OPEN && (
+        <Flex gap={2} mb={4} maxW="3xl" wrap="wrap">
+          <Select
+            maxW="28"
+            value={bidSide}
+            onChange={(e) => setBidSide(e.target.value as "yes" | "no")}
+          >
+            <option value="yes">YES</option>
+            <option value="no">NO</option>
+          </Select>
+          <InputGroup maxW="48">
+            <Input
+              type="number"
+              placeholder="shares"
+              value={bidAmountRxd}
+              onChange={(e) => setBidAmountRxd(e.target.value)}
+            />
+            <InputRightAddon>shares</InputRightAddon>
+          </InputGroup>
+          <InputGroup maxW="48">
+            <Input
+              type="number"
+              placeholder="offering"
+              value={bidTotalRxd}
+              onChange={(e) => setBidTotalRxd(e.target.value)}
+            />
+            <InputRightAddon>RXD</InputRightAddon>
+          </InputGroup>
+          <Button minW="28" isLoading={busy === "Post bid"} onClick={postBid}>
+            Post buy order
+          </Button>
+        </Flex>
+      )}
+
       {myOrders.length > 0 && (
         <Box mb={4}>
           <Text fontSize="sm" color="gray.400" mb={1}>
@@ -205,6 +267,9 @@ function OrdersPanel({
               {myOrders.map((o) => (
                 <Tr key={o.adTxid}>
                   <Td>
+                    <Badge variant="outline" mr={1}>
+                      {postedKind(o).toUpperCase()}
+                    </Badge>
                     <Badge colorScheme={o.side === "yes" ? "green" : "red"}>
                       {o.side.toUpperCase()}
                     </Badge>
@@ -261,7 +326,7 @@ function OrdersPanel({
         <Table size="sm" maxW="3xl" mb={4}>
           <Thead>
             <Tr>
-              <Th>Side</Th>
+              <Th>Order</Th>
               <Th textAlign="right">Amount</Th>
               <Th textAlign="right">Price</Th>
               <Th textAlign="right">Implied</Th>
@@ -273,6 +338,9 @@ function OrdersPanel({
             {book.asks.map((a) => (
               <Tr key={a.adTxid}>
                 <Td>
+                  <Badge variant="outline" mr={1}>
+                    {a.kind.toUpperCase()}
+                  </Badge>
                   <Badge colorScheme={a.side === "yes" ? "green" : "red"}>
                     {a.side.toUpperCase()}
                   </Badge>
@@ -318,13 +386,39 @@ function OrdersPanel({
       </Flex>
       {preview && (
         <Flex align="center" gap={3} mt={2} fontSize="sm">
+          <Badge variant="outline">{preview.kind.toUpperCase()}</Badge>
           <Badge colorScheme={preview.side === "yes" ? "green" : "red"}>
             {preview.side.toUpperCase()}
           </Badge>
-          <Photons value={preview.order.share.satoshis} />
+          <Photons
+            value={
+              preview.kind === "bid"
+                ? preview.buy!.shareOut.satoshis
+                : preview.sell!.share.satoshis
+            }
+          />
           <Text>for</Text>
-          <Photons value={preview.order.payment.satoshis} />
-          <Text>({pct(askProbability(preview.order.payment.satoshis, preview.order.share.satoshis))})</Text>
+          <Photons
+            value={
+              preview.kind === "bid"
+                ? preview.buy!.rxd.satoshis
+                : preview.sell!.payment.satoshis
+            }
+          />
+          <Text>
+            (
+            {pct(
+              askProbability(
+                preview.kind === "bid"
+                  ? preview.buy!.rxd.satoshis
+                  : preview.sell!.payment.satoshis,
+                preview.kind === "bid"
+                  ? preview.buy!.shareOut.satoshis
+                  : preview.sell!.share.satoshis
+              )
+            )}
+            )
+          </Text>
           <Badge colorScheme={preview.open ? "blue" : "gray"}>
             {preview.open ? "open" : "closed"}
           </Badge>
@@ -332,7 +426,7 @@ function OrdersPanel({
             <Button
               size="xs"
               isLoading={busy === "Fill"}
-              onClick={() => run("Fill", () => fillOrderAction(tracked, preview.order))}
+              onClick={() => run("Fill", () => fillTrade(preview))}
             >
               Fill
             </Button>

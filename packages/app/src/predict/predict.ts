@@ -21,6 +21,8 @@ import {
   buildRevert,
   buildSellOrder,
   fillSellOrder,
+  buildBuyOrder,
+  fillBuyOrder,
   buildShareTransfer,
   findMarketBeacon,
   encodeState,
@@ -36,6 +38,7 @@ import {
   type Utxo,
   type Outcome,
   type SellOrder,
+  type BuyOrder,
 } from "radiantswap";
 import { scriptHash } from "@lib/script";
 import db from "@app/db";
@@ -63,15 +66,23 @@ export interface TrackedMarket {
   addedAt: number;
 }
 
-/** A sell order this wallet posted (the ad is on-chain; the signed order is kept locally too). */
+/** An order this wallet posted (the ad is on-chain; the signed order is kept locally too).
+ *  `kind` "ask" = selling shares for RXD (order set); "bid" = offering RXD for shares (buy set).
+ *  Legacy entries without `kind` are asks. */
 export interface PostedOrder {
   adTxid: string;
   marketCreateTxid: string;
+  kind?: "ask" | "bid";
   side: "yes" | "no";
-  amount: number; // share photons offered
-  priceSats: number; // RXD photons asked
-  order: SellOrder;
+  amount: number; // share photons
+  priceSats: number; // RXD photons
+  order?: SellOrder;
+  buy?: BuyOrder;
   createdAt: number;
+}
+
+export function postedKind(o: PostedOrder): "ask" | "bid" {
+  return o.kind ?? "ask";
 }
 
 /** Live, chain-derived view of a tracked market. */
@@ -262,6 +273,11 @@ async function unspentByScript(lock: Buffer, expectRef?: Buffer): Promise<Utxo[]
  *  unspent at a time. This avoids `blockchain.ref.get`, whose per-session response cache can
  *  serve a stale location after the singleton moves (RXinDexer cache-invalidation bug). */
 export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
+  // A disconnected worker resolves scripthash queries to [] (not an error), which would render
+  // as "market not found" — fail loudly instead so the UI shows a retryable state.
+  if (!(await electrumWorker.value.isReady())) {
+    throw new Error("Not connected to an ElectrumX server — retry in a moment");
+  }
   const scripts = scriptsOf(t);
   const baseState = {
     expiry: t.expiry,
@@ -670,6 +686,7 @@ export async function postOrderAction(
   const posted: PostedOrder = {
     adTxid: built.txid,
     marketCreateTxid: t.createTxid,
+    kind: "ask",
     side,
     amount: share.satoshis,
     priceSats,
@@ -680,7 +697,106 @@ export async function postOrderAction(
   return posted;
 }
 
-/** Is the share UTXO behind an order still unspent (order still fillable)? */
+/** Offer `priceSats` RXD for `amount` shares: prepare an exact-value coin (its whole value is the
+ *  bid — surplus would be claimable by the taker), sign the buy order, broadcast its RSWP ad. */
+export async function postBidAction(
+  t: TrackedMarket,
+  side: "yes" | "no",
+  amount: number,
+  priceSats: number
+): Promise<PostedOrder> {
+  const { address, wif } = requireWallet();
+  const p2pkh = Script.buildPublicKeyHashOut(Address.fromString(address));
+
+  // prep: one exact-value output the order consumes whole, plus a change output that funds the
+  // advertisement tx (explicit chaining — a second db.txo selection here would race the wallet
+  // sync and double-spend the coin the prep just consumed: txn-mempool-conflict).
+  const prepFunding = await selectFunding(priceSats + 2 * feeHeadroom());
+  let prepChange = 0;
+  const prep = sized((feeSats) => {
+    const tx = new Transaction();
+    tx.from({
+      txId: prepFunding.txid,
+      outputIndex: prepFunding.vout,
+      script: prepFunding.script,
+      satoshis: prepFunding.satoshis,
+    });
+    tx.addOutput(new Transaction.Output({ script: p2pkh, satoshis: priceSats }));
+    prepChange = prepFunding.satoshis - priceSats - feeSats;
+    if (prepChange <= 0) throw new Error("Funding coin too small");
+    tx.to(address, prepChange);
+    tx.sign(PrivateKey.fromWIF(wif));
+    tx.seal();
+    return { hex: tx.toString() as string, txid: tx.id as string };
+  });
+  await broadcast(prep.hex);
+
+  const scripts = scriptsOf(t);
+  const refs = refsOf(t);
+  const order = buildBuyOrder({
+    side,
+    rxd: {
+      txid: prep.txid,
+      vout: 0,
+      satoshis: priceSats,
+      script: p2pkh.toHex() as string,
+      wif,
+    },
+    amount,
+    shareCode: side === "yes" ? scripts.yesCode : scripts.noCode,
+    makerRecipientPkh: walletPkh(),
+  });
+  const adScript = rswp.buildBuyAdvertisementScript(
+    order,
+    side === "yes" ? refs.yesRef : refs.noRef
+  );
+
+  // fund the ad from the prep's own change output (vout 1) — see chaining note above
+  const adFunding: KeyedUtxo = {
+    txid: prep.txid,
+    vout: 1,
+    satoshis: prepChange,
+    script: p2pkh.toHex() as string,
+    wif,
+  };
+  const built = sized((feeSats) => {
+    const tx = new Transaction();
+    tx.from({
+      txId: adFunding.txid,
+      outputIndex: adFunding.vout,
+      script: adFunding.script,
+      satoshis: adFunding.satoshis,
+    });
+    tx.addOutput(
+      new Transaction.Output({
+        script: Script.fromHex(adScript.toString("hex")),
+        satoshis: 0,
+      })
+    );
+    const change = adFunding.satoshis - feeSats;
+    if (change < 0) throw new Error("Funding coin too small");
+    if (change > 0) tx.to(address, change);
+    tx.sign(PrivateKey.fromWIF(adFunding.wif));
+    tx.seal();
+    return { hex: tx.toString() as string, txid: tx.id as string };
+  });
+  await broadcast(built.hex);
+
+  const posted: PostedOrder = {
+    adTxid: built.txid,
+    marketCreateTxid: t.createTxid,
+    kind: "bid",
+    side,
+    amount,
+    priceSats,
+    buy: order,
+    createdAt: Date.now(),
+  };
+  await saveMyOrder(posted);
+  return posted;
+}
+
+/** Is the UTXO behind an order still unspent (order still fillable)? */
 export async function orderIsOpen(order: SellOrder): Promise<boolean> {
   return await electrumWorker.value.isUtxoUnspent(
     order.share.txid,
@@ -689,11 +805,23 @@ export async function orderIsOpen(order: SellOrder): Promise<boolean> {
   );
 }
 
-/** One ask in the market's (share → RXD) book, as the indexer reports it. */
+/** Open/closed status for a posted order of either kind. */
+export async function postedOrderIsOpen(posted: PostedOrder): Promise<boolean> {
+  const bound =
+    postedKind(posted) === "bid" ? posted.buy!.rxd : posted.order!.share;
+  return await electrumWorker.value.isUtxoUnspent(
+    bound.txid,
+    bound.vout,
+    scriptHash(bound.script)
+  );
+}
+
+/** One order in the market's (share ↔ RXD) book, as the indexer reports it. */
 export interface IndexedAsk {
+  kind: "ask" | "bid";
   side: "yes" | "no";
   /** The RSWP advertisement txid (display order) — resolve to a fillable order
-   *  with orderFromAdTxid. */
+   *  with tradeFromAdTxid. */
   adTxid: string;
   amount: number;
   priceSats: number;
@@ -718,9 +846,10 @@ export async function indexedOrderbook(
   if (books.every((b) => b === null)) return { available: false, asks: [] };
   const asks: IndexedAsk[] = [];
   books.forEach((book, i) => {
-    for (const o of book?.asks || []) {
+    for (const o of [...(book?.asks || []), ...(book?.bids || [])]) {
       if (o.status !== "open" || !o.tx_hash) continue;
       asks.push({
+        kind: o.side === "buy" ? "bid" : "ask",
         side: pairs[i].side,
         adTxid: o.tx_hash,
         amount: o.amount,
@@ -729,16 +858,22 @@ export async function indexedOrderbook(
       });
     }
   });
-  // The indexer currently reports `amount` as the priceTerms total (== price) for sells, so
-  // resolve the true offered quantity from each ad's backing outpoint (capped to keep the
-  // book render cheap); failures keep the indexer value.
+  // The indexer's price/amount semantics are still settling (sells report amount == price), so
+  // resolve true amounts/prices from each ad's backing outpoint (capped to keep the book render
+  // cheap); failures keep the indexer values.
   await Promise.all(
     asks.slice(0, 25).map(async (a) => {
       try {
-        const { order } = await orderFromAdTxid(t, a.adTxid);
-        a.amount = order.share.satoshis;
+        const trade = await tradeFromAdTxid(t, a.adTxid);
+        if (trade.kind === "ask" && trade.sell) {
+          a.amount = trade.sell.share.satoshis;
+          a.priceSats = trade.sell.payment.satoshis;
+        } else if (trade.kind === "bid" && trade.buy) {
+          a.amount = trade.buy.shareOut.satoshis;
+          a.priceSats = trade.buy.rxd.satoshis;
+        }
       } catch {
-        /* keep indexer-reported amount */
+        /* keep indexer-reported values */
       }
     })
   );
@@ -750,11 +885,21 @@ export async function indexedOrderbook(
   return { available: true, asks };
 }
 
-/** Reconstruct a fillable SellOrder from an on-chain RSWP advertisement transaction. */
-export async function orderFromAdTxid(
+/** A fillable trade reconstructed from an on-chain RSWP advertisement (either side). */
+export interface AdTrade {
+  kind: "ask" | "bid";
+  side: "yes" | "no";
+  open: boolean;
+  sell?: SellOrder;
+  buy?: BuyOrder;
+}
+
+/** Reconstruct a fillable order from an on-chain RSWP advertisement transaction. The kind is
+ *  detected from the ad: shares offered = ask; native RXD offered wanting shares = bid. */
+export async function tradeFromAdTxid(
   t: TrackedMarket,
   adTxid: string
-): Promise<{ order: SellOrder; side: "yes" | "no"; open: boolean }> {
+): Promise<AdTrade> {
   const raw = await electrumWorker.value.getTransaction(adTxid.trim());
   if (!raw) throw new Error("Advertisement transaction not found");
   const { scripts } = outputScripts(raw);
@@ -765,24 +910,42 @@ export async function orderFromAdTxid(
   }
   if (!ad) throw new Error("No RSWP advertisement in that transaction");
   const refs = refsOf(t);
+  const idOf = (r: Buffer) => rswp.swapTokenId(r);
+
+  const backingRaw = await electrumWorker.value.getTransaction(ad.outpoint.txid);
+  if (!backingRaw) throw new Error("Offered output's transaction not found");
+  const backingTx = outputScripts(backingRaw);
+  const backingScript = backingTx.scripts[ad.outpoint.vout];
+  if (!backingScript) throw new Error("Offered output not found");
+  const backing = {
+    script: backingScript.toString("hex"),
+    satoshis: backingTx.values[ad.outpoint.vout],
+  };
+  const open = await electrumWorker.value.isUtxoUnspent(
+    ad.outpoint.txid,
+    ad.outpoint.vout,
+    scriptHash(backing.script)
+  );
+
+  if (ad.offeredTokenId === rswp.RXD_TOKEN_ID) {
+    // bid: RXD offered, shares wanted
+    const side =
+      ad.wantTokenId === idOf(refs.yesRef)
+        ? "yes"
+        : ad.wantTokenId === idOf(refs.noRef)
+        ? "no"
+        : null;
+    if (!side) throw new Error("Advertisement is not for this market's shares");
+    return { kind: "bid", side, open, buy: rswp.buyOrderFromAdvertisement(ad, side, backing) };
+  }
   const side =
-    ad.offeredTokenId === rswp.swapTokenId(refs.yesRef)
+    ad.offeredTokenId === idOf(refs.yesRef)
       ? "yes"
-      : ad.offeredTokenId === rswp.swapTokenId(refs.noRef)
+      : ad.offeredTokenId === idOf(refs.noRef)
       ? "no"
       : null;
   if (!side) throw new Error("Advertisement is not for this market's shares");
-
-  const shareRaw = await electrumWorker.value.getTransaction(ad.outpoint.txid);
-  if (!shareRaw) throw new Error("Offered share transaction not found");
-  const shareTx = outputScripts(shareRaw);
-  const shareScript = shareTx.scripts[ad.outpoint.vout];
-  if (!shareScript) throw new Error("Offered share output not found");
-  const order = rswp.sellOrderFromAdvertisement(ad, side, {
-    script: shareScript.toString("hex"),
-    satoshis: shareTx.values[ad.outpoint.vout],
-  });
-  return { order, side, open: await orderIsOpen(order) };
+  return { kind: "ask", side, open, sell: rswp.sellOrderFromAdvertisement(ad, side, backing) };
 }
 
 /** Atomically fill a sell order: pay the maker's pre-signed price, take the shares. Reconstruct
@@ -807,20 +970,72 @@ export async function fillOrderAction(
   return await broadcast(built.hex);
 }
 
-/** Cancel a posted order by moving the share to ourselves (spends the order's bound UTXO). */
-export async function cancelOrderAction(posted: PostedOrder): Promise<string> {
+/** Atomically fill a buy order: send the shares, take the maker's RXD. Picks the smallest
+ *  position that covers the amount; any surplus returns as share change. */
+export async function fillBidAction(
+  t: TrackedMarket,
+  live: LiveMarket,
+  order: BuyOrder
+): Promise<string> {
   const { address, wif } = requireWallet();
+  const positions = order.side === "yes" ? live.myYes : live.myNo;
+  const takerShare = positions
+    .filter((u) => u.satoshis >= order.shareOut.satoshis)
+    .sort((a, b) => a.satoshis - b.satoshis)[0];
+  if (!takerShare) {
+    throw new Error(
+      `No single ${order.side.toUpperCase()} position covers ${order.shareOut.satoshis} photons`
+    );
+  }
   const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
-    buildShareTransfer({
-      share: posted.order.share,
-      shareWif: wif,
-      recipientPkh: walletPkh(),
+    fillBuyOrder({
+      order,
+      takerShare,
+      takerShareWif: wif,
       funding,
+      payoutScriptHex: Script.buildPublicKeyHashOut(
+        Address.fromString(address)
+      ).toHex() as string,
+      takerChangePkh: walletPkh(),
       changeAddress: address,
       feeSats,
     })
   );
+  return await broadcast(built.hex);
+}
+
+/** Cancel a posted order by spending its bound UTXO back to ourselves: asks self-transfer the
+ *  share; bids self-send the exact-value RXD coin. */
+export async function cancelOrderAction(posted: PostedOrder): Promise<string> {
+  const { address, wif } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  let built: { hex: string };
+  if (postedKind(posted) === "bid") {
+    const coin = posted.buy!.rxd;
+    built = sized((feeSats) => {
+      const tx = new Transaction();
+      tx.from({ txId: coin.txid, outputIndex: coin.vout, script: coin.script, satoshis: coin.satoshis });
+      tx.from({ txId: funding.txid, outputIndex: funding.vout, script: funding.script, satoshis: funding.satoshis });
+      const back = coin.satoshis + funding.satoshis - feeSats;
+      if (back <= 0) throw new Error("Funding too small for fee");
+      tx.to(address, back);
+      tx.sign(PrivateKey.fromWIF(wif));
+      tx.seal();
+      return { hex: tx.toString() as string, txid: tx.id as string };
+    });
+  } else {
+    built = sized((feeSats) =>
+      buildShareTransfer({
+        share: posted.order!.share,
+        shareWif: wif,
+        recipientPkh: walletPkh(),
+        funding,
+        changeAddress: address,
+        feeSats,
+      })
+    );
+  }
   const txid = await broadcast(built.hex);
   await removeMyOrder(posted.adTxid);
   return txid;
