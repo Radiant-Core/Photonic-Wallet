@@ -25,6 +25,7 @@ import {
   fillBuyOrder,
   buildShareTransfer,
   findMarketBeacon,
+  verifyMarketBeacon,
   encodeState,
   impliedProbability,
   oracle as swapOracle,
@@ -101,6 +102,9 @@ export const statusLabel: Record<Status, string> = {
   [Status.RESOLVED_YES]: "Resolved YES",
   [Status.RESOLVED_NO]: "Resolved NO",
   [Status.REVERTED]: "Reverted",
+  // optimistic-oracle (MarketOpt) statuses — present in the SDK Status enum
+  [Status.PROPOSED_YES]: "Proposed YES (challenge window)",
+  [Status.PROPOSED_NO]: "Proposed NO (challenge window)",
 };
 
 /* ------------------------------- registry (kvp) ------------------------------- */
@@ -179,22 +183,46 @@ export async function openMarketByCreateTxid(
 ): Promise<TrackedMarket> {
   const raw = await electrumWorker.value.getTransaction(createTxid.trim());
   if (!raw) throw new Error("Transaction not found");
-  const { scripts } = outputScripts(raw);
+  const tx = new Transaction(raw);
+  const scripts = tx.outputs.map((o: { script: { toBuffer(): Buffer } }) =>
+    Buffer.from(o.script.toBuffer())
+  );
   const beacon = findMarketBeacon(scripts);
   if (!beacon) {
     throw new Error(
       "No RMKT beacon in that transaction — not a (self-describing) RadiantSwap market"
     );
   }
+  // Do NOT trust the beacon's own fields: re-anchor to the on-chain market. radiantjs
+  // input.prevTxId.toString('hex') is already display order (verified), which is what
+  // verifyMarketBeacon's encodeRef expects.
+  const createTx = {
+    inputs: tx.inputs.map((i: { prevTxId: Buffer; outputIndex: number }) => ({
+      txid: Buffer.from(i.prevTxId).toString("hex"),
+      vout: i.outputIndex,
+    })),
+    outputs: tx.outputs.map((o: { script: { toBuffer(): Buffer }; satoshis: number }) => ({
+      script: Buffer.from(o.script.toBuffer()),
+      satoshis: o.satoshis,
+    })),
+  };
+  const v = verifyMarketBeacon(beacon, createTx);
+  if (!v) {
+    throw new Error(
+      "RMKT beacon failed verification: its marketRef is not a singleton this transaction deploys, " +
+        "or output[0]/anchors don't match — treating as an untrusted/forged beacon."
+    );
+  }
   return {
     createTxid: createTxid.trim(),
-    question: beacon.question,
-    marketRef: beacon.refs.marketRef.toString("hex"),
-    yesRef: beacon.refs.yesRef.toString("hex"),
-    noRef: beacon.refs.noRef.toString("hex"),
-    expiry: beacon.expiry,
-    grace: beacon.grace,
-    oracle: beacon.oracle.toString("hex"),
+    question: v.question,
+    marketRef: v.marketRef.toString("hex"),
+    yesRef: v.refs.yesRef.toString("hex"),
+    noRef: v.refs.noRef.toString("hex"),
+    // resolution params come from the on-chain SINGLETON STATE, never the beacon
+    expiry: v.state.expiry,
+    grace: v.state.grace,
+    oracle: v.state.oracle.toString("hex"),
     addedAt: Date.now(),
   };
 }
@@ -956,6 +984,11 @@ export async function fillOrderAction(
 ): Promise<string> {
   const { address } = requireWallet();
   const scripts = scriptsOf(t);
+  // Fetch the live singleton so fillSellOrder can refuse a stale order on a non-OPEN market
+  // (a maker's pre-signed SINGLE|ACP ask stays fillable after resolution — without this the
+  // taker could overpay for a now-worthless losing share). fetchLiveMarket throws if the
+  // singleton is gone, which also correctly aborts the fill.
+  const live = await fetchLiveMarket(t);
   const funding = await selectFunding(order.payment.satoshis + feeHeadroom());
   const built = sized((feeSats) =>
     fillSellOrder({
@@ -964,6 +997,7 @@ export async function fillOrderAction(
       takerRecipientPkh: walletPkh(),
       funding,
       changeAddress: address,
+      marketScriptHex: live.market.script,
       feeSats,
     })
   );
