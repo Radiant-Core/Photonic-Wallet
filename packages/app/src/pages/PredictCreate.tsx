@@ -41,6 +41,10 @@ export default function PredictCreate() {
   const [threshold, setThreshold] = useState("2");
   const [kind, setKind] = useState<MarketKind>("binary");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // optimistic-oracle (MarketOpt) terms — binary markets only
+  const [useOptimistic, setUseOptimistic] = useState(false);
+  const [bondRxd, setBondRxd] = useState("0.1");
+  const [liveness, setLiveness] = useState("36");
   // categorical
   const [outcomeCount, setOutcomeCount] = useState(String(supportedOutcomeCounts[0] ?? 3));
   const [outcomeLabels, setOutcomeLabels] = useState("");
@@ -102,6 +106,20 @@ export default function PredictCreate() {
       }
       committee = { keys, threshold: th };
     }
+    let optimistic: { bond: number; liveness: number } | undefined;
+    if (kind === "binary" && useOptimistic) {
+      const bond = Math.round(parseFloat(bondRxd) * 100_000_000);
+      const lv = parseInt(liveness, 10);
+      if (!Number.isFinite(bond) || bond < 546) {
+        toast({ title: "Proposer bond must be at least 546 photons", status: "warning" });
+        return;
+      }
+      if (!Number.isInteger(lv) || lv < 1 || lv > 65535) {
+        toast({ title: "Challenge window must be 1…65535 blocks", status: "warning" });
+        return;
+      }
+      optimistic = { bond, liveness: lv };
+    }
     // per-kind validation
     let labels: string[] = [];
     if (kind === "categorical") {
@@ -133,7 +151,13 @@ export default function PredictCreate() {
       let createdTxid: string;
       let route = "m";
       if (kind === "binary") {
-        const t = await createMarketAction({ question: question.trim(), expiry: e, grace: g, committee });
+        const t = await createMarketAction({
+          question: question.trim(),
+          expiry: e,
+          grace: g,
+          committee,
+          optimistic,
+        });
         createdTxid = t.createTxid;
       } else if (kind === "categorical") {
         const t = await createCategoricalAction({
@@ -359,6 +383,45 @@ export default function PredictCreate() {
               <option value="3">3</option>
             </Select>
           </FormControl>
+        </>
+      )}
+
+      {kind === "binary" && (
+        <FormControl mb={4}>
+          <Checkbox
+            isChecked={useOptimistic}
+            onChange={(e) => setUseOptimistic(e.target.checked)}
+          >
+            Optimistic resolution (anyone can propose the outcome; bonded, with a challenge window)
+          </Checkbox>
+        </FormControl>
+      )}
+
+      {kind === "binary" && useOptimistic && (
+        <>
+          <Alert status="info" mb={4} borderRadius="md">
+            <AlertIcon />
+            After expiry, anyone may propose YES/NO by locking the bond. The oracle
+            {useCommittee ? " committee" : " (this wallet)"} can override within the challenge
+            window — slashing the bond — otherwise anyone finalizes the proposal afterwards and the
+            bond is returned to the proposer.
+          </Alert>
+          <HStack mb={4} spacing={4} align="start">
+            <FormControl isRequired>
+              <FormLabel>Proposer bond (RXD)</FormLabel>
+              <NumberInput value={bondRxd} onChange={(v) => setBondRxd(v)} min={0}>
+                <NumberInputField />
+              </NumberInput>
+              <FormHelperText>Locked by a proposer; ≥ 546 photons.</FormHelperText>
+            </FormControl>
+            <FormControl isRequired maxW="56">
+              <FormLabel>Challenge window (blocks)</FormLabel>
+              <NumberInput value={liveness} onChange={(v) => setLiveness(v)} min={1} max={65535}>
+                <NumberInputField />
+              </NumberInput>
+              <FormHelperText>Override window, 1…65535.</FormHelperText>
+            </FormControl>
+          </HStack>
         </>
       )}
 

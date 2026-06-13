@@ -29,17 +29,20 @@ import {
   Tr,
   useToast,
 } from "@chakra-ui/react";
-import { Status, type SellOrder, type Utxo } from "radiantswap";
+import { Status, type Utxo } from "radiantswap";
 import Photons from "@app/components/Photons";
 import { useLiveQuery } from "dexie-react-hooks";
 import { wallet } from "@app/signals";
 import {
   askProbability,
   cancelOrderAction,
+  challengeBlocksRemaining,
   fetchLiveMarket,
   fillBidAction,
   fillOrderAction,
+  finalizeAction,
   indexedOrderbook,
+  isOptimistic,
   listMyOrders,
   listTracked,
   mergeAction,
@@ -47,6 +50,8 @@ import {
   postedKind,
   postedOrderIsOpen,
   postOrderAction,
+  proposalConfirmations,
+  proposeAction,
   redeemAction,
   resolveAction,
   revertAction,
@@ -60,6 +65,7 @@ import {
   type PostedOrder,
   type TrackedMarket,
 } from "@app/predict/predict";
+import { bestDirectAsk, deriveMarketOdds } from "@app/predict/odds";
 
 const RXD = 100_000_000;
 
@@ -85,11 +91,15 @@ function OrdersPanel({
   live,
   busy,
   run,
+  book,
+  reloadBook,
 }: {
   tracked: TrackedMarket;
   live: LiveMarket;
   busy: string;
   run: (label: string, fn: () => Promise<string>) => Promise<void>;
+  book: { available: boolean; asks: IndexedAsk[] } | null;
+  reloadBook: () => void;
 }) {
   const toast = useToast();
   const positions = [
@@ -101,7 +111,6 @@ function OrdersPanel({
   const [bidSide, setBidSide] = useState<"yes" | "no">("yes");
   const [bidAmountRxd, setBidAmountRxd] = useState("1");
   const [bidTotalRxd, setBidTotalRxd] = useState("");
-  const [book, setBook] = useState<{ available: boolean; asks: IndexedAsk[] } | null>(null);
   const [adTxid, setAdTxid] = useState("");
   const [preview, setPreview] = useState<AdTrade | null>(null);
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
@@ -110,18 +119,7 @@ function OrdersPanel({
     [tracked.createTxid],
     [] as PostedOrder[]
   );
-
-  const loadBook = async () => {
-    try {
-      setBook(await indexedOrderbook(tracked));
-    } catch {
-      setBook({ available: false, asks: [] });
-    }
-  };
-  useEffect(() => {
-    loadBook();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracked.createTxid]);
+  const bookOdds = book?.available ? deriveMarketOdds(book.asks) : null;
 
   useEffect(() => {
     (async () => {
@@ -305,12 +303,21 @@ function OrdersPanel({
 
       <Flex align="center" gap={2} mb={1}>
         <Text fontSize="sm" color="gray.400">
-          Open orders (indexer)
+          Order book (indexer)
         </Text>
-        <Button size="xs" onClick={loadBook}>
+        <Button size="xs" onClick={reloadBook}>
           Refresh
         </Button>
       </Flex>
+      {bookOdds && bookOdds.mid !== null && (
+        <Flex align="center" gap={2} my={1} color="gray.500" fontSize="xs">
+          <Box flex="1" borderBottom="1px solid" borderColor="whiteAlpha.200" />
+          <Text whiteSpace="nowrap">
+            spread {bookOdds.spread!.toFixed(2)} · mid {bookOdds.mid.toFixed(2)}
+          </Text>
+          <Box flex="1" borderBottom="1px solid" borderColor="whiteAlpha.200" />
+        </Flex>
+      )}
       {book === null ? (
         <Spinner size="sm" />
       ) : !book.available ? (
@@ -447,6 +454,7 @@ export default function PredictMarket() {
   const [splitRxd, setSplitRxd] = useState("1");
   const [ckeys, setCkeys] = useState("");
   const [cwifs, setCwifs] = useState("");
+  const [book, setBook] = useState<{ available: boolean; asks: IndexedAsk[] } | null>(null);
 
   useEffect(() => {
     listTracked().then((rows) => {
@@ -457,10 +465,9 @@ export default function PredictMarket() {
     });
   }, [createTxid]);
 
-  const soloOracle = useMemo(
-    () => (tracked ? walletIsSoloOracle(tracked) : false),
-    [tracked]
-  );
+  // Plain const (not useMemo): walletIsSoloOracle reads wallet.value.wif/locked, which change on
+  // unlock — a [tracked]-keyed memo would stay stale if the wallet unlocks after this page mounts.
+  const soloOracle = tracked ? walletIsSoloOracle(tracked) : false;
   const threshold = tracked ? parseInt(tracked.oracle.substring(0, 2), 16) : 1;
   const committeeInput = () =>
     soloOracle || !tracked
@@ -491,6 +498,18 @@ export default function PredictMarket() {
     refresh();
   }, [refresh]);
 
+  const loadBook = useCallback(async () => {
+    if (!tracked) return;
+    try {
+      setBook(await indexedOrderbook(tracked));
+    } catch {
+      setBook({ available: false, asks: [] });
+    }
+  }, [tracked]);
+  useEffect(() => {
+    loadBook();
+  }, [loadBook]);
+
   const sets = useMemo(
     () => (live ? completeSets(live.myYes, live.myNo) : []),
     [live]
@@ -505,8 +524,9 @@ export default function PredictMarket() {
         description: txid,
         status: "success",
       });
-      // Singleton chain advances one tx per action; refetch the live view.
+      // Singleton chain advances one tx per action; refetch the live view + order book.
       await refresh();
+      await loadBook();
     } catch (e) {
       toast({
         title: `${label} failed`,
@@ -528,10 +548,37 @@ export default function PredictMarket() {
   const open = st === Status.OPEN;
   const resolved = st === Status.RESOLVED_YES || st === Status.RESOLVED_NO;
   const winningSide = st === Status.RESOLVED_YES ? "YES" : "NO";
-  const myWinning =
-    st === Status.RESOLVED_YES ? live?.myYes : st === Status.RESOLVED_NO ? live?.myNo : [];
   const revertibleAt = tracked.expiry + tracked.grace;
   const canRevert = open && live !== null && live.height >= revertibleAt;
+
+  // Market-level odds + one-click buy targets (Items 1 & 3), derived from the indexed book. Plain
+  // consts (not useMemo): they must NOT sit after the `if (!tracked) return` guard above as hooks,
+  // and they're cheap O(book) pure computations that also need to track the wallet address signal.
+  const odds = book?.available ? deriveMarketOdds(book.asks) : null;
+  const yesAsk = book?.available ? bestDirectAsk(book.asks, "yes", wallet.value.address) : null;
+  const noAsk = book?.available ? bestDirectAsk(book.asks, "no", wallet.value.address) : null;
+  const buyBest = (side: "yes" | "no", ask: IndexedAsk | null) => {
+    if (!live) return;
+    if (!ask) {
+      toast({ title: `No ${side.toUpperCase()} sell orders to fill yet`, status: "warning" });
+      return;
+    }
+    run(`Buy ${side.toUpperCase()}`, async () => {
+      const trade = await tradeFromAdTxid(tracked, ask.adTxid);
+      if (!trade.open) throw new Error("That order was just filled — refresh and retry");
+      if (trade.kind !== "ask" || !trade.sell) throw new Error("Unexpected order kind");
+      return await fillOrderAction(tracked, trade.sell);
+    });
+  };
+
+  // Optimistic-oracle (MarketOpt) lifecycle flags (Item 4).
+  const optimistic = isOptimistic(tracked);
+  const proposed = st === Status.PROPOSED_YES || st === Status.PROPOSED_NO;
+  const proposedSide = st === Status.PROPOSED_YES ? "YES" : "NO";
+  const canPropose = optimistic && open && live !== null && live.height >= tracked.expiry;
+  const challengeLeft =
+    optimistic && proposed && live ? challengeBlocksRemaining(tracked, live) : 0;
+  const canFinalize = proposed && challengeLeft === 0;
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
@@ -542,6 +589,68 @@ export default function PredictMarket() {
         market {tracked.marketRef.substring(0, 16)}… · created{" "}
         {tracked.createTxid.substring(0, 8)}…
       </Text>
+
+      {odds && odds.yesProb !== null ? (
+        <Box mb={5} maxW="3xl">
+          <Flex justify="space-between" align="flex-end" mb={2}>
+            <Box>
+              <Text as="span" fontSize="3xl" fontWeight="bold" color="green.300" lineHeight="1">
+                {pct(odds.yesProb)}
+              </Text>{" "}
+              <Text as="span" fontSize="md" color="green.300" fontWeight="semibold">
+                YES
+              </Text>
+            </Box>
+            <Box textAlign="right">
+              <Text as="span" fontSize="md" color="red.300" fontWeight="semibold">
+                NO
+              </Text>{" "}
+              <Text as="span" fontSize="3xl" fontWeight="bold" color="red.300" lineHeight="1">
+                {/* Derive NO from the rounded YES so the two halves always sum to 100%. */}
+                {100 - Math.round(odds.yesProb * 100)}%
+              </Text>
+            </Box>
+          </Flex>
+          <Flex h="10px" borderRadius="full" overflow="hidden" bg="whiteAlpha.200" mb={3}>
+            <Box bg="green.400" w={`${Math.max(0, Math.min(100, odds.yesProb * 100))}%`} />
+            <Box bg="red.400" flex="1" />
+          </Flex>
+          {open && (
+            <Flex gap={3} wrap="wrap">
+              <Button
+                flex="1"
+                minW="40"
+                colorScheme="green"
+                variant="outline"
+                isLoading={busy === "Buy YES"}
+                isDisabled={!yesAsk || !live}
+                onClick={() => buyBest("yes", yesAsk)}
+              >
+                Buy YES
+                {yesAsk ? ` · ${pct(askProbability(yesAsk.priceSats, yesAsk.amount))}` : ""}
+              </Button>
+              <Button
+                flex="1"
+                minW="40"
+                colorScheme="red"
+                variant="outline"
+                isLoading={busy === "Buy NO"}
+                isDisabled={!noAsk || !live}
+                onClick={() => buyBest("no", noAsk)}
+              >
+                Buy NO
+                {noAsk ? ` · ${pct(askProbability(noAsk.priceSats, noAsk.amount))}` : ""}
+              </Button>
+            </Flex>
+          )}
+        </Box>
+      ) : (
+        book?.available && (
+          <Text fontSize="sm" color="gray.500" mb={4}>
+            No market price yet — post the first order below to set the odds.
+          </Text>
+        )
+      )}
 
       {error && (
         <Alert status="error" mb={4} borderRadius="md">
@@ -561,7 +670,13 @@ export default function PredictMarket() {
                 <Badge
                   fontSize="md"
                   colorScheme={
-                    open ? "blue" : st === Status.REVERTED ? "orange" : "green"
+                    open
+                      ? "blue"
+                      : proposed
+                      ? "purple"
+                      : st === Status.REVERTED
+                      ? "orange"
+                      : "green"
                   }
                 >
                   {statusLabel[live.state.status]}
@@ -692,12 +807,21 @@ export default function PredictMarket() {
             </Box>
           )}
 
-          <OrdersPanel tracked={tracked} live={live} busy={busy} run={run} />
+          <OrdersPanel
+            tracked={tracked}
+            live={live}
+            busy={busy}
+            run={run}
+            book={book}
+            reloadBook={loadBook}
+          />
 
           <Heading size="sm" mb={2}>
             Resolution
           </Heading>
-          {open && !soloOracle && (
+          {/* Committee/oracle key inputs — needed to resolve a classic market, or to OVERRIDE a
+              proposal on an optimistic one. Shown while the market is open or has a live proposal. */}
+          {!soloOracle && (open || proposed) && (
             <Box mb={2} maxW="2xl">
               <Text fontSize="sm" color="gray.400" mb={1}>
                 Committee market ({threshold}-of-N). Member pubkeys in slot
@@ -722,12 +846,109 @@ export default function PredictMarket() {
               />
             </Box>
           )}
+
+          {/* Optimistic proposal status + challenge-window countdown. */}
+          {optimistic && proposed && live && tracked.optimistic && (
+            <Alert status="info" mb={3} borderRadius="md" maxW="2xl" alignItems="flex-start">
+              <AlertIcon />
+              <Box fontSize="sm">
+                <Text>
+                  Proposed <b>{proposedSide}</b> — challenge window{" "}
+                  {proposalConfirmations(live)}/{tracked.optimistic.liveness} blocks.{" "}
+                  {challengeLeft > 0
+                    ? `${challengeLeft} block(s) until anyone can finalize.`
+                    : "Finalizable now."}
+                </Text>
+                <Text color="gray.400" mt={1}>
+                  Proposer bond <Photons value={tracked.optimistic.bond} /> is repaid on
+                  finalize, or slashed if the committee overrides the proposal.
+                </Text>
+              </Box>
+            </Alert>
+          )}
+
           <HStack wrap="wrap" mb={2}>
+            {/* Optimistic OPEN: anyone may propose an outcome (and lock a bond) after expiry. */}
+            {optimistic && open && (
+              <>
+                <Button
+                  size="sm"
+                  colorScheme="green"
+                  isLoading={busy === "Propose YES"}
+                  isDisabled={!canPropose}
+                  onClick={() =>
+                    run("Propose YES", () =>
+                      proposeAction(tracked, live, Status.PROPOSED_YES)
+                    )
+                  }
+                >
+                  Propose YES
+                </Button>
+                <Button
+                  size="sm"
+                  colorScheme="red"
+                  isLoading={busy === "Propose NO"}
+                  isDisabled={!canPropose}
+                  onClick={() =>
+                    run("Propose NO", () =>
+                      proposeAction(tracked, live, Status.PROPOSED_NO)
+                    )
+                  }
+                >
+                  Propose NO
+                </Button>
+              </>
+            )}
+
+            {/* Optimistic PROPOSED: anyone finalizes after liveness; committee may override. */}
+            {optimistic && proposed && (
+              <>
+                <Button
+                  size="sm"
+                  colorScheme="blue"
+                  isLoading={busy === "Finalize"}
+                  isDisabled={!canFinalize}
+                  onClick={() => run("Finalize", () => finalizeAction(tracked, live))}
+                >
+                  {canFinalize ? `Finalize ${proposedSide}` : `Finalize (in ${challengeLeft})`}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorScheme="green"
+                  isLoading={busy === "Override YES"}
+                  onClick={() =>
+                    run("Override YES", () =>
+                      resolveAction(tracked, live, Status.RESOLVED_YES, committeeInput())
+                    )
+                  }
+                >
+                  Override → YES
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorScheme="red"
+                  isLoading={busy === "Override NO"}
+                  onClick={() =>
+                    run("Override NO", () =>
+                      resolveAction(tracked, live, Status.RESOLVED_NO, committeeInput())
+                    )
+                  }
+                >
+                  Override → NO
+                </Button>
+              </>
+            )}
+
+            {/* Committee/oracle resolve (classic markets, or an immediate settle on an optimistic
+                open market) + permissionless revert after expiry + grace. */}
             {open && (
               <>
                 <Button
                   size="sm"
                   colorScheme="green"
+                  variant={optimistic ? "outline" : "solid"}
                   isLoading={busy === "Resolve YES"}
                   onClick={() =>
                     run("Resolve YES", () =>
@@ -740,6 +961,7 @@ export default function PredictMarket() {
                 <Button
                   size="sm"
                   colorScheme="red"
+                  variant={optimistic ? "outline" : "solid"}
                   isLoading={busy === "Resolve NO"}
                   onClick={() =>
                     run("Resolve NO", () =>
@@ -760,12 +982,25 @@ export default function PredictMarket() {
                 </Button>
               </>
             )}
-            {!open && <Text fontSize="sm" color="gray.400">Final.</Text>}
+            {!open && !proposed && (
+              <Text fontSize="sm" color="gray.400">
+                Final.
+              </Text>
+            )}
           </HStack>
+
+          {optimistic && open && live && live.height < tracked.expiry && (
+            <Text fontSize="xs" color="gray.500" maxW="2xl" mb={1}>
+              Proposals open at block {tracked.expiry.toLocaleString()} (current{" "}
+              {live.height.toLocaleString()}).
+            </Text>
+          )}
           <Text fontSize="xs" color="gray.500" maxW="2xl">
-            {soloOracle
-              ? "This wallet holds the market's operator oracle key."
-              : "Resolution needs the committee threshold; the chain stores only the keyset hash, so the member pubkeys must be supplied in their original slot order."}{" "}
+            {optimistic
+              ? "Optimistic market: after expiry anyone may propose the outcome by locking a bond; the committee can override within the challenge window (slashing the bond), after which anyone may finalize and the bond returns to the proposer. "
+              : soloOracle
+              ? "This wallet holds the market's operator oracle key. "
+              : "Resolution needs the committee threshold; the chain stores only the keyset hash, so the member pubkeys must be supplied in their original slot order. "}
             Revert is permissionless once the chain passes expiry + grace, and
             leaves every complete set reclaimable via merge.
           </Text>

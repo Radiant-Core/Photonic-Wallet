@@ -19,6 +19,10 @@ import {
   buildRedeem,
   buildResolve,
   buildRevert,
+  buildPropose,
+  buildFinalize,
+  marketStateFromScript,
+  NO_PROPOSER,
   buildSellOrder,
   fillSellOrder,
   buildBuyOrder,
@@ -53,6 +57,7 @@ import {
   type KeyedUtxo,
   type Utxo,
   type Outcome,
+  type Proposal,
   type SellOrder,
   type BuyOrder,
   type CatRefs,
@@ -93,6 +98,15 @@ export interface TrackedMarket {
   outcomeLabels?: string[];
   /** Scalar metadata: bin edges (K+1 values) + optional unit; outcome k covers [edges[k-1], edges[k]). */
   scalar?: { edges: number[]; unit?: string };
+  /** Optimistic-oracle (MarketOpt) terms, fixed at creation. Present iff this is an optimistic
+   *  binary market — the singleton then carries a 74-byte state and supports propose/finalize. */
+  optimistic?: { bond: number; liveness: number };
+}
+
+/** True for an optimistic (MarketOpt) binary market — its singleton carries a 74-byte state and
+ *  supports the permissionless propose → (liveness) → finalize flow plus committee override. */
+export function isOptimistic(t: TrackedMarket): boolean {
+  return marketKind(t) === "binary" && !!t.optimistic;
 }
 
 /** The shape of a tracked market (legacy rows without `kind` are binary). */
@@ -128,6 +142,10 @@ export interface LiveMarket {
   myYes: Utxo[]; // wallet's YES positions
   myNo: Utxo[];
   height: number; // current chain height (for expiry display)
+  /** Optimistic markets only: the confirmation height of the live proposal (the tx that created the
+   *  current PROPOSED_* singleton), or null when not in a proposal / unconfirmed. Drives the
+   *  challenge-window countdown: a finalize needs `height − proposalHeight + 1 >= liveness`. */
+  proposalHeight: number | null;
 }
 
 export const statusLabel: Record<Status, string> = {
@@ -196,7 +214,20 @@ export function refsOf(t: TrackedMarket): MarketRefs {
 }
 
 export function scriptsOf(t: TrackedMarket): MarketScripts {
-  return buildMarketScripts(refsOf(t));
+  // Optimistic markets use the MARKETOPT covenant for the singleton (the ShareToken code is
+  // identical either way); every lifecycle action rebuilds the lock through here, so this one
+  // switch keeps split/merge/redeem/resolve/revert/propose/finalize variant-correct.
+  return buildMarketScripts(refsOf(t), { optimistic: isOptimistic(t) });
+}
+
+/** The 72-hex DISPLAY-order ref string `blockchain.ref.get` expects (txid big-endian + vout
+ *  big-endian), derived from the internal-order ref hex stored on the tracked market. */
+function displayRef(internalRefHex: string): string {
+  const ref = Buffer.from(internalRefHex, "hex");
+  const txidBE = Buffer.from(ref.subarray(0, 32)).reverse().toString("hex");
+  const voutBE = Buffer.alloc(4);
+  voutBE.writeUInt32BE(ref.readUInt32LE(32), 0);
+  return txidBE + voutBE.toString("hex");
 }
 
 
@@ -246,15 +277,6 @@ export async function openMarketByCreateTxid(
         "or output[0]/anchors don't match — treating as an untrusted/forged beacon."
     );
   }
-  // fetchLiveMarket locates the singleton via the binary status-variant locks; an optimistic
-  // (MarketOpt, 74-byte state) singleton can't be tracked yet — refuse the import loudly rather
-  // than silently produce an un-viewable market.
-  if (v.state.optimistic) {
-    throw new Error(
-      "This is an optimistic (MarketOpt) market — committee-resolution markets only are supported " +
-        "in this wallet for now."
-    );
-  }
   return {
     createTxid: createTxid.trim(),
     question: v.question,
@@ -265,6 +287,11 @@ export async function openMarketByCreateTxid(
     expiry: v.state.expiry,
     grace: v.state.grace,
     oracle: v.state.oracle.toString("hex"),
+    // optimistic markets carry bond/liveness in the 74-byte state — persist them so the singleton
+    // (whose proposerPkh varies once proposed) can be rebuilt and tracked.
+    optimistic: v.state.optimistic
+      ? { bond: v.state.optimistic.bond, liveness: v.state.optimistic.liveness }
+      : undefined,
     addedAt: Date.now(),
   };
 }
@@ -349,44 +376,19 @@ export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
     throw new Error("Not connected to an ElectrumX server — retry in a moment");
   }
   const scripts = scriptsOf(t);
-  const baseState = {
-    expiry: t.expiry,
-    grace: t.grace,
-    oracle: Buffer.from(t.oracle, "hex"),
-  };
-  const statuses = [
-    Status.OPEN,
-    Status.RESOLVED_YES,
-    Status.RESOLVED_NO,
-    Status.REVERTED,
-  ];
-  const [height, ...byStatus] = await Promise.all([
-    electrumWorker.value.getBlockHeight(),
-    ...statuses.map((status) =>
-      unspentByScript(
-        buildStatefulOutput(
-          encodeState({ status, ...baseState }),
-          scripts.marketCode
-        ),
-        refsOf(t).marketRef
-      )
-    ),
-  ]);
-  let market: Utxo | null = null;
-  let state: MarketState | null = null;
-  for (let i = 0; i < statuses.length; i++) {
-    if (byStatus[i].length > 0) {
-      market = byStatus[i][0];
-      state = { status: statuses[i], ...baseState };
-      break;
-    }
-  }
-  if (!market || !state) {
-    throw new Error("Market singleton not found on chain");
-  }
-
-  const pkh = walletPkh();
   const refs = refsOf(t);
+
+  const [height, located] = await Promise.all([
+    electrumWorker.value.getBlockHeight(),
+    isOptimistic(t)
+      ? locateOptimisticSingleton(t, scripts, refs)
+      : locateBinarySingleton(t, scripts, refs),
+  ]);
+  const { market, state, proposalHeight } = located;
+
+  // Share anchors and the wallet's positions are read the same way for both variants — the
+  // ShareToken (YES/NO) code is identical whether the market is classic or optimistic.
+  const pkh = walletPkh();
   const [yesAnchors, noAnchors, myYes, myNo] = await Promise.all([
     unspentByScript(buildStatefulOutput(MARKER, scripts.yesCode), refs.yesRef),
     unspentByScript(buildStatefulOutput(MARKER, scripts.noCode), refs.noRef),
@@ -402,7 +404,110 @@ export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
     myYes,
     myNo,
     height,
+    proposalHeight,
   };
+}
+
+interface LocatedSingleton {
+  market: Utxo;
+  state: MarketState;
+  proposalHeight: number | null;
+}
+
+/** Classic binary market: the lock bytes are constant per status (expiry/grace/oracle never change,
+ *  collateral lives in the UTXO value), so probe the four status-variant locks by scripthash —
+ *  exactly one is unspent. Avoids `blockchain.ref.get`, whose response cache can serve a stale
+ *  location after the singleton moves. */
+async function locateBinarySingleton(
+  t: TrackedMarket,
+  scripts: MarketScripts,
+  refs: MarketRefs
+): Promise<LocatedSingleton> {
+  const baseState = {
+    expiry: t.expiry,
+    grace: t.grace,
+    oracle: Buffer.from(t.oracle, "hex"),
+  };
+  const statuses = [
+    Status.OPEN,
+    Status.RESOLVED_YES,
+    Status.RESOLVED_NO,
+    Status.REVERTED,
+  ];
+  const byStatus = await Promise.all(
+    statuses.map((status) =>
+      unspentByScript(
+        buildStatefulOutput(encodeState({ status, ...baseState }), scripts.marketCode),
+        refs.marketRef
+      )
+    )
+  );
+  for (let i = 0; i < statuses.length; i++) {
+    if (byStatus[i].length > 0) {
+      return { market: byStatus[i][0], state: { status: statuses[i], ...baseState }, proposalHeight: null };
+    }
+  }
+  throw new Error("Market singleton not found on chain");
+}
+
+/** Optimistic (MarketOpt) market: an OPEN singleton carries proposerPkh = NO_PROPOSER, so its lock
+ *  is reconstructable and locatable by scripthash (the hot path — no ref.get). Once proposed the
+ *  proposerPkh varies, so the proposed/resolved/reverted states can't be rebuilt: locate the
+ *  singleton via the ref index and decode the on-chain 74-byte state directly. */
+async function locateOptimisticSingleton(
+  t: TrackedMarket,
+  scripts: MarketScripts,
+  refs: MarketRefs
+): Promise<LocatedSingleton> {
+  const baseState = {
+    expiry: t.expiry,
+    grace: t.grace,
+    oracle: Buffer.from(t.oracle, "hex"),
+  };
+  const terms = t.optimistic!;
+  const openState: MarketState = {
+    status: Status.OPEN,
+    ...baseState,
+    optimistic: { bond: terms.bond, liveness: terms.liveness, proposerPkh: NO_PROPOSER },
+  };
+  const openUtxos = await unspentByScript(
+    buildStatefulOutput(encodeState(openState), scripts.marketCode),
+    refs.marketRef
+  );
+  if (openUtxos.length > 0) {
+    return { market: openUtxos[0], state: openState, proposalHeight: null };
+  }
+
+  // Past OPEN: ref.get -> latest tx -> decode the singleton output's state.
+  const refResp = await electrumWorker.value.getRef(displayRef(t.marketRef));
+  const latest = Array.isArray(refResp) ? refResp[refResp.length - 1] : undefined;
+  if (!latest?.tx_hash) {
+    throw new Error("Market singleton not found on chain (ref has no location)");
+  }
+  const raw = await electrumWorker.value.getTransaction(latest.tx_hash);
+  if (!raw) throw new Error("Could not fetch the market singleton transaction");
+  const { scripts: outScripts, values } = outputScripts(raw);
+  for (let i = 0; i < outScripts.length; i++) {
+    const decoded = marketStateFromScript(outScripts[i]);
+    // Bind the on-chain state to THIS market: same oracle descriptor and same optimistic terms.
+    if (
+      decoded?.optimistic &&
+      decoded.oracle.toString("hex") === t.oracle &&
+      decoded.optimistic.bond === terms.bond &&
+      decoded.optimistic.liveness === terms.liveness
+    ) {
+      const market: Utxo = {
+        txid: latest.tx_hash,
+        vout: i,
+        satoshis: values[i],
+        script: outScripts[i].toString("hex"),
+      };
+      const proposed =
+        decoded.status === Status.PROPOSED_YES || decoded.status === Status.PROPOSED_NO;
+      return { market, state: decoded, proposalHeight: proposed ? latest.height || null : null };
+    }
+  }
+  throw new Error("Market singleton not found in its latest transaction");
 }
 
 /* ------------------------------- wallet funding ------------------------------- */
@@ -471,6 +576,10 @@ export async function createMarketAction(p: {
   expiry: number;
   grace: number;
   committee?: { keys: string[]; threshold: number };
+  /** Set to deploy an optimistic (MarketOpt) market: anyone may propose an outcome after expiry by
+   *  locking `bond` photons; the committee can override (slashing the bond) within `liveness` blocks,
+   *  after which anyone may finalize and the bond returns to the proposer. */
+  optimistic?: { bond: number; liveness: number };
 }): Promise<TrackedMarket> {
   const { address, wif } = requireWallet();
   const priv = PrivateKey.fromWIF(wif);
@@ -526,6 +635,7 @@ export async function createMarketAction(p: {
       grace: p.grace,
       changeAddress: address,
       question: p.question,
+      optimistic: p.optimistic,
       feeSats,
     })
   );
@@ -542,6 +652,9 @@ export async function createMarketAction(p: {
     oracle: created.state.oracle.toString("hex"),
     committeeKeys: committee.keys.map((k) => k.toString("hex")),
     threshold: committee.threshold,
+    optimistic: created.state.optimistic
+      ? { bond: created.state.optimistic.bond, liveness: created.state.optimistic.liveness }
+      : undefined,
     addedAt: Date.now(),
   };
   await trackMarket(tracked);
@@ -688,6 +801,86 @@ export async function revertAction(
   const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildRevert({
+      scripts: scriptsOf(t),
+      market: live.market,
+      state: live.state,
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/* --------------------------- optimistic-oracle (MarketOpt) --------------------------- */
+
+/** Number of confirmations the live proposal has accrued (0 while unconfirmed). */
+export function proposalConfirmations(live: LiveMarket): number {
+  if (live.proposalHeight == null) return 0;
+  return Math.max(0, live.height - live.proposalHeight + 1);
+}
+
+/** Blocks left in the challenge window before a proposal can be finalized (0 = finalizable now). */
+export function challengeBlocksRemaining(t: TrackedMarket, live: LiveMarket): number {
+  const liveness = t.optimistic?.liveness ?? 0;
+  return Math.max(0, liveness - proposalConfirmations(live));
+}
+
+/** Propose an outcome on an optimistic market (permissionless, after expiry): lock the proposer
+ *  bond into the singleton and start the challenge window. The bond returns to THIS wallet at
+ *  finalize, or is slashed if the committee overrides. */
+export async function proposeAction(
+  t: TrackedMarket,
+  live: LiveMarket,
+  proposal: Proposal
+): Promise<string> {
+  if (!t.optimistic) throw new Error("Not an optimistic market");
+  if (live.state.status !== Status.OPEN) {
+    throw new Error("Can only propose on an open market");
+  }
+  if (live.height < t.expiry) {
+    throw new Error(
+      `Proposals open at block ${t.expiry.toLocaleString()} (current ${live.height.toLocaleString()})`
+    );
+  }
+  const { address } = requireWallet();
+  const funding = await selectFunding(t.optimistic.bond + feeHeadroom());
+  const built = sized((feeSats) =>
+    buildPropose({
+      scripts: scriptsOf(t),
+      market: live.market,
+      state: live.state,
+      proposal,
+      proposerPkh: walletPkh(),
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Finalize an unchallenged proposal once the liveness window has elapsed (permissionless): flip
+ *  PROPOSED_x → RESOLVED_x and repay the bond to the recorded proposer. */
+export async function finalizeAction(
+  t: TrackedMarket,
+  live: LiveMarket
+): Promise<string> {
+  if (!t.optimistic) throw new Error("Not an optimistic market");
+  if (
+    live.state.status !== Status.PROPOSED_YES &&
+    live.state.status !== Status.PROPOSED_NO
+  ) {
+    throw new Error("No live proposal to finalize");
+  }
+  const remaining = challengeBlocksRemaining(t, live);
+  if (remaining > 0) {
+    throw new Error(`Challenge window still open — ${remaining} block(s) remaining`);
+  }
+  const { address } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildFinalize({
       scripts: scriptsOf(t),
       market: live.market,
       state: live.state,
