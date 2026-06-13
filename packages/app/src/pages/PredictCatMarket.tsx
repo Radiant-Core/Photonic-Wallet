@@ -160,6 +160,13 @@ export default function PredictCatMarket() {
         {tracked.createTxid.substring(0, 8)}…
       </Text>
 
+      <Alert status="warning" mb={4} borderRadius="md" maxW="3xl">
+        <AlertIcon />
+        Advanced market type — mint, settle, redeem and merge are supported here, but there is no
+        peer-to-peer order book or market discovery for it yet (only binary markets are fully
+        tradeable and discoverable).
+      </Alert>
+
       {error && (
         <Alert status="error" mb={4} borderRadius="md">
           <AlertIcon />

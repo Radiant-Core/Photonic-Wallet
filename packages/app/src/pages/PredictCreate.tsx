@@ -40,6 +40,7 @@ export default function PredictCreate() {
   const [committeeKeys, setCommitteeKeys] = useState("");
   const [threshold, setThreshold] = useState("2");
   const [kind, setKind] = useState<MarketKind>("binary");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   // categorical
   const [outcomeCount, setOutcomeCount] = useState(String(supportedOutcomeCounts[0] ?? 3));
   const [outcomeLabels, setOutcomeLabels] = useState("");
@@ -182,18 +183,37 @@ export default function PredictCreate() {
         market after expiry + grace and all complete sets remain reclaimable.
       </Alert>
 
-      <FormControl mb={4}>
-        <FormLabel>Market type</FormLabel>
-        <Select value={kind} onChange={(e) => setKind(e.target.value as MarketKind)}>
-          <option value="binary">Binary (YES / NO)</option>
-          <option value="categorical">Categorical (K outcomes)</option>
-          <option value="scalar">Scalar (numeric range, bucketed)</option>
-        </Select>
-        <FormHelperText>
-          Binary and scalar markets are self-describing; categorical/scalar markets are tracked
-          locally by this wallet.
-        </FormHelperText>
+      <FormControl mb={3}>
+        <Checkbox
+          isChecked={showAdvanced}
+          onChange={(e) => {
+            setShowAdvanced(e.target.checked);
+            if (!e.target.checked) setKind("binary");
+          }}
+        >
+          Show advanced market types (categorical / scalar)
+        </Checkbox>
       </FormControl>
+
+      {showAdvanced && (
+        <FormControl mb={4}>
+          <FormLabel>Market type</FormLabel>
+          <Select value={kind} onChange={(e) => setKind(e.target.value as MarketKind)}>
+            <option value="binary">Binary (YES / NO)</option>
+            <option value="categorical">Categorical (K outcomes)</option>
+            <option value="scalar">Scalar (numeric range, bucketed)</option>
+          </Select>
+        </FormControl>
+      )}
+
+      {kind !== "binary" && (
+        <Alert status="warning" mb={4} borderRadius="md">
+          <AlertIcon />
+          Advanced market type. You can create, mint, settle, redeem and merge it in this wallet,
+          but there is no peer-to-peer order book or market discovery for it yet — only binary
+          markets are fully tradeable and discoverable.
+        </Alert>
+      )}
 
       <FormControl mb={4} isRequired>
         <FormLabel>Question</FormLabel>
