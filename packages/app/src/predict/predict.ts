@@ -213,6 +213,15 @@ export async function openMarketByCreateTxid(
         "or output[0]/anchors don't match — treating as an untrusted/forged beacon."
     );
   }
+  // fetchLiveMarket locates the singleton via the binary status-variant locks; an optimistic
+  // (MarketOpt, 74-byte state) singleton can't be tracked yet — refuse the import loudly rather
+  // than silently produce an un-viewable market.
+  if (v.state.optimistic) {
+    throw new Error(
+      "This is an optimistic (MarketOpt) market — committee-resolution markets only are supported " +
+        "in this wallet for now."
+    );
+  }
   return {
     createTxid: createTxid.trim(),
     question: v.question,
