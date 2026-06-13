@@ -32,6 +32,21 @@ import {
   rswp,
   Status,
   MARKER,
+  // categorical / scalar (K-outcome) markets
+  buildCreateCategorical,
+  buildCategoricalSplit,
+  buildCategoricalMerge,
+  buildCategoricalRedeem,
+  buildCategoricalResolve,
+  buildCategoricalRevert,
+  buildCategoricalScripts,
+  encodeCatState,
+  CAT_OPEN,
+  CAT_REVERTED,
+  SUPPORTED_K,
+  uniformRange,
+  binIndexForValue,
+  binLabel,
   type MarketRefs,
   type MarketScripts,
   type MarketState,
@@ -40,6 +55,9 @@ import {
   type Outcome,
   type SellOrder,
   type BuyOrder,
+  type CatRefs,
+  type CatScripts,
+  type CatState,
 } from "radiantswap";
 import { scriptHash } from "@lib/script";
 import db from "@app/db";
@@ -50,13 +68,15 @@ const { Script, Transaction, Address, PrivateKey } = rjs;
 
 const KVP_KEY = "predictMarkets";
 
-/** A locally tracked market — everything needed to rebuild its scripts, from the RMKT beacon. */
+/** A locally tracked market — everything needed to rebuild its scripts. Binary markets are
+ *  self-describing on-chain (RMKT beacon) and discoverable via the indexer; categorical/scalar
+ *  markets have no beacon yet, so the wallet keeps their refs + labels locally. */
 export interface TrackedMarket {
   createTxid: string;
   question: string;
   marketRef: string; // 36-byte hex (internal byte order)
-  yesRef: string;
-  noRef: string;
+  yesRef: string; // binary only ("" for categorical/scalar)
+  noRef: string; // binary only ("" for categorical/scalar)
   expiry: number;
   grace: number;
   oracle: string; // 33-byte descriptor hex
@@ -65,6 +85,19 @@ export interface TrackedMarket {
   committeeKeys?: string[];
   threshold?: number;
   addedAt: number;
+  /** Market shape. Absent = "binary" (legacy rows). */
+  kind?: "binary" | "categorical" | "scalar";
+  /** Categorical/scalar: one 36-byte ref hex per outcome (K = outcomeRefs.length). */
+  outcomeRefs?: string[];
+  /** Display label per outcome (categorical) or per bin (scalar). */
+  outcomeLabels?: string[];
+  /** Scalar metadata: bin edges (K+1 values) + optional unit; outcome k covers [edges[k-1], edges[k]). */
+  scalar?: { edges: number[]; unit?: string };
+}
+
+/** The shape of a tracked market (legacy rows without `kind` are binary). */
+export function marketKind(t: TrackedMarket): "binary" | "categorical" | "scalar" {
+  return t.kind ?? "binary";
 }
 
 /** An order this wallet posted (the ad is on-chain; the signed order is kept locally too).
@@ -656,6 +689,348 @@ export async function revertAction(
   const built = sized((feeSats) =>
     buildRevert({
       scripts: scriptsOf(t),
+      market: live.market,
+      state: live.state,
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/* ===================== categorical / scalar (K-outcome) markets ===================== */
+
+/** K for which a MarketCat covenant is embedded (so the wallet can create them). */
+export const supportedOutcomeCounts: number[] = SUPPORTED_K;
+
+/** Live, chain-derived view of a categorical/scalar market. */
+export interface LiveCatMarket {
+  state: CatState;
+  market: Utxo; // current singleton
+  anchors: (Utxo | null)[]; // one per outcome (1..K)
+  myShares: Utxo[][]; // wallet positions per outcome (index 0 = outcome 1)
+  height: number;
+  outcomes: number; // K
+}
+
+export function catRefsOf(t: TrackedMarket): CatRefs {
+  return {
+    marketRef: Buffer.from(t.marketRef, "hex"),
+    outcomeRefs: (t.outcomeRefs || []).map((r) => Buffer.from(r, "hex")),
+  };
+}
+
+export function catScriptsOf(t: TrackedMarket): CatScripts {
+  return buildCategoricalScripts(catRefsOf(t));
+}
+
+/** Status byte → label for a K-outcome market (0=Open, 1..K=Resolved to outcome k, 127=Reverted). */
+export function catStatusLabel(t: TrackedMarket, status: number): string {
+  if (status === CAT_OPEN) return "Open";
+  if (status === CAT_REVERTED) return "Reverted";
+  const k = status; // 1-based outcome
+  const label = (t.outcomeLabels || [])[k - 1];
+  return label ? `Resolved: ${label}` : `Resolved (outcome ${k})`;
+}
+
+/** Locate the categorical singleton among its status variants (0, 1..K, 127) the same way the
+ *  binary view does — the lock bytes are constant per status, exactly one is unspent — then load
+ *  the K anchors and the wallet's positions per outcome. */
+export async function fetchLiveCatMarket(t: TrackedMarket): Promise<LiveCatMarket> {
+  if (!(await electrumWorker.value.isReady())) {
+    throw new Error("Not connected to an ElectrumX server — retry in a moment");
+  }
+  const refs = catRefsOf(t);
+  const K = refs.outcomeRefs.length;
+  const scripts = catScriptsOf(t);
+  const base = { expiry: t.expiry, grace: t.grace, oracle: Buffer.from(t.oracle, "hex") };
+  const candidateStatuses = [CAT_OPEN, ...Array.from({ length: K }, (_, i) => i + 1), CAT_REVERTED];
+  const [height, ...byStatus] = await Promise.all([
+    electrumWorker.value.getBlockHeight(),
+    ...candidateStatuses.map((status) =>
+      unspentByScript(
+        buildStatefulOutput(encodeCatState({ status, ...base }), scripts.marketCode),
+        refs.marketRef
+      )
+    ),
+  ]);
+  let market: Utxo | null = null;
+  let state: CatState | null = null;
+  for (let i = 0; i < candidateStatuses.length; i++) {
+    if (byStatus[i].length > 0) {
+      market = byStatus[i][0];
+      state = { status: candidateStatuses[i], ...base };
+      break;
+    }
+  }
+  if (!market || !state) throw new Error("Market singleton not found on chain");
+
+  const pkh = walletPkh();
+  const perOutcome = await Promise.all(
+    refs.outcomeRefs.flatMap((ref, i) => [
+      unspentByScript(buildStatefulOutput(MARKER, scripts.outcomeCodes[i]), ref),
+      unspentByScript(buildStatefulOutput(pkh, scripts.outcomeCodes[i]), ref),
+    ])
+  );
+  const anchors: (Utxo | null)[] = [];
+  const myShares: Utxo[][] = [];
+  for (let i = 0; i < K; i++) {
+    anchors.push(perOutcome[2 * i][0] || null);
+    myShares.push(perOutcome[2 * i + 1]);
+  }
+  return { state, market, anchors, myShares, height, outcomes: K };
+}
+
+/** Committee for a categorical create/resolve: this wallet's key as 1-of-1, or supplied members. */
+function catCommittee(p?: { keys: string[]; threshold: number }) {
+  if (p) {
+    return { keys: p.keys.map((k) => Buffer.from(k, "hex")), threshold: p.threshold };
+  }
+  const { wif } = requireWallet();
+  return swapOracle.soloOracle(Buffer.from(PrivateKey.fromWIF(wif).toPublicKey().toBuffer()));
+}
+
+/** True when this wallet's key alone is the categorical market's oracle (solo operator). */
+export function walletIsCatSoloOracle(t: TrackedMarket): boolean {
+  const w = wallet.value;
+  if (!w.wif || w.locked) return false;
+  const pk = Buffer.from(PrivateKey.fromWIF(w.wif.toString()).toPublicKey().toBuffer());
+  return (
+    swapOracle.committeeDescriptor(swapOracle.soloOracle(pk)).toString("hex") === t.oracle
+  );
+}
+
+interface CreateCatParams {
+  question: string;
+  expiry: number;
+  grace: number;
+  outcomes: number; // K (must be in supportedOutcomeCounts)
+  labels: string[]; // K display labels
+  committee?: { keys: string[]; threshold: number };
+  kind?: "categorical" | "scalar";
+  scalar?: { edges: number[]; unit?: string };
+}
+
+/** Create a K-outcome categorical market: prep a coin into 1+K ref-inducing outputs, deploy, track. */
+export async function createCategoricalAction(p: CreateCatParams): Promise<TrackedMarket> {
+  const { address, wif } = requireWallet();
+  const K = p.outcomes;
+  if (!supportedOutcomeCounts.includes(K)) {
+    throw new Error(`Unsupported outcome count ${K} (supported: ${supportedOutcomeCounts.join(", ")})`);
+  }
+  if (p.labels.length !== K) throw new Error(`Need exactly ${K} outcome labels`);
+  const committee = catCommittee(p.committee);
+
+  // prep: fan one coin into 1+K outputs (first covers the create fee; all 1+K induce the refs).
+  const p2pkh = Script.buildPublicKeyHashOut(Address.fromString(address));
+  const PREP = [feeHeadroom() + 600_000, ...Array.from({ length: K }, () => 300_000)];
+  const prepFunding = await selectFunding(PREP.reduce((a, b) => a + b, 0) + feeHeadroom());
+  const prep = sized((feeSats) => {
+    const tx = new Transaction();
+    tx.from({
+      txId: prepFunding.txid,
+      outputIndex: prepFunding.vout,
+      script: prepFunding.script,
+      satoshis: prepFunding.satoshis,
+    });
+    for (const v of PREP) tx.addOutput(new Transaction.Output({ script: p2pkh, satoshis: v }));
+    const change = prepFunding.satoshis - PREP.reduce((a, b) => a + b, 0) - feeSats;
+    if (change < 0) throw new Error("Funding coin too small");
+    if (change > 0) tx.to(address, change);
+    tx.sign(PrivateKey.fromWIF(wif));
+    tx.seal();
+    return { hex: tx.toString() as string, txid: tx.id as string };
+  });
+  await broadcast(prep.hex);
+
+  const funding = PREP.map((satoshis, vout) => ({
+    txid: prep.txid,
+    vout,
+    satoshis,
+    script: p2pkh.toHex() as string,
+    wif,
+  })) as KeyedUtxo[];
+
+  const created = sized((feeSats) =>
+    buildCreateCategorical({
+      funding,
+      outcomes: K,
+      committee,
+      expiry: p.expiry,
+      grace: p.grace,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  await broadcast(created.hex);
+
+  const tracked: TrackedMarket = {
+    createTxid: created.txid,
+    question: p.question,
+    marketRef: created.refs.marketRef.toString("hex"),
+    yesRef: "",
+    noRef: "",
+    expiry: p.expiry,
+    grace: p.grace,
+    oracle: created.state.oracle.toString("hex"),
+    committeeKeys: committee.keys.map((k) => k.toString("hex")),
+    threshold: committee.threshold,
+    addedAt: Date.now(),
+    kind: p.kind || "categorical",
+    outcomeRefs: created.refs.outcomeRefs.map((r) => r.toString("hex")),
+    outcomeLabels: p.labels,
+    scalar: p.scalar,
+  };
+  await trackMarket(tracked);
+  return tracked;
+}
+
+/** Create a scalar market over [min,max] split into `bins` equal buckets (a bucketed categorical). */
+export async function createScalarAction(p: {
+  question: string;
+  expiry: number;
+  grace: number;
+  min: number;
+  max: number;
+  bins: number;
+  unit?: string;
+  committee?: { keys: string[]; threshold: number };
+}): Promise<TrackedMarket> {
+  const range = uniformRange(p.min, p.max, p.bins, p.unit); // throws if bins ∉ supported / bad range
+  const labels = Array.from({ length: p.bins }, (_, i) => binLabel(range, i + 1));
+  return createCategoricalAction({
+    question: p.question,
+    expiry: p.expiry,
+    grace: p.grace,
+    outcomes: p.bins,
+    labels,
+    committee: p.committee,
+    kind: "scalar",
+    scalar: { edges: range.edges, unit: p.unit },
+  });
+}
+
+/** Lock (K+1)·N, mint N of each of the K outcomes to the wallet. */
+export async function splitCatAction(
+  t: TrackedMarket,
+  live: LiveCatMarket,
+  amount: number
+): Promise<string> {
+  const { address } = requireWallet();
+  if (live.anchors.some((a) => !a)) throw new Error("Outcome anchors not found on chain");
+  const funding = await selectFunding((live.outcomes + 1) * amount + feeHeadroom());
+  const built = sized((feeSats) =>
+    buildCategoricalSplit({
+      scripts: catScriptsOf(t),
+      market: live.market,
+      anchors: live.anchors as Utxo[],
+      funding,
+      amount,
+      recipientPkh: walletPkh(),
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Burn one equal-value share of every outcome (a complete set) and reclaim the collateral. */
+export async function mergeCatAction(
+  t: TrackedMarket,
+  live: LiveCatMarket,
+  shares: Utxo[]
+): Promise<string> {
+  const { address, wif } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildCategoricalMerge({
+      market: live.market,
+      shares,
+      shareWif: wif,
+      funding,
+      payoutAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Burn a winning-outcome position post-resolution, redeeming 1:1. */
+export async function redeemCatAction(
+  t: TrackedMarket,
+  live: LiveCatMarket,
+  winningShare: Utxo
+): Promise<string> {
+  const { address, wif } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildCategoricalRedeem({
+      market: live.market,
+      state: live.state,
+      winningShare,
+      shareWif: wif,
+      funding,
+      payoutAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Resolve a categorical market to a 1-based outcome index (solo-operator markets only for now). */
+export async function resolveCatAction(
+  t: TrackedMarket,
+  live: LiveCatMarket,
+  outcome: number
+): Promise<string> {
+  const { address, wif } = requireWallet();
+  if (!walletIsCatSoloOracle(t)) {
+    throw new Error(
+      "In-wallet resolution is supported for solo-operator markets only (this market uses a committee)"
+    );
+  }
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildCategoricalResolve({
+      scripts: catScriptsOf(t),
+      refs: catRefsOf(t),
+      market: live.market,
+      state: live.state,
+      outcome,
+      committee: swapOracle.soloOracle(
+        Buffer.from(PrivateKey.fromWIF(wif).toPublicKey().toBuffer())
+      ),
+      signerWifs: [wif],
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Resolve a scalar market by the observed VALUE (mapped to its bin), solo-operator only. */
+export async function resolveScalarAction(
+  t: TrackedMarket,
+  live: LiveCatMarket,
+  value: number
+): Promise<string> {
+  if (!t.scalar) throw new Error("Not a scalar market");
+  const bin = binIndexForValue({ edges: t.scalar.edges, unit: t.scalar.unit }, value);
+  return resolveCatAction(t, live, bin);
+}
+
+/** Safety hatch: after expiry+grace flip an unresolved categorical market to REVERTED. */
+export async function revertCatAction(
+  t: TrackedMarket,
+  live: LiveCatMarket
+): Promise<string> {
+  const { address } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildCategoricalRevert({
+      scripts: catScriptsOf(t),
       market: live.market,
       state: live.state,
       funding,

@@ -9,6 +9,7 @@ import {
   FormControl,
   FormHelperText,
   FormLabel,
+  HStack,
   Input,
   NumberInput,
   NumberInputField,
@@ -16,9 +17,16 @@ import {
   Textarea,
   useToast,
 } from "@chakra-ui/react";
-import { createMarketAction } from "@app/predict/predict";
+import {
+  createMarketAction,
+  createCategoricalAction,
+  createScalarAction,
+  supportedOutcomeCounts,
+} from "@app/predict/predict";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { MAX_QUESTION_BYTES } from "radiantswap";
+
+type MarketKind = "binary" | "categorical" | "scalar";
 
 export default function PredictCreate() {
   const toast = useToast();
@@ -31,6 +39,15 @@ export default function PredictCreate() {
   const [useCommittee, setUseCommittee] = useState(false);
   const [committeeKeys, setCommitteeKeys] = useState("");
   const [threshold, setThreshold] = useState("2");
+  const [kind, setKind] = useState<MarketKind>("binary");
+  // categorical
+  const [outcomeCount, setOutcomeCount] = useState(String(supportedOutcomeCounts[0] ?? 3));
+  const [outcomeLabels, setOutcomeLabels] = useState("");
+  // scalar
+  const [scalarMin, setScalarMin] = useState("0");
+  const [scalarMax, setScalarMax] = useState("100");
+  const [scalarBins, setScalarBins] = useState(String(supportedOutcomeCounts[0] ?? 3));
+  const [scalarUnit, setScalarUnit] = useState("");
 
   useEffect(() => {
     electrumWorker.value
@@ -84,16 +101,66 @@ export default function PredictCreate() {
       }
       committee = { keys, threshold: th };
     }
+    // per-kind validation
+    let labels: string[] = [];
+    if (kind === "categorical") {
+      const K = parseInt(outcomeCount, 10);
+      labels = outcomeLabels
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (labels.length !== K) {
+        toast({ title: `Enter exactly ${K} outcome labels (one per line)`, status: "warning" });
+        return;
+      }
+    }
+    let smin = 0;
+    let smax = 0;
+    let sbins = 0;
+    if (kind === "scalar") {
+      smin = parseFloat(scalarMin);
+      smax = parseFloat(scalarMax);
+      sbins = parseInt(scalarBins, 10);
+      if (!Number.isFinite(smin) || !Number.isFinite(smax) || smax <= smin) {
+        toast({ title: "Scalar range needs max > min", status: "warning" });
+        return;
+      }
+    }
+
     setBusy(true);
     try {
-      const t = await createMarketAction({
-        question: question.trim(),
-        expiry: e,
-        grace: g,
-        committee,
-      });
+      let createdTxid: string;
+      let route = "m";
+      if (kind === "binary") {
+        const t = await createMarketAction({ question: question.trim(), expiry: e, grace: g, committee });
+        createdTxid = t.createTxid;
+      } else if (kind === "categorical") {
+        const t = await createCategoricalAction({
+          question: question.trim(),
+          expiry: e,
+          grace: g,
+          outcomes: parseInt(outcomeCount, 10),
+          labels,
+          committee,
+        });
+        createdTxid = t.createTxid;
+        route = "cat";
+      } else {
+        const t = await createScalarAction({
+          question: question.trim(),
+          expiry: e,
+          grace: g,
+          min: smin,
+          max: smax,
+          bins: sbins,
+          unit: scalarUnit.trim() || undefined,
+          committee,
+        });
+        createdTxid = t.createTxid;
+        route = "cat";
+      }
       toast({ title: "Market created", status: "success" });
-      navigate(`/predict/m/${t.createTxid}`);
+      navigate(`/predict/${route}/${createdTxid}`);
     } catch (err) {
       toast({
         title: "Create failed",
@@ -115,18 +182,105 @@ export default function PredictCreate() {
         market after expiry + grace and all complete sets remain reclaimable.
       </Alert>
 
+      <FormControl mb={4}>
+        <FormLabel>Market type</FormLabel>
+        <Select value={kind} onChange={(e) => setKind(e.target.value as MarketKind)}>
+          <option value="binary">Binary (YES / NO)</option>
+          <option value="categorical">Categorical (K outcomes)</option>
+          <option value="scalar">Scalar (numeric range, bucketed)</option>
+        </Select>
+        <FormHelperText>
+          Binary and scalar markets are self-describing; categorical/scalar markets are tracked
+          locally by this wallet.
+        </FormHelperText>
+      </FormControl>
+
       <FormControl mb={4} isRequired>
         <FormLabel>Question</FormLabel>
         <Input
-          placeholder="Will RXD ≥ $1 by 2026-12-31?"
+          placeholder={
+            kind === "scalar"
+              ? "What will the RXD price be on 2026-12-31?"
+              : kind === "categorical"
+              ? "Who wins the 2026 election?"
+              : "Will RXD ≥ $1 by 2026-12-31?"
+          }
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
         />
         <FormHelperText>
-          A clear, binary YES/NO question. Stored on-chain in the creation
-          transaction.
+          {kind === "binary"
+            ? "A clear, binary YES/NO question."
+            : kind === "categorical"
+            ? "A question with mutually-exclusive outcomes (exactly one wins)."
+            : "A numeric question; the range below is split into buckets."}
         </FormHelperText>
       </FormControl>
+
+      {kind === "categorical" && (
+        <>
+          <FormControl mb={4} isRequired maxW="40">
+            <FormLabel>Outcomes</FormLabel>
+            <Select value={outcomeCount} onChange={(e) => setOutcomeCount(e.target.value)}>
+              {supportedOutcomeCounts.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </Select>
+            <FormHelperText>Supported outcome counts.</FormHelperText>
+          </FormControl>
+          <FormControl mb={4} isRequired>
+            <FormLabel>Outcome labels (one per line)</FormLabel>
+            <Textarea
+              rows={Math.min(parseInt(outcomeCount, 10) || 3, 12)}
+              placeholder={"Alice\nBob\nCarol"}
+              value={outcomeLabels}
+              onChange={(e) => setOutcomeLabels(e.target.value)}
+            />
+            <FormHelperText>
+              Exactly {outcomeCount} mutually-exclusive outcomes; exactly one resolves as the winner.
+            </FormHelperText>
+          </FormControl>
+        </>
+      )}
+
+      {kind === "scalar" && (
+        <>
+          <HStack mb={4} spacing={4} align="start">
+            <FormControl isRequired>
+              <FormLabel>Min</FormLabel>
+              <NumberInput value={scalarMin} onChange={(v) => setScalarMin(v)}>
+                <NumberInputField />
+              </NumberInput>
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Max</FormLabel>
+              <NumberInput value={scalarMax} onChange={(v) => setScalarMax(v)}>
+                <NumberInputField />
+              </NumberInput>
+            </FormControl>
+            <FormControl isRequired maxW="32">
+              <FormLabel>Buckets</FormLabel>
+              <Select value={scalarBins} onChange={(e) => setScalarBins(e.target.value)}>
+                {supportedOutcomeCounts.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+          </HStack>
+          <FormControl mb={4} maxW="40">
+            <FormLabel>Unit (optional)</FormLabel>
+            <Input placeholder="$, %, pts…" value={scalarUnit} onChange={(e) => setScalarUnit(e.target.value)} />
+            <FormHelperText>
+              The range is split into {scalarBins} equal buckets; resolution picks the bucket
+              containing the observed value.
+            </FormHelperText>
+          </FormControl>
+        </>
+      )}
 
       <FormControl mb={4} isRequired>
         <FormLabel>Expiry (block height)</FormLabel>

@@ -495,6 +495,12 @@ const router = createHashRouter([
                   Component: (await import("./pages/PredictMarket")).default,
                 }),
               },
+              {
+                path: "/predict/cat/:createTxid",
+                lazy: async () => ({
+                  Component: (await import("./pages/PredictCatMarket")).default,
+                }),
+              },
             ],
           },
 

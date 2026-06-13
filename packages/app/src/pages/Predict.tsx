@@ -22,6 +22,7 @@ import { DeleteIcon } from "@chakra-ui/icons";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   listTracked,
+  marketKind,
   openMarketByCreateTxid,
   trackMarket,
   untrackMarket,
@@ -59,9 +60,9 @@ export default function Predict() {
     <Box mx={{ base: 2, md: 4 }}>
       <Alert status="info" mb={4} borderRadius="md">
         <AlertIcon />
-        Binary prediction markets, fully collateralized on-chain. Markets are
-        tracked locally — import one with its creation txid, or create your
-        own.
+        Fully-collateralized prediction markets on-chain — binary (YES/NO),
+        categorical (K outcomes), and scalar (numeric range). Markets are tracked
+        locally; import a binary market by its creation txid, or create your own.
       </Alert>
 
       <Flex gap={2} mb={6} maxW="2xl">
@@ -85,16 +86,20 @@ export default function Predict() {
           <Thead>
             <Tr>
               <Th>Question</Th>
+              <Th>Type</Th>
               <Th>Expiry</Th>
               <Th>Oracle</Th>
               <Th width="50px" />
             </Tr>
           </Thead>
           <Tbody>
-            {markets.map((m) => (
+            {markets.map((m) => {
+              const kind = marketKind(m);
+              const to = kind === "binary" ? `/predict/m/${m.createTxid}` : `/predict/cat/${m.createTxid}`;
+              return (
               <Tr key={m.createTxid}>
                 <Td>
-                  <Link to={`/predict/m/${m.createTxid}`}>
+                  <Link to={to}>
                     <Text fontWeight="semibold" _hover={{ color: "lightBlue.400" }}>
                       {m.question}
                     </Text>
@@ -102,6 +107,15 @@ export default function Predict() {
                       {m.createTxid.substring(0, 8)}…
                     </Text>
                   </Link>
+                </Td>
+                <Td>
+                  <Badge colorScheme={kind === "binary" ? "blue" : kind === "scalar" ? "purple" : "teal"}>
+                    {kind === "binary"
+                      ? "Binary"
+                      : kind === "scalar"
+                      ? `Scalar · ${m.outcomeRefs?.length ?? 0}`
+                      : `Categorical · ${m.outcomeRefs?.length ?? 0}`}
+                  </Badge>
                 </Td>
                 <Td>block {m.expiry.toLocaleString()}</Td>
                 <Td>
@@ -119,7 +133,8 @@ export default function Predict() {
                   />
                 </Td>
               </Tr>
-            ))}
+              );
+            })}
           </Tbody>
         </Table>
       )}
