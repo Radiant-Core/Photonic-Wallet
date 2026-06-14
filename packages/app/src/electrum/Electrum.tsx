@@ -95,6 +95,13 @@ const wrapped = wrap<{
     bids: import("./worker/electrumWorker").SwapIndexOrder[];
     asks: import("./worker/electrumWorker").SwapIndexOrder[];
   } | null;
+  listMarkets: (
+    limit?: number,
+    offset?: number
+  ) => import("./worker/electrumWorker").IndexedMarket[];
+  getMarket: (
+    marketRef: string
+  ) => import("./worker/electrumWorker").IndexedMarket | null;
   resolveWaveName: (name: string) => { target: string } | null;
   checkWaveAvailable: (name: string) => boolean;
 }>(worker);

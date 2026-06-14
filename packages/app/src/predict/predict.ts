@@ -2,8 +2,9 @@
  * RadiantSwap prediction-market glue — tracked-market registry, chain reads, and wallet-funded
  * lifecycle actions (create / split / merge / redeem / resolve / revert).
  *
- * Market discovery has no indexer endpoint yet (`market.*` is a deferred RadiantSwap plug-point),
- * so markets are tracked locally by their creation txid: the create tx carries a self-describing
+ * Binary markets are discoverable via the indexer (`market.list` / `market.get`, RMKT beacons);
+ * markets are also tracked locally by creation txid — a watchlist, and the only source for
+ * categorical/scalar markets (which carry no beacon). The create tx carries a self-describing
  * RMKT beacon (question + refs + params) from which every watch script is rebuilt. Live state is
  * read with two RPCs: `blockchain.ref.get` (the singleton's latest location) and
  * `blockchain.scripthash.listunspent` (anchors + the wallet's YES/NO positions, whose locking
@@ -30,6 +31,7 @@ import {
   buildShareTransfer,
   findMarketBeacon,
   verifyMarketBeacon,
+  encodeRef,
   encodeState,
   impliedProbability,
   oracle as swapOracle,
@@ -68,6 +70,7 @@ import { scriptHash } from "@lib/script";
 import db from "@app/db";
 import { wallet, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
+import type { IndexedMarket } from "@app/electrum/worker/electrumWorker";
 
 const { Script, Transaction, Address, PrivateKey } = rjs;
 
@@ -110,7 +113,9 @@ export function isOptimistic(t: TrackedMarket): boolean {
 }
 
 /** The shape of a tracked market (legacy rows without `kind` are binary). */
-export function marketKind(t: TrackedMarket): "binary" | "categorical" | "scalar" {
+export function marketKind(
+  t: TrackedMarket
+): "binary" | "categorical" | "scalar" {
   return t.kind ?? "binary";
 }
 
@@ -179,6 +184,40 @@ export async function untrackMarket(createTxid: string): Promise<void> {
   );
 }
 
+/** Convert an indexer display ref (`txid_vout`, big-endian txid) to the internal 36-byte hex a
+ *  TrackedMarket stores. */
+function refFromDisplay(ref: string): string {
+  const [txid, vout] = ref.split("_");
+  return encodeRef(txid, parseInt(vout, 10)).toString("hex");
+}
+
+/** Map an indexer-discovered market (verified RMKT beacon record) to a TrackedMarket for list
+ *  display + the mini odds bar. Resolution terms not in the beacon (committee keys, optimistic
+ *  bond/liveness) are intentionally omitted — they're re-anchored from chain by
+ *  openMarketByCreateTxid when the market is actually opened, so this object is display-only. */
+function indexedToTracked(im: IndexedMarket): TrackedMarket {
+  return {
+    createTxid: im.create_txid,
+    question: im.question || "(untitled market)",
+    marketRef: refFromDisplay(im.market_ref),
+    yesRef: refFromDisplay(im.yes_ref),
+    noRef: refFromDisplay(im.no_ref),
+    expiry: im.expiry,
+    grace: im.grace,
+    oracle: im.oracle,
+    addedAt: 0,
+    kind: "binary",
+  };
+}
+
+/** Discover binary prediction markets from the indexer's RMKT-beacon index, newest-first. Returns
+ *  [] when the connected indexer has no predict index (older indexers) so the Markets page falls
+ *  back to locally-tracked markets only. */
+export async function discoverMarkets(limit = 100): Promise<TrackedMarket[]> {
+  const rows = await electrumWorker.value.listMarkets(limit, 0);
+  return rows.map(indexedToTracked);
+}
+
 const ORDERS_KEY = "predictMyOrders";
 
 export async function listMyOrders(
@@ -230,7 +269,6 @@ function displayRef(internalRefHex: string): string {
   return txidBE + voutBE.toString("hex");
 }
 
-
 function outputScripts(rawTx: string): { scripts: Buffer[]; values: number[] } {
   const tx = new Transaction(rawTx);
   return {
@@ -265,10 +303,12 @@ export async function openMarketByCreateTxid(
       txid: Buffer.from(i.prevTxId).toString("hex"),
       vout: i.outputIndex,
     })),
-    outputs: tx.outputs.map((o: { script: { toBuffer(): Buffer }; satoshis: number }) => ({
-      script: Buffer.from(o.script.toBuffer()),
-      satoshis: o.satoshis,
-    })),
+    outputs: tx.outputs.map(
+      (o: { script: { toBuffer(): Buffer }; satoshis: number }) => ({
+        script: Buffer.from(o.script.toBuffer()),
+        satoshis: o.satoshis,
+      })
+    ),
   };
   const v = verifyMarketBeacon(beacon, createTx);
   if (!v) {
@@ -336,7 +376,10 @@ function zeroRefs(script: Buffer): Buffer {
 
 /** List unspent outputs locked by `lock`, keyed the way the indexer keys them (zero_refs), and
  *  filtered to entries actually carrying `expectRef` (the zeroed hash collides across markets). */
-async function unspentByScript(lock: Buffer, expectRef?: Buffer): Promise<Utxo[]> {
+async function unspentByScript(
+  lock: Buffer,
+  expectRef?: Buffer
+): Promise<Utxo[]> {
   const utxos = await electrumWorker.value.getUtxosByScriptHash(
     scriptHash(zeroRefs(lock).toString("hex"))
   );
@@ -437,14 +480,21 @@ async function locateBinarySingleton(
   const byStatus = await Promise.all(
     statuses.map((status) =>
       unspentByScript(
-        buildStatefulOutput(encodeState({ status, ...baseState }), scripts.marketCode),
+        buildStatefulOutput(
+          encodeState({ status, ...baseState }),
+          scripts.marketCode
+        ),
         refs.marketRef
       )
     )
   );
   for (let i = 0; i < statuses.length; i++) {
     if (byStatus[i].length > 0) {
-      return { market: byStatus[i][0], state: { status: statuses[i], ...baseState }, proposalHeight: null };
+      return {
+        market: byStatus[i][0],
+        state: { status: statuses[i], ...baseState },
+        proposalHeight: null,
+      };
     }
   }
   throw new Error("Market singleton not found on chain");
@@ -468,7 +518,11 @@ async function locateOptimisticSingleton(
   const openState: MarketState = {
     status: Status.OPEN,
     ...baseState,
-    optimistic: { bond: terms.bond, liveness: terms.liveness, proposerPkh: NO_PROPOSER },
+    optimistic: {
+      bond: terms.bond,
+      liveness: terms.liveness,
+      proposerPkh: NO_PROPOSER,
+    },
   };
   const openUtxos = await unspentByScript(
     buildStatefulOutput(encodeState(openState), scripts.marketCode),
@@ -480,9 +534,13 @@ async function locateOptimisticSingleton(
 
   // Past OPEN: ref.get -> latest tx -> decode the singleton output's state.
   const refResp = await electrumWorker.value.getRef(displayRef(t.marketRef));
-  const latest = Array.isArray(refResp) ? refResp[refResp.length - 1] : undefined;
+  const latest = Array.isArray(refResp)
+    ? refResp[refResp.length - 1]
+    : undefined;
   if (!latest?.tx_hash) {
-    throw new Error("Market singleton not found on chain (ref has no location)");
+    throw new Error(
+      "Market singleton not found on chain (ref has no location)"
+    );
   }
   const raw = await electrumWorker.value.getTransaction(latest.tx_hash);
   if (!raw) throw new Error("Could not fetch the market singleton transaction");
@@ -503,8 +561,13 @@ async function locateOptimisticSingleton(
         script: outScripts[i].toString("hex"),
       };
       const proposed =
-        decoded.status === Status.PROPOSED_YES || decoded.status === Status.PROPOSED_NO;
-      return { market, state: decoded, proposalHeight: proposed ? latest.height || null : null };
+        decoded.status === Status.PROPOSED_YES ||
+        decoded.status === Status.PROPOSED_NO;
+      return {
+        market,
+        state: decoded,
+        proposalHeight: proposed ? latest.height || null : null,
+      };
     }
   }
   throw new Error("Market singleton not found in its latest transaction");
@@ -653,7 +716,10 @@ export async function createMarketAction(p: {
     committeeKeys: committee.keys.map((k) => k.toString("hex")),
     threshold: committee.threshold,
     optimistic: created.state.optimistic
-      ? { bond: created.state.optimistic.bond, liveness: created.state.optimistic.liveness }
+      ? {
+          bond: created.state.optimistic.bond,
+          liveness: created.state.optimistic.liveness,
+        }
       : undefined,
     addedAt: Date.now(),
   };
@@ -741,8 +807,9 @@ export function walletIsSoloOracle(t: TrackedMarket): boolean {
     PrivateKey.fromWIF(w.wif.toString()).toPublicKey().toBuffer()
   );
   return (
-    swapOracle.committeeDescriptor(swapOracle.soloOracle(pk)).toString("hex") ===
-    t.oracle
+    swapOracle
+      .committeeDescriptor(swapOracle.soloOracle(pk))
+      .toString("hex") === t.oracle
   );
 }
 
@@ -821,7 +888,10 @@ export function proposalConfirmations(live: LiveMarket): number {
 }
 
 /** Blocks left in the challenge window before a proposal can be finalized (0 = finalizable now). */
-export function challengeBlocksRemaining(t: TrackedMarket, live: LiveMarket): number {
+export function challengeBlocksRemaining(
+  t: TrackedMarket,
+  live: LiveMarket
+): number {
   const liveness = t.optimistic?.liveness ?? 0;
   return Math.max(0, liveness - proposalConfirmations(live));
 }
@@ -875,7 +945,9 @@ export async function finalizeAction(
   }
   const remaining = challengeBlocksRemaining(t, live);
   if (remaining > 0) {
-    throw new Error(`Challenge window still open — ${remaining} block(s) remaining`);
+    throw new Error(
+      `Challenge window still open — ${remaining} block(s) remaining`
+    );
   }
   const { address } = requireWallet();
   const funding = await selectFunding(feeHeadroom());
@@ -930,20 +1002,33 @@ export function catStatusLabel(t: TrackedMarket, status: number): string {
 /** Locate the categorical singleton among its status variants (0, 1..K, 127) the same way the
  *  binary view does — the lock bytes are constant per status, exactly one is unspent — then load
  *  the K anchors and the wallet's positions per outcome. */
-export async function fetchLiveCatMarket(t: TrackedMarket): Promise<LiveCatMarket> {
+export async function fetchLiveCatMarket(
+  t: TrackedMarket
+): Promise<LiveCatMarket> {
   if (!(await electrumWorker.value.isReady())) {
     throw new Error("Not connected to an ElectrumX server — retry in a moment");
   }
   const refs = catRefsOf(t);
   const K = refs.outcomeRefs.length;
   const scripts = catScriptsOf(t);
-  const base = { expiry: t.expiry, grace: t.grace, oracle: Buffer.from(t.oracle, "hex") };
-  const candidateStatuses = [CAT_OPEN, ...Array.from({ length: K }, (_, i) => i + 1), CAT_REVERTED];
+  const base = {
+    expiry: t.expiry,
+    grace: t.grace,
+    oracle: Buffer.from(t.oracle, "hex"),
+  };
+  const candidateStatuses = [
+    CAT_OPEN,
+    ...Array.from({ length: K }, (_, i) => i + 1),
+    CAT_REVERTED,
+  ];
   const [height, ...byStatus] = await Promise.all([
     electrumWorker.value.getBlockHeight(),
     ...candidateStatuses.map((status) =>
       unspentByScript(
-        buildStatefulOutput(encodeCatState({ status, ...base }), scripts.marketCode),
+        buildStatefulOutput(
+          encodeCatState({ status, ...base }),
+          scripts.marketCode
+        ),
         refs.marketRef
       )
     ),
@@ -962,7 +1047,10 @@ export async function fetchLiveCatMarket(t: TrackedMarket): Promise<LiveCatMarke
   const pkh = walletPkh();
   const perOutcome = await Promise.all(
     refs.outcomeRefs.flatMap((ref, i) => [
-      unspentByScript(buildStatefulOutput(MARKER, scripts.outcomeCodes[i]), ref),
+      unspentByScript(
+        buildStatefulOutput(MARKER, scripts.outcomeCodes[i]),
+        ref
+      ),
       unspentByScript(buildStatefulOutput(pkh, scripts.outcomeCodes[i]), ref),
     ])
   );
@@ -978,19 +1066,28 @@ export async function fetchLiveCatMarket(t: TrackedMarket): Promise<LiveCatMarke
 /** Committee for a categorical create/resolve: this wallet's key as 1-of-1, or supplied members. */
 function catCommittee(p?: { keys: string[]; threshold: number }) {
   if (p) {
-    return { keys: p.keys.map((k) => Buffer.from(k, "hex")), threshold: p.threshold };
+    return {
+      keys: p.keys.map((k) => Buffer.from(k, "hex")),
+      threshold: p.threshold,
+    };
   }
   const { wif } = requireWallet();
-  return swapOracle.soloOracle(Buffer.from(PrivateKey.fromWIF(wif).toPublicKey().toBuffer()));
+  return swapOracle.soloOracle(
+    Buffer.from(PrivateKey.fromWIF(wif).toPublicKey().toBuffer())
+  );
 }
 
 /** True when this wallet's key alone is the categorical market's oracle (solo operator). */
 export function walletIsCatSoloOracle(t: TrackedMarket): boolean {
   const w = wallet.value;
   if (!w.wif || w.locked) return false;
-  const pk = Buffer.from(PrivateKey.fromWIF(w.wif.toString()).toPublicKey().toBuffer());
+  const pk = Buffer.from(
+    PrivateKey.fromWIF(w.wif.toString()).toPublicKey().toBuffer()
+  );
   return (
-    swapOracle.committeeDescriptor(swapOracle.soloOracle(pk)).toString("hex") === t.oracle
+    swapOracle
+      .committeeDescriptor(swapOracle.soloOracle(pk))
+      .toString("hex") === t.oracle
   );
 }
 
@@ -1006,19 +1103,31 @@ interface CreateCatParams {
 }
 
 /** Create a K-outcome categorical market: prep a coin into 1+K ref-inducing outputs, deploy, track. */
-export async function createCategoricalAction(p: CreateCatParams): Promise<TrackedMarket> {
+export async function createCategoricalAction(
+  p: CreateCatParams
+): Promise<TrackedMarket> {
   const { address, wif } = requireWallet();
   const K = p.outcomes;
   if (!supportedOutcomeCounts.includes(K)) {
-    throw new Error(`Unsupported outcome count ${K} (supported: ${supportedOutcomeCounts.join(", ")})`);
+    throw new Error(
+      `Unsupported outcome count ${K} (supported: ${supportedOutcomeCounts.join(
+        ", "
+      )})`
+    );
   }
-  if (p.labels.length !== K) throw new Error(`Need exactly ${K} outcome labels`);
+  if (p.labels.length !== K)
+    throw new Error(`Need exactly ${K} outcome labels`);
   const committee = catCommittee(p.committee);
 
   // prep: fan one coin into 1+K outputs (first covers the create fee; all 1+K induce the refs).
   const p2pkh = Script.buildPublicKeyHashOut(Address.fromString(address));
-  const PREP = [feeHeadroom() + 600_000, ...Array.from({ length: K }, () => 300_000)];
-  const prepFunding = await selectFunding(PREP.reduce((a, b) => a + b, 0) + feeHeadroom());
+  const PREP = [
+    feeHeadroom() + 600_000,
+    ...Array.from({ length: K }, () => 300_000),
+  ];
+  const prepFunding = await selectFunding(
+    PREP.reduce((a, b) => a + b, 0) + feeHeadroom()
+  );
   const prep = sized((feeSats) => {
     const tx = new Transaction();
     tx.from({
@@ -1027,8 +1136,10 @@ export async function createCategoricalAction(p: CreateCatParams): Promise<Track
       script: prepFunding.script,
       satoshis: prepFunding.satoshis,
     });
-    for (const v of PREP) tx.addOutput(new Transaction.Output({ script: p2pkh, satoshis: v }));
-    const change = prepFunding.satoshis - PREP.reduce((a, b) => a + b, 0) - feeSats;
+    for (const v of PREP)
+      tx.addOutput(new Transaction.Output({ script: p2pkh, satoshis: v }));
+    const change =
+      prepFunding.satoshis - PREP.reduce((a, b) => a + b, 0) - feeSats;
     if (change < 0) throw new Error("Funding coin too small");
     if (change > 0) tx.to(address, change);
     tx.sign(PrivateKey.fromWIF(wif));
@@ -1091,7 +1202,9 @@ export async function createScalarAction(p: {
   committee?: { keys: string[]; threshold: number };
 }): Promise<TrackedMarket> {
   const range = uniformRange(p.min, p.max, p.bins, p.unit); // throws if bins ∉ supported / bad range
-  const labels = Array.from({ length: p.bins }, (_, i) => binLabel(range, i + 1));
+  const labels = Array.from({ length: p.bins }, (_, i) =>
+    binLabel(range, i + 1)
+  );
   return createCategoricalAction({
     question: p.question,
     expiry: p.expiry,
@@ -1111,8 +1224,11 @@ export async function splitCatAction(
   amount: number
 ): Promise<string> {
   const { address } = requireWallet();
-  if (live.anchors.some((a) => !a)) throw new Error("Outcome anchors not found on chain");
-  const funding = await selectFunding((live.outcomes + 1) * amount + feeHeadroom());
+  if (live.anchors.some((a) => !a))
+    throw new Error("Outcome anchors not found on chain");
+  const funding = await selectFunding(
+    (live.outcomes + 1) * amount + feeHeadroom()
+  );
   const built = sized((feeSats) =>
     buildCategoricalSplit({
       scripts: catScriptsOf(t),
@@ -1210,7 +1326,10 @@ export async function resolveScalarAction(
   value: number
 ): Promise<string> {
   if (!t.scalar) throw new Error("Not a scalar market");
-  const bin = binIndexForValue({ edges: t.scalar.edges, unit: t.scalar.unit }, value);
+  const bin = binIndexForValue(
+    { edges: t.scalar.edges, unit: t.scalar.unit },
+    value
+  );
   return resolveCatAction(t, live, bin);
 }
 
@@ -1326,7 +1445,9 @@ export async function postBidAction(
       script: prepFunding.script,
       satoshis: prepFunding.satoshis,
     });
-    tx.addOutput(new Transaction.Output({ script: p2pkh, satoshis: priceSats }));
+    tx.addOutput(
+      new Transaction.Output({ script: p2pkh, satoshis: priceSats })
+    );
     prepChange = prepFunding.satoshis - priceSats - feeSats;
     if (prepChange <= 0) throw new Error("Funding coin too small");
     tx.to(address, prepChange);
@@ -1517,7 +1638,9 @@ export async function tradeFromAdTxid(
   const refs = refsOf(t);
   const idOf = (r: Buffer) => rswp.swapTokenId(r);
 
-  const backingRaw = await electrumWorker.value.getTransaction(ad.outpoint.txid);
+  const backingRaw = await electrumWorker.value.getTransaction(
+    ad.outpoint.txid
+  );
   if (!backingRaw) throw new Error("Offered output's transaction not found");
   const backingTx = outputScripts(backingRaw);
   const backingScript = backingTx.scripts[ad.outpoint.vout];
@@ -1541,7 +1664,12 @@ export async function tradeFromAdTxid(
         ? "no"
         : null;
     if (!side) throw new Error("Advertisement is not for this market's shares");
-    return { kind: "bid", side, open, buy: rswp.buyOrderFromAdvertisement(ad, side, backing) };
+    return {
+      kind: "bid",
+      side,
+      open,
+      buy: rswp.buyOrderFromAdvertisement(ad, side, backing),
+    };
   }
   const side =
     ad.offeredTokenId === idOf(refs.yesRef)
@@ -1550,7 +1678,12 @@ export async function tradeFromAdTxid(
       ? "no"
       : null;
   if (!side) throw new Error("Advertisement is not for this market's shares");
-  return { kind: "ask", side, open, sell: rswp.sellOrderFromAdvertisement(ad, side, backing) };
+  return {
+    kind: "ask",
+    side,
+    open,
+    sell: rswp.sellOrderFromAdvertisement(ad, side, backing),
+  };
 }
 
 /** Atomically fill a sell order: pay the maker's pre-signed price, take the shares. Reconstruct
@@ -1595,7 +1728,9 @@ export async function fillBidAction(
     .sort((a, b) => a.satoshis - b.satoshis)[0];
   if (!takerShare) {
     throw new Error(
-      `No single ${order.side.toUpperCase()} position covers ${order.shareOut.satoshis} photons`
+      `No single ${order.side.toUpperCase()} position covers ${
+        order.shareOut.satoshis
+      } photons`
     );
   }
   const funding = await selectFunding(feeHeadroom());
@@ -1626,8 +1761,18 @@ export async function cancelOrderAction(posted: PostedOrder): Promise<string> {
     const coin = posted.buy!.rxd;
     built = sized((feeSats) => {
       const tx = new Transaction();
-      tx.from({ txId: coin.txid, outputIndex: coin.vout, script: coin.script, satoshis: coin.satoshis });
-      tx.from({ txId: funding.txid, outputIndex: funding.vout, script: funding.script, satoshis: funding.satoshis });
+      tx.from({
+        txId: coin.txid,
+        outputIndex: coin.vout,
+        script: coin.script,
+        satoshis: coin.satoshis,
+      });
+      tx.from({
+        txId: funding.txid,
+        outputIndex: funding.vout,
+        script: funding.script,
+        satoshis: funding.satoshis,
+      });
       const back = coin.satoshis + funding.satoshis - feeSats;
       if (back <= 0) throw new Error("Funding too small for fee");
       tx.to(address, back);

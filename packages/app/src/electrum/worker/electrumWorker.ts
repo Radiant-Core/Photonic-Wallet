@@ -128,6 +128,24 @@ export interface SwapIndexOrder {
   status: string; // "open" | ...
 }
 
+/** A prediction market discovered by RXinDexer's predict index (RMKT beacon). Refs are in
+ *  display form (`txid_vout`); resolution params come from the on-chain singleton state, so
+ *  `status_at_creation` is only the creation status — query live status via blockchain.ref.get. */
+export interface IndexedMarket {
+  market_ref: string;
+  yes_ref: string;
+  no_ref: string;
+  expiry: number;
+  grace: number;
+  oracle: string; // 33-byte hex
+  optimistic: boolean;
+  status_at_creation: number;
+  question: string | null;
+  beacon_params_match: boolean;
+  create_txid: string; // display (big-endian) txid hex
+  create_height: number;
+}
+
 const worker = {
   ready: false,
   active: true,
@@ -388,6 +406,33 @@ const worker = {
           }
         | { error: string }
         | undefined;
+      if (!result || "error" in result) return null;
+      return result;
+    } catch {
+      return null;
+    }
+  },
+  // RXinDexer prediction-market discovery (market.* / RMKT beacons). Returns []/null when the
+  // server lacks the predict index (older indexers) so callers degrade to local-only tracking.
+  async listMarkets(limit = 50, offset = 0) {
+    try {
+      const result = (await electrum.client?.request(
+        "market.list",
+        limit,
+        offset
+      )) as IndexedMarket[] | { error: string } | undefined;
+      if (!result || "error" in result) return [];
+      return result;
+    } catch {
+      return [];
+    }
+  },
+  async getMarket(marketRef: string) {
+    try {
+      const result = (await electrum.client?.request(
+        "market.get",
+        marketRef
+      )) as IndexedMarket | { error: string } | undefined;
       if (!result || "error" in result) return null;
       return result;
     } catch {

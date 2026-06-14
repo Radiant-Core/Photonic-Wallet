@@ -46,6 +46,8 @@ import {
   listMyOrders,
   listTracked,
   mergeAction,
+  openMarketByCreateTxid,
+  trackMarket,
   postBidAction,
   postedKind,
   postedOrderIsOpen,
@@ -502,12 +504,29 @@ export default function PredictMarket() {
   } | null>(null);
 
   useEffect(() => {
-    listTracked().then((rows) => {
-      const t = rows.find((r) => r.createTxid === createTxid) || null;
+    let cancelled = false;
+    (async () => {
+      const rows = await listTracked();
+      let t = rows.find((r) => r.createTxid === createTxid) || null;
+      // Not in the local watchlist (opened from the discovered-markets feed or a shared link):
+      // re-anchor the binary market from its on-chain RMKT beacon and add it to the watchlist.
+      if (!t && createTxid) {
+        try {
+          t = await openMarketByCreateTxid(createTxid);
+          await trackMarket(t);
+        } catch (e) {
+          if (!cancelled) setError((e as Error).message);
+          return;
+        }
+      }
+      if (cancelled) return;
       setTracked(t);
       if (t?.committeeKeys?.length) setCkeys(t.committeeKeys.join("\n"));
       if (!t) setError("Market not tracked — import it from the Markets page");
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [createTxid]);
 
   // Plain const (not useMemo): walletIsSoloOracle reads wallet.value.wif/locked, which change on
