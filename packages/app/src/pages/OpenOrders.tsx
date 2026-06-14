@@ -57,7 +57,7 @@ import TokenContent from "@app/components/TokenContent";
 import { WaveExpiryBadge } from "@app/components/WaveAssetLabel";
 import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
 import { HiOutlineAtSymbol } from "react-icons/hi";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   SmartToken,
   ContractType,
@@ -761,6 +761,7 @@ export default function OpenOrders({
 } = {}) {
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const copyToClipboard = useCopyToClipboard();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<ParsedOrder[]>([]);
@@ -921,12 +922,20 @@ export default function OpenOrders({
   );
 
   useEffect(() => {
+    // A `?ref=` deep-link (e.g. from Browse Market) lands the user directly on a
+    // specific token's order book. The ref is the 72-hex form, which
+    // normalizeTokenSearch resolves to the swap-index tokenid.
+    const refParam = searchParams.get("ref")?.trim();
     checkIndexAvailability().then((available) => {
-      if (available) {
+      if (!available) return;
+      if (refParam) {
+        setSearchRef(refParam);
+        fetchOrders(refParam);
+      } else {
         fetchOrders();
       }
     });
-  }, [checkIndexAvailability, fetchOrders]);
+  }, [checkIndexAvailability, fetchOrders, searchParams]);
 
   // Auto-refresh every 30 seconds when tab is visible
   useEffect(() => {
@@ -1524,7 +1533,11 @@ export default function OpenOrders({
 
   // Smart empty state message
   const getEmptyStateMessage = () => {
-    if (!glyphs || glyphs.length === 0) {
+    const hasSearch = searchRef.trim().length > 0;
+    // "No tokens in wallet" only applies to the default (own-tokens) view. When the
+    // user is looking at a specific listing (e.g. deep-linked from Browse Market),
+    // the wallet's own holdings are irrelevant — speak to the search instead.
+    if (!hasSearch && (!glyphs || glyphs.length === 0)) {
       return {
         title: "No tokens in wallet",
         description:
@@ -1532,11 +1545,17 @@ export default function OpenOrders({
       };
     }
     if (orders.length === 0) {
-      return {
-        title: "No open orders found",
-        description:
-          "There are currently no open swap orders for tokens you own. Check back later or create your own swap offer.",
-      };
+      return hasSearch
+        ? {
+            title: "No open orders for this listing",
+            description:
+              "This offer may have been filled or cancelled, or it isn't in this swap server's index. Try a different swap server in Settings, or check back later.",
+          }
+        : {
+            title: "No open orders found",
+            description:
+              "There are currently no open swap orders for tokens you own. Check back later or create your own swap offer.",
+          };
     }
     if (filteredAndSortedOrders.length === 0) {
       return {

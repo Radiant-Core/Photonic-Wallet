@@ -419,7 +419,7 @@ export default function WaveNames() {
                   variant="outline"
                   colorScheme="purple"
                   leftIcon={<Icon as={MdStorefront} />}
-                  onClick={() => navigate("/wave-names/market")}
+                  onClick={() => navigate("/market?filter=names")}
                 >
                   {"Browse Names for Sale"}
                 </Button>

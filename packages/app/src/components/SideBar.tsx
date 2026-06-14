@@ -13,7 +13,7 @@ import StatusBar from "./StatusBar";
 import { language, openMenu } from "@app/signals";
 import { RiSwap2Line } from "react-icons/ri";
 import { HiOutlineAtSymbol } from "react-icons/hi";
-import { MdHome, MdSell, MdStorefront, MdLink } from "react-icons/md";
+import { MdHome, MdStorefront, MdLink } from "react-icons/md";
 import {
   TbTriangleSquareCircle,
   TbCoins,
@@ -100,14 +100,15 @@ export default function SideBar({ ...rest }: GridProps) {
         >
           {"Wave Names"}
         </MenuButton>
-        <MenuButton
-          to="/wave-names/market"
-          leftIcon={<Icon as={MdStorefront} boxSize={5} />}
-        >
-          {"Names for Sale"}
-        </MenuButton>
         <MenuButton to="/coins" leftIcon={<Icon as={TbCoins} boxSize={5} />}>
           {"Coins"}
+        </MenuButton>
+        <MenuButton
+          to="/market"
+          match={["/market"]}
+          leftIcon={<Icon as={MdStorefront} boxSize={5} />}
+        >
+          {"Market"}
         </MenuButton>
         <MenuButton
           to="/swap"
@@ -122,9 +123,6 @@ export default function SideBar({ ...rest }: GridProps) {
           leftIcon={<Icon as={TbChartLine} boxSize={5} />}
         >
           {"Predict"}
-        </MenuButton>
-        <MenuButton to="/market" leftIcon={<Icon as={MdSell} boxSize={5} />}>
-          {"Marketplace"}
         </MenuButton>
         <MenuButton to="/vault" leftIcon={<Icon as={TbLock} boxSize={5} />}>
           {"Vault"}

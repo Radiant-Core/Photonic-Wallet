@@ -128,6 +128,61 @@ export interface SwapIndexOrder {
   status: string; // "open" | ...
 }
 
+/** One open order from the RXinDexer global swap-index feed (swap.get_orders with no
+ *  refs → SwapIndex.get_open_orders / _order_to_dict). This is a DISCOVERY shape: it
+ *  carries the trading pair, side and status but NOT the maker signature / price terms
+ *  needed to build a fill — those come from the node swapindex (getopenorders) once the
+ *  taker opens the per-token book. `base_ref`/`quote_ref` are display form (`txid_vout`,
+ *  null = RXD). NOTE: `price`/`amount` are indicative only — the index's sell-side
+ *  amount/price semantics are still settling (see predict.ts indexedOrderbook). */
+export interface SwapOpenOrder {
+  order_id: string | null;
+  tx_hash: string | null;
+  vout: number;
+  height: number;
+  timestamp: number;
+  maker_scripthash: string | null;
+  maker_address: string | null;
+  base_ref: string | null; // offered token, display "txid_vout"; null = RXD
+  quote_ref: string | null; // wanted token, display "txid_vout"; null = RXD
+  base_ticker: string | null;
+  quote_ticker: string | null;
+  side: "buy" | "sell";
+  price: number;
+  amount: number;
+  filled_amount: number;
+  remaining_amount: number;
+  percent_filled: number;
+  min_fill: number;
+  fee_rate: number;
+  status: string; // "open" | "partial" | "expired" | ...
+  expiry_height: number | null;
+  fill_count: number;
+  avg_fill_price: number;
+}
+
+/** One active royalty-covenant listing from RXinDexer's royalty index (RRYL beacon).
+ *  Carries the full on-chain terms + covenant_script so a buyer can build a purchase
+ *  with no off-chain descriptor. `ref` is display form; `ref_le` is the raw 36-byte LE
+ *  singleton ref (the covenant/nftScript form). */
+export interface RoyaltyIndexListing {
+  listing_id: string | null;
+  txid: string | null;
+  vout: number;
+  height: number;
+  timestamp: number;
+  ref: string | null;
+  ref_le: string | null;
+  seller_address: string | null;
+  seller_script: string | null;
+  price: number;
+  royalties: { script: string; value: number }[];
+  royalty_total: number;
+  value: number;
+  covenant_script: string | null;
+  status: string;
+}
+
 /** A prediction market discovered by RXinDexer's predict index (RMKT beacon). Refs are in
  *  display form (`txid_vout`); resolution params come from the on-chain singleton state, so
  *  `status_at_creation` is only the creation status — query live status via blockchain.ref.get. */
@@ -410,6 +465,45 @@ const worker = {
       return result;
     } catch {
       return null;
+    }
+  },
+  // RXinDexer global swap-index browse: ALL open orders across every pair
+  // (swap.get_orders with no refs → SwapIndex.get_open_orders). Empty base/quote
+  // ("") are falsy server-side so the index returns the whole open book, paginated
+  // by limit/offset. Returns [] when the server lacks the swap index (older
+  // indexers / not deployed) so callers can show an empty/unavailable state.
+  async getOpenSwapOrders(limit = 50, offset = 0) {
+    try {
+      const result = (await electrum.client?.request(
+        "swap.get_orders",
+        "",
+        "",
+        limit,
+        offset
+      )) as SwapOpenOrder[] | { error: string } | undefined;
+      if (!result || !Array.isArray(result)) return [];
+      return result;
+    } catch {
+      return [];
+    }
+  },
+  // RXinDexer royalty-listing discovery (royalty.get_listings / RRYL beacons).
+  // No refs -> the global feed of every NFT listed for sale (newest-first). With a
+  // display ref -> listings for one NFT. Returns [] when the server lacks the
+  // royalty index (default OFF until deployed) so callers degrade to local-only.
+  async getRoyaltyListings(limit = 50, offset = 0, ref = "") {
+    try {
+      const result = (await electrum.client?.request(
+        "royalty.get_listings",
+        ref,
+        "",
+        limit,
+        offset
+      )) as RoyaltyIndexListing[] | { error: string } | undefined;
+      if (!result || !Array.isArray(result)) return [];
+      return result;
+    } catch {
+      return [];
     }
   },
   // RXinDexer prediction-market discovery (market.* / RMKT beacons). Returns []/null when the

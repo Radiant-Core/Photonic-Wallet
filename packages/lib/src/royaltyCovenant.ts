@@ -83,6 +83,15 @@ const OP_PUSHINPUTREFSINGLETON = "d8"; // takes a 36-byte immediate ref
 const OP_OUTPUTVALUE = "cc"; // unary: pop index -> push value (CScriptNum)
 const OP_OUTPUTBYTECODE = "cd"; // unary: pop index -> push scriptPubKey bytes
 const OP_GREATERTHANOREQUAL = "a2";
+const OP_RETURN = "6a";
+
+// Listing discovery beacon. A value-0 OP_RETURN emitted on the listing tx so
+// RXinDexer can cheaply detect a new royalty listing and version-gate its parser
+// (the covenant script itself carries no length/version marker). The indexer
+// reads <magic><version><ref>, then parses terms from the covenant output that
+// carries the same ref. MUST stay in lockstep with royalty_index.parse_royalty_beacon.
+export const ROYALTY_BEACON_MAGIC = "RRYL";
+export const ROYALTY_BEACON_VERSION = 1;
 
 // Minimal push of an output index (0..16 -> single OP_N byte via pushMinimal).
 const idx = (n: number) => pushMinimal(n);
@@ -192,6 +201,24 @@ export function royaltySaleScript(terms: RoyaltySaleTerms): string {
 
   // Round-trip through the radiantjs parser to guarantee the bytes are a
   // well-formed script (and to surface any push-encoding mistakes early).
+  return Script.fromHex(hex).toHex();
+}
+
+/**
+ * Build the value-0 OP_RETURN discovery beacon for a royalty listing:
+ *   OP_RETURN "RRYL" <version:1> <ref:36>
+ * Emitted alongside the covenant output so RXinDexer can detect the listing.
+ */
+export function royaltyBeaconScript(ref: string): string {
+  if (ref.length !== 72) {
+    throw new Error(
+      `royaltyBeaconScript: ref must be 36 bytes (72 hex chars), got ${ref.length}`
+    );
+  }
+  const magicHex = Buffer.from(ROYALTY_BEACON_MAGIC, "ascii").toString("hex");
+  const versionHex = ROYALTY_BEACON_VERSION.toString(16).padStart(2, "0");
+  const hex =
+    OP_RETURN + pushData(magicHex) + pushData(versionHex) + pushData(ref);
   return Script.fromHex(hex).toHex();
 }
 
@@ -319,11 +346,18 @@ export function buildRoyaltyListingTx(opts: {
   feeRate: number;
 }): { tx: rjs.Transaction; covenantScript: string } {
   const covenantScript = royaltySaleScript(opts.terms);
+  // Covenant at output[0] (so the listing UTXO vout is stable at 0); the
+  // value-0 discovery beacon at output[1]; buyer change after.
+  const beaconOutput = { script: royaltyBeaconScript(opts.terms.ref), value: 0 };
+  const listingOutputs = [
+    { script: covenantScript, value: opts.nftUtxo.value },
+    beaconOutput,
+  ];
   const fund = fundTx(
     opts.sellerAddress,
     opts.rxdCoins,
     [opts.nftUtxo],
-    [{ script: covenantScript, value: opts.nftUtxo.value }],
+    listingOutputs,
     p2pkhScript(opts.sellerAddress),
     opts.feeRate
   );
@@ -332,7 +366,7 @@ export function buildRoyaltyListingTx(opts: {
     opts.sellerAddress,
     opts.sellerWif,
     [opts.nftUtxo, ...fund.funding],
-    [{ script: covenantScript, value: opts.nftUtxo.value }, ...fund.change],
+    [...listingOutputs, ...fund.change],
     false
   );
   return { tx, covenantScript };

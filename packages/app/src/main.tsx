@@ -5,6 +5,7 @@
 import "./processShim";
 import {
   createHashRouter,
+  Navigate,
   RouterProvider,
   useRouteError,
 } from "react-router-dom";
@@ -59,7 +60,7 @@ import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
 import History from "./pages/History";
 import VaultPage from "./pages/Vault";
-import Market from "./pages/Market";
+import MarketHub from "./pages/MarketHub";
 import WaveRegister from "./pages/WaveRegister";
 import WaveNames from "./pages/WaveNames";
 import Connect from "./pages/Connect";
@@ -433,7 +434,7 @@ const router = createHashRouter([
           },
           {
             path: "/market",
-            element: <Market />,
+            element: <MarketHub />,
           },
           {
             path: "/connect",
@@ -469,6 +470,11 @@ const router = createHashRouter([
               {
                 path: "/swap/orders",
                 element: <OpenOrders />,
+              },
+              {
+                // Folded into the unified Market hub; redirect old bookmarks.
+                path: "/swap/browse",
+                element: <Navigate to="/market" replace />,
               },
             ],
           },
@@ -529,8 +535,9 @@ const router = createHashRouter([
             element: <WaveNames />,
           },
           {
+            // WAVE names-for-sale folded into the unified Market hub (Names filter).
             path: "/wave-names/market",
-            element: <OpenOrders defaultFilter="names" />,
+            element: <Navigate to="/market?filter=names" replace />,
           },
           {
             element: <SettingsLayout />,

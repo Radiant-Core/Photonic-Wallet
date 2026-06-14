@@ -539,3 +539,23 @@ export function assetToSwapTokenId(
     sha256(Buffer.from(Outpoint.fromString(glyphRef).ref(), "hex"))
   ).toString("hex");
 }
+
+/**
+ * Convert a swap-index display ref (`<txid_be>_<vout_decimal>`, as emitted by
+ * RXinDexer's `_format_ref` in the global `swap.get_orders` feed) to the 72-hex
+ * ref form the wallet uses internally — txid big-endian + 4-byte big-endian vout.
+ * This is exactly the `glyph.ref` form that `assetToSwapTokenId` / `Outpoint.refHash`
+ * hash to derive the node swapindex tokenid, so the result can deep-link a
+ * discovered order into the per-token Open Orders book (which fetches the fillable
+ * offer via the node's `getopenorders`). Returns null for an RXD side (no ref) or a
+ * malformed input. See OpenOrders deep-link handling and Outpoint.fromShortInput.
+ */
+export function swapIndexRefToRef(displayRef?: string | null): string | null {
+  if (!displayRef) return null;
+  const sep = displayRef.indexOf("_");
+  if (sep !== 64) return null; // expect 64-hex txid + "_" + decimal vout
+  const vout = Number(displayRef.slice(sep + 1));
+  if (!Number.isInteger(vout) || vout < 0) return null;
+  if (!/^[0-9a-fA-F]{64}$/.test(displayRef.slice(0, 64))) return null;
+  return Outpoint.fromShortInput(displayRef).toString();
+}

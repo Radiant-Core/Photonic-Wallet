@@ -9,7 +9,7 @@ import { wrap } from "comlink";
 import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
 import type { VaultRecord, VaultScanResult } from "@app/types";
-import { discoverCovenants } from "@app/covenant";
+import { discoverCovenants, syncCovenants } from "@app/covenant";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
 // TEMP: Force dedicated worker for debugging (SharedWorker logs go to separate console)
@@ -95,6 +95,15 @@ const wrapped = wrap<{
     bids: import("./worker/electrumWorker").SwapIndexOrder[];
     asks: import("./worker/electrumWorker").SwapIndexOrder[];
   } | null;
+  getOpenSwapOrders: (
+    limit?: number,
+    offset?: number
+  ) => import("./worker/electrumWorker").SwapOpenOrder[];
+  getRoyaltyListings: (
+    limit?: number,
+    offset?: number,
+    ref?: string
+  ) => import("./worker/electrumWorker").RoyaltyIndexListing[];
   listMarkets: (
     limit?: number,
     offset?: number
@@ -259,6 +268,10 @@ export default function Electrum() {
           if (wallet.value.swapAddress) {
             await discoverCovenants(wallet.value.swapAddress);
           }
+          // Reconcile active covenants (royalty listings + soulbound/authority)
+          // against the chain so a bought/cancelled listing resolves even when
+          // the Market page isn't open. (Previously only triggered from Market.)
+          await syncCovenants();
         } catch (covErr) {
           console.warn("[Electrum] Covenant discovery failed:", covErr);
         }
