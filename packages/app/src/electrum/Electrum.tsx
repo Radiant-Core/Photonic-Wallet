@@ -8,7 +8,7 @@ import { ContractType, ElectrumStatus, SmartToken } from "@app/types";
 import { wrap } from "comlink";
 import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
-import type { VaultRecord } from "@app/types";
+import type { VaultRecord, VaultScanResult } from "@app/types";
 import { discoverCovenants } from "@app/covenant";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
@@ -61,7 +61,11 @@ const wrapped = wrap<{
     | { status: "unverified"; reason: string };
   syncPending: (manual?: boolean) => void;
   manualSync: () => void;
-  discoverVaults: (wif: string, address: string, swapWif?: string) => number;
+  discoverVaults: (
+    wif: string,
+    address: string,
+    swapWif?: string
+  ) => VaultScanResult;
   addVault: (record: VaultRecord) => void;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
@@ -164,19 +168,46 @@ export default function Electrum() {
     }
   }, [stableServers, wallet.value.address]);
 
-  // Discover vaults when wallet is unlocked and connected
+  // Discover vaults when wallet is unlocked and connected.
+  //
+  // `discoveryRanRef` latches ONLY after a confirmed-complete scan (no skipped
+  // transactions and no throw). A partial or failed scan leaves it false so a
+  // later CONNECTED event retries — otherwise a transient timeout would strand
+  // the user at "no vaults" with no automatic recovery. `discoveryInFlightRef`
+  // guards against launching overlapping runs while one is still awaiting.
   const discoveryRanRef = useRef(false);
+  const discoveryInFlightRef = useRef(false);
   useEffect(() => {
     const discover = async () => {
       if (
         discoveryRanRef.current ||
+        discoveryInFlightRef.current ||
         !wallet.value.wif ||
         !wallet.value.address ||
         electrumStatus.value !== ElectrumStatus.CONNECTED
       ) {
         return;
       }
-      discoveryRanRef.current = true;
+      discoveryInFlightRef.current = true;
+      // Assume complete; any skipped tx or thrown error flips this false.
+      let complete = true;
+
+      // An unlocked, connected wallet is a strong engagement signal — ask the
+      // browser to move this origin into the persistent storage bucket so the
+      // IndexedDB-only vault records (and the rest of wallet state) aren't
+      // evicted under storage pressure or after ~7 idle days on Safari/iOS.
+      try {
+        if (navigator.storage?.persist && navigator.storage.persisted) {
+          const already = await navigator.storage.persisted();
+          if (!already) {
+            const granted = await navigator.storage.persist();
+            console.debug(`[Storage] Persistent storage granted: ${granted}`);
+          }
+        }
+      } catch (e) {
+        console.debug("[Storage] persist() request failed:", e);
+      }
+
       console.debug("[Electrum] Starting vault discovery");
       try {
         // Materialise WIFs only for the duration of the worker calls; refs
@@ -184,27 +215,29 @@ export default function Electrum() {
         const wifStr = wallet.value.wif.toString();
         const swapWifStr = wallet.value.swapWif?.toString();
         // Scan main address - also try swapWif for decryption if main fails
-        const mainCount = await electrumWorker.value.discoverVaults(
+        const mainResult = await electrumWorker.value.discoverVaults(
           wifStr,
           wallet.value.address,
           swapWifStr // Try swap WIF if main fails to decrypt
         );
-        if (mainCount > 0) {
+        if (mainResult.skipped > 0) complete = false;
+        if (mainResult.discovered > 0) {
           console.log(
-            `[Electrum] Discovered ${mainCount} vault(s) on main address`
+            `[Electrum] Discovered ${mainResult.discovered} vault(s) on main address`
           );
         }
 
         // Scan swap address if different from main
         if (swapWifStr && wallet.value.swapAddress) {
-          const swapCount = await electrumWorker.value.discoverVaults(
+          const swapResult = await electrumWorker.value.discoverVaults(
             swapWifStr,
             wallet.value.swapAddress,
             wifStr // Try main WIF if swap fails to decrypt
           );
-          if (swapCount > 0) {
+          if (swapResult.skipped > 0) complete = false;
+          if (swapResult.discovered > 0) {
             console.log(
-              `[Electrum] Discovered ${swapCount} vault(s) on swap address`
+              `[Electrum] Discovered ${swapResult.discovered} vault(s) on swap address`
             );
           }
         }
@@ -223,7 +256,14 @@ export default function Electrum() {
           console.warn("[Electrum] Covenant discovery failed:", covErr);
         }
       } catch (error) {
+        // A throw (e.g. history could not be loaded) means the scan did not
+        // complete — keep the latch open so the next CONNECTED event retries.
+        complete = false;
         console.warn("[Electrum] Vault discovery failed:", error);
+      } finally {
+        discoveryInFlightRef.current = false;
+        // Latch only on a confirmed-complete scan (no skipped tx, no throw).
+        if (complete) discoveryRanRef.current = true;
       }
     };
 

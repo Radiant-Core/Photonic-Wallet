@@ -345,4 +345,38 @@ export interface VaultRecord {
   activityLog?: VaultActivity[];
 }
 
+/**
+ * Result of a vault discovery scan over one address's transaction history.
+ * `skipped` counts transactions that could not be fetched/verified (timeouts,
+ * hash mismatch, per-tx errors) — a non-zero value means the scan was partial
+ * and "no vaults found" cannot be trusted.
+ */
+export interface VaultScanResult {
+  /** New vaults discovered and stored this scan */
+  discovered: number;
+  /** Transactions successfully fetched and examined */
+  scanned: number;
+  /** Total transactions in the address history */
+  total: number;
+  /** Transactions that could not be scanned (timeouts, verification failures) */
+  skipped: number;
+}
+
+/** Persisted record of the last vault discovery scan for an address. */
+export interface VaultLastScan extends VaultScanResult {
+  timestamp: number;
+  address?: string;
+  /** True only when every transaction was scanned (skipped === 0, no throw). */
+  complete: boolean;
+}
+
+/**
+ * Sentinel thrown by discoverVaults when the address transaction history could
+ * not be loaded (get_history exhausted its retries). Carried via the Error
+ * message so it survives the comlink worker boundary, where `instanceof` checks
+ * do not. The UI maps this to a "could not load history" error instead of the
+ * misleading "no vaults found".
+ */
+export const VAULT_SCAN_FAILED = "VAULT_SCAN_FAILED";
+
 export {};

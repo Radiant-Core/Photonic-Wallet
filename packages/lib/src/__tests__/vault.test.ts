@@ -13,6 +13,7 @@ import {
   vaultScriptHash,
   buildRedeemScript,
   isNativeVault,
+  isVaultRecipientAddress,
   buildVaultTx,
   claimVaultTx,
   estimateVaultClaimSize,
@@ -33,12 +34,20 @@ import {
   VAULT_PAYLOAD_VERSION,
   buildVaultOpReturn,
   parseVaultOpReturn,
+  buildVestingTx,
+  recoverVaultsFromTx,
+  decodeVaultMetadataList,
+  decryptVaultOpReturnPlaintext,
+  verifyVaultRecoveryInfo,
+  extractVaultSenderAddress,
   type VaultParams,
+  type VaultRecoveryInfo,
   type FundingUtxo,
 } from "../vault";
 import { nftScript, ftScript } from "../script";
+import { sha256 } from "@noble/hashes/sha256";
 
-const { PrivateKey, Transaction } = rjs;
+const { PrivateKey, Transaction, Script } = rjs;
 
 // ============================================================================
 // Test fixtures
@@ -1109,5 +1118,633 @@ describe("vault OP_RETURN — v2 ECDH derivation", () => {
     const scriptHex =
       "6a05" + VAULT_MAGIC_BYTES + "39" /* push 0x39=57 bytes */ + fakeV1Body;
     expect(parseVaultOpReturn(scriptHex, senderWif)).toBeNull();
+  });
+});
+
+// ============================================================================
+// recoverVaultsFromTx — round-trip recovery (RXD, NFT, FT, vesting)
+//
+// Regression coverage for two recovery bugs:
+//   - vesting schedules never recovered (multi-tranche plaintext rejected by
+//     decodeVaultMetadata's version-byte check)
+//   - FT self-vaults never recovered (native output compared against P2SH wrap)
+// ============================================================================
+
+describe("recoverVaultsFromTx — round-trip", () => {
+  const privKey = new PrivateKey();
+  const wif = privKey.toWIF();
+  const fromAddress = privKey.toAddress().toString();
+
+  // A fat RXD coin to fund any vault/vesting tx. The scriptSig validity is
+  // irrelevant here — recovery only reads the tx OUTPUTS.
+  const rxdCoin = {
+    txid: "a".repeat(64),
+    vout: 0,
+    script: "76a914" + "00".repeat(20) + "88ac",
+    value: 100_000_000,
+  };
+
+  it("recovers a simple RXD self-vault", () => {
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 123456,
+      assetType: "rxd",
+      recipientAddress: fromAddress,
+      value: 5_000_000,
+      label: "savings",
+    };
+    const { rawTx, txid, redeemScriptHex } = buildVaultTx(
+      [rxdCoin],
+      fromAddress,
+      wif,
+      params,
+      1
+    );
+    const recovered = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].params.assetType).toBe("rxd");
+    expect(recovered[0].params.locktime).toBe(123456);
+    expect(recovered[0].params.value).toBe(5_000_000);
+    expect(recovered[0].redeemScriptHex).toBe(redeemScriptHex);
+  });
+
+  it("recovers a simple NFT self-vault", () => {
+    const tokenUtxo = {
+      txid: "b".repeat(64),
+      vout: 0,
+      script: nftScript(fromAddress, testRef),
+      value: 546,
+    };
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 222222,
+      assetType: "nft",
+      recipientAddress: fromAddress,
+      ref: testRef,
+      value: 546,
+    };
+    const { rawTx, txid } = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
+    const recovered = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].params.assetType).toBe("nft");
+    expect(recovered[0].params.ref).toBe(testRef);
+    expect(recovered[0].params.locktime).toBe(222222);
+  });
+
+  it("recovers an FT self-vault (native script — regression for P2SH-only match)", () => {
+    const tokenUtxo = {
+      txid: "c".repeat(64),
+      vout: 0,
+      script: ftScript(fromAddress, testRef),
+      value: 1000,
+    };
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 333333,
+      assetType: "ft",
+      recipientAddress: fromAddress,
+      ref: testRef,
+      value: 1000,
+    };
+    const { rawTx, txid } = buildVaultTx([rxdCoin], fromAddress, wif, params, 1, [
+      tokenUtxo,
+    ]);
+    const recovered = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].params.assetType).toBe("ft");
+    expect(recovered[0].params.ref).toBe(testRef);
+    expect(recovered[0].params.locktime).toBe(333333);
+    // The recovered script is the FT native locking script (no P2SH wrap).
+    expect(recovered[0].redeemScriptHex).toBe(
+      vaultFtNativeScript(333333, fromAddress, testRef)
+    );
+  });
+
+  it("recovers ALL tranches of a vesting schedule (regression for version-byte collision)", () => {
+    const locktimes = [400000, 410000, 420000];
+    const tranches: VaultParams[] = locktimes.map((lt) => ({
+      mode: "block",
+      locktime: lt,
+      assetType: "rxd",
+      recipientAddress: fromAddress,
+      value: 1_000_000,
+      label: "vest",
+    }));
+    const { rawTx, txid } = buildVestingTx(
+      [rxdCoin],
+      fromAddress,
+      wif,
+      tranches,
+      1
+    );
+    const recovered = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(recovered).toHaveLength(3);
+    expect(recovered.map((r) => r.params.locktime).sort((a, b) => a - b)).toEqual(
+      locktimes
+    );
+    for (const r of recovered) expect(r.params.assetType).toBe("rxd");
+  });
+
+  it("recovers a single-tranche vesting schedule", () => {
+    const tranches: VaultParams[] = [
+      {
+        mode: "block",
+        locktime: 480000,
+        assetType: "rxd",
+        recipientAddress: fromAddress,
+        value: 3_000_000,
+      },
+    ];
+    const { rawTx, txid } = buildVestingTx(
+      [rxdCoin],
+      fromAddress,
+      wif,
+      tranches,
+      1
+    );
+    const recovered = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].params.locktime).toBe(480000);
+  });
+
+  it("recovers a third-party vault for the recipient, but not the sender", () => {
+    const recipientPriv = new PrivateKey();
+    const recipientWif = recipientPriv.toWIF();
+    const recipientAddress = recipientPriv.toAddress().toString();
+    const recipientPubHex = recipientPriv
+      .toPublicKey()
+      .toBuffer()
+      .toString("hex");
+
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 555555,
+      assetType: "rxd",
+      recipientAddress,
+      recipientPubKey: recipientPubHex,
+      value: 2_000_000,
+    };
+    const { rawTx, txid } = buildVaultTx([rxdCoin], fromAddress, wif, params, 1);
+
+    // Recipient recovers it (rebuilt P2SH with the recipient address matches).
+    const asRecipient = recoverVaultsFromTx(
+      rawTx,
+      txid,
+      recipientWif,
+      recipientAddress
+    );
+    expect(asRecipient).toHaveLength(1);
+    expect(asRecipient[0].params.locktime).toBe(555555);
+
+    // Sender can decrypt but rebuilds with their OWN address → no P2SH match.
+    const asSender = recoverVaultsFromTx(rawTx, txid, wif, fromAddress);
+    expect(asSender).toHaveLength(0);
+  });
+
+  it("recovers nothing for an uninvolved wallet", () => {
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 123456,
+      assetType: "rxd",
+      recipientAddress: fromAddress,
+      value: 5_000_000,
+    };
+    const { rawTx, txid } = buildVaultTx([rxdCoin], fromAddress, wif, params, 1);
+    const stranger = new PrivateKey();
+    const recovered = recoverVaultsFromTx(
+      rawTx,
+      txid,
+      stranger.toWIF(),
+      stranger.toAddress().toString()
+    );
+    expect(recovered).toHaveLength(0);
+  });
+});
+
+describe("decodeVaultMetadataList", () => {
+  const priv = new PrivateKey();
+  const wif = priv.toWIF();
+  const addr = priv.toAddress().toString();
+
+  it("decodes a single-vault plaintext to one params", () => {
+    const op = buildVaultOpReturn(
+      {
+        mode: "block",
+        locktime: 100000,
+        assetType: "rxd",
+        recipientAddress: addr,
+        value: 1,
+      },
+      wif
+    );
+    const plaintext = decryptVaultOpReturnPlaintext(op, wif);
+    expect(plaintext).not.toBeNull();
+    const list = decodeVaultMetadataList(plaintext!);
+    // At least the single-vault interpretation must be present and correct.
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    expect(list.some((p) => p.locktime === 100000 && p.assetType === "rxd")).toBe(
+      true
+    );
+  });
+});
+
+describe("vaultScriptHash — native FT vs P2SH", () => {
+  const electrumScriptHash = (outputScriptHex: string) =>
+    Buffer.from(sha256(Buffer.from(outputScriptHex, "hex")))
+      .reverse()
+      .toString("hex");
+
+  it("hashes RXD/NFT vaults as their P2SH output script", () => {
+    const redeem = vaultP2pkhRedeemScript(100000, testAddress);
+    expect(vaultScriptHash(redeem)).toBe(
+      electrumScriptHash(p2shOutputScript(redeem))
+    );
+  });
+
+  it("hashes FT vaults as their NATIVE output script (not P2SH)", () => {
+    const native = vaultFtNativeScript(100000, testAddress, testRef);
+    // Correct: hash the native script directly (it IS the on-chain output).
+    expect(vaultScriptHash(native)).toBe(electrumScriptHash(native));
+    // And NOT the (wrong) P2SH-wrapped hash the old code produced.
+    expect(vaultScriptHash(native)).not.toBe(
+      electrumScriptHash(p2shOutputScript(native))
+    );
+  });
+});
+
+// ============================================================================
+// Share-recovery-info gifting (third-party vault, self-encrypted OP_RETURN)
+// + trustless verifyVaultRecoveryInfo import
+// ============================================================================
+
+describe("share-recovery-info gifting", () => {
+  const sender = new PrivateKey();
+  const senderWif = sender.toWIF();
+  const senderAddress = sender.toAddress().toString();
+
+  const recipient = new PrivateKey();
+  const recipientWif = recipient.toWIF();
+  const recipientAddress = recipient.toAddress().toString();
+
+  const stranger = new PrivateKey();
+  const strangerWif = stranger.toWIF();
+
+  const rxdCoin = {
+    txid: "f".repeat(64),
+    vout: 0,
+    script: "76a914" + "00".repeat(20) + "88ac",
+    value: 100_000_000,
+  };
+
+  // Build a gifted vault: recipient != sender, no recipientPubKey,
+  // shareRecoveryInfo flips the OP_RETURN to self-encryption.
+  const giftParams: VaultParams = {
+    mode: "block",
+    locktime: 654321,
+    assetType: "rxd",
+    recipientAddress,
+    shareRecoveryInfo: true,
+    value: 7_000_000,
+    label: "gift",
+  };
+
+  it("creates a third-party vault without a recipient pubkey (no throw)", () => {
+    const result = buildVaultTx([rxdCoin], senderAddress, senderWif, giftParams, 1);
+    expect(result.rawTx).toBeTruthy();
+    // The vault output locks to the RECIPIENT's pkh, not the sender's.
+    const recipientRedeem = buildRedeemScript({
+      ...giftParams,
+      recipientAddress,
+    });
+    const expectedP2sh = p2shOutputScript(recipientRedeem);
+    const tx = new Transaction(result.rawTx);
+    const scripts: string[] = tx.outputs.map(
+      (o: { script: { toHex: () => string } }) => o.script.toHex()
+    );
+    expect(scripts).toContain(expectedP2sh);
+  });
+
+  it("self-encrypts the OP_RETURN: sender can decrypt, recipient and strangers cannot", () => {
+    const { rawTx } = buildVaultTx([rxdCoin], senderAddress, senderWif, giftParams, 1);
+    const tx = new Transaction(rawTx);
+    const opReturn = tx.outputs
+      .map((o: { script: { toHex: () => string } }) => o.script.toHex())
+      .find((h: string) => h.startsWith("6a05" + VAULT_MAGIC_BYTES));
+    expect(opReturn).toBeTruthy();
+    // Sender (self-encrypt audience) decrypts.
+    expect(parseVaultOpReturn(opReturn!, senderWif)).not.toBeNull();
+    // Recipient is NOT the OP_RETURN audience — cannot decrypt.
+    expect(parseVaultOpReturn(opReturn!, recipientWif)).toBeNull();
+    // Random observer cannot decrypt.
+    expect(parseVaultOpReturn(opReturn!, strangerWif)).toBeNull();
+  });
+
+  it("recipient imports the vault trustlessly via verifyVaultRecoveryInfo", () => {
+    const { rawTx, txid } = buildVaultTx(
+      [rxdCoin],
+      senderAddress,
+      senderWif,
+      giftParams,
+      1
+    );
+    const info: VaultRecoveryInfo = {
+      txid,
+      vout: 0,
+      assetType: "rxd",
+      mode: "block",
+      locktime: 654321,
+      label: "gift",
+    };
+    const got = verifyVaultRecoveryInfo(rawTx, info, recipientAddress);
+    expect(got).not.toBeNull();
+    expect(got!.vout).toBe(0);
+    expect(got!.params.locktime).toBe(654321);
+    expect(got!.params.value).toBe(7_000_000); // value comes from the chain
+    expect(got!.params.recipientAddress).toBe(recipientAddress);
+    // The rebuilt redeem script matches what the sender built for the recipient.
+    expect(got!.redeemScriptHex).toBe(
+      buildRedeemScript({ ...giftParams, recipientAddress })
+    );
+  });
+
+  it("rejects an importer who is NOT the recipient (wrong address)", () => {
+    const { rawTx, txid } = buildVaultTx(
+      [rxdCoin],
+      senderAddress,
+      senderWif,
+      giftParams,
+      1
+    );
+    const info: VaultRecoveryInfo = {
+      txid,
+      vout: 0,
+      assetType: "rxd",
+      mode: "block",
+      locktime: 654321,
+    };
+    // Sender tries to import → rebuild with sender pkh → no match.
+    expect(verifyVaultRecoveryInfo(rawTx, info, senderAddress)).toBeNull();
+    // Stranger likewise.
+    expect(
+      verifyVaultRecoveryInfo(rawTx, info, stranger.toAddress().toString())
+    ).toBeNull();
+  });
+
+  it("rejects tampered metadata (locktime / assetType / ref)", () => {
+    const { rawTx, txid } = buildVaultTx(
+      [rxdCoin],
+      senderAddress,
+      senderWif,
+      giftParams,
+      1
+    );
+    const base: VaultRecoveryInfo = {
+      txid,
+      vout: 0,
+      assetType: "rxd",
+      mode: "block",
+      locktime: 654321,
+    };
+    expect(
+      verifyVaultRecoveryInfo(rawTx, { ...base, locktime: 654322 }, recipientAddress)
+    ).toBeNull();
+    expect(
+      verifyVaultRecoveryInfo(
+        rawTx,
+        { ...base, assetType: "nft", ref: testRef },
+        recipientAddress
+      )
+    ).toBeNull();
+  });
+
+  it("rejects an out-of-range vout and a poisoned transaction", () => {
+    const { rawTx, txid } = buildVaultTx(
+      [rxdCoin],
+      senderAddress,
+      senderWif,
+      giftParams,
+      1
+    );
+    expect(
+      verifyVaultRecoveryInfo(
+        rawTx,
+        { txid, vout: 99, assetType: "rxd", mode: "block", locktime: 654321 },
+        recipientAddress
+      )
+    ).toBeNull();
+    // Poisoned: claim a different txid than the raw tx actually hashes to.
+    expect(
+      verifyVaultRecoveryInfo(
+        rawTx,
+        {
+          txid: "0".repeat(64),
+          vout: 0,
+          assetType: "rxd",
+          mode: "block",
+          locktime: 654321,
+        },
+        recipientAddress
+      )
+    ).toBeNull();
+  });
+
+  it("still throws for a third-party vault without pubkey AND without shareRecoveryInfo", () => {
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 654321,
+      assetType: "rxd",
+      recipientAddress,
+      value: 1000,
+    };
+    expect(() => buildVaultTx([rxdCoin], senderAddress, senderWif, params, 1)).toThrow(
+      /recipientPubKey|shareRecoveryInfo/i
+    );
+  });
+
+  it("gifts a vesting schedule: every tranche imports for the recipient", () => {
+    const locktimes = [700000, 710000];
+    const tranches: VaultParams[] = locktimes.map((lt) => ({
+      mode: "block",
+      locktime: lt,
+      assetType: "rxd",
+      recipientAddress,
+      shareRecoveryInfo: true,
+      value: 1_500_000,
+    }));
+    const { rawTx, txid } = buildVestingTx(
+      [rxdCoin],
+      senderAddress,
+      senderWif,
+      tranches,
+      1
+    );
+    const recovered = locktimes.map((lt, i) =>
+      verifyVaultRecoveryInfo(
+        rawTx,
+        { txid, vout: i, assetType: "rxd", mode: "block", locktime: lt },
+        recipientAddress
+      )
+    );
+    expect(recovered.every((r) => r !== null)).toBe(true);
+    expect(recovered.map((r) => r!.params.locktime)).toEqual(locktimes);
+  });
+});
+
+// ============================================================================
+// Red-team hardening: recipient validation, verify guards, dual-key claim
+// ============================================================================
+
+describe("isVaultRecipientAddress", () => {
+  it("accepts a mainnet P2PKH address on mainnet", () => {
+    expect(isVaultRecipientAddress(testAddress, "mainnet")).toBe(true);
+    expect(isVaultRecipientAddress(testAddress)).toBe(true);
+  });
+
+  it("rejects a P2PKH address on the wrong network", () => {
+    expect(isVaultRecipientAddress(testAddress, "testnet")).toBe(false);
+  });
+
+  it("rejects a P2SH (scripthash) address — funds would be unclaimable", () => {
+    const p2sh = p2shAddress(vaultP2pkhRedeemScript(100000, testAddress));
+    expect(p2sh).toMatch(/^3/);
+    expect(isVaultRecipientAddress(p2sh, "mainnet")).toBe(false);
+  });
+
+  it("rejects garbage / empty / whitespace", () => {
+    expect(isVaultRecipientAddress("")).toBe(false);
+    expect(isVaultRecipientAddress("not-an-address")).toBe(false);
+    expect(isVaultRecipientAddress("   ")).toBe(false);
+  });
+});
+
+describe("extractVaultSenderAddress", () => {
+  it("recovers the sender's address from a vault creation tx", () => {
+    const sender = PrivateKey.fromRandom("livenet");
+    const senderWif = sender.toWIF();
+    const senderAddr = sender.toAddress().toString();
+    // The coin script must match the sender so radiantjs actually signs it
+    // (otherwise the input scriptSig is empty and no pubkey is revealed).
+    const coin = {
+      txid: "d".repeat(64),
+      vout: 0,
+      script: Script.fromAddress(senderAddr).toHex(),
+      value: 100_000_000,
+    };
+    const params: VaultParams = {
+      mode: "block",
+      locktime: 123456,
+      assetType: "rxd",
+      recipientAddress: senderAddr,
+      value: 5_000_000,
+    };
+    const { rawTx } = buildVaultTx([coin], senderAddr, senderWif, params, 1);
+    expect(extractVaultSenderAddress(rawTx, "mainnet")).toBe(senderAddr);
+  });
+
+  it("returns undefined for unparseable input", () => {
+    expect(extractVaultSenderAddress("", "mainnet")).toBeUndefined();
+    expect(extractVaultSenderAddress("deadbeef", "mainnet")).toBeUndefined();
+  });
+});
+
+describe("verifyVaultRecoveryInfo — hardening", () => {
+  const priv = new PrivateKey();
+  const wif = priv.toWIF();
+  const addr = priv.toAddress().toString();
+  const rxdCoin = {
+    txid: "e".repeat(64),
+    vout: 0,
+    script: "76a914" + "00".repeat(20) + "88ac",
+    value: 100_000_000,
+  };
+  const gift: VaultParams = {
+    mode: "block",
+    locktime: 321000,
+    assetType: "rxd",
+    recipientAddress: addr,
+    shareRecoveryInfo: true,
+    value: 4_000_000,
+  };
+
+  it("normalizes an uppercase / whitespace-padded txid", () => {
+    const { rawTx, txid } = buildVaultTx([rxdCoin], addr, wif, gift, 1);
+    const info: VaultRecoveryInfo = {
+      txid: `  ${txid.toUpperCase()}  `,
+      vout: 0,
+      assetType: "rxd",
+      mode: "block",
+      locktime: 321000,
+    };
+    expect(verifyVaultRecoveryInfo(rawTx, info, addr)).not.toBeNull();
+  });
+
+  it("rejects a non-integer (float) locktime", () => {
+    const { rawTx, txid } = buildVaultTx([rxdCoin], addr, wif, gift, 1);
+    const info = {
+      txid,
+      vout: 0,
+      assetType: "rxd" as const,
+      mode: "block" as const,
+      locktime: 321000.5,
+    };
+    expect(verifyVaultRecoveryInfo(rawTx, info, addr)).toBeNull();
+  });
+});
+
+describe("claimVaultTx — separate funding key (swap-locked vault)", () => {
+  // Vault locked to key A (the recipient); fee funded from key B's coins.
+  const vaultKey = PrivateKey.fromRandom("livenet");
+  const vaultWif = vaultKey.toWIF();
+  const vaultAddr = vaultKey.toAddress().toString();
+  const vaultPubHex = vaultKey.toPublicKey().toBuffer().toString("hex");
+
+  const fundKey = PrivateKey.fromRandom("livenet");
+  const fundWif = fundKey.toWIF();
+  const fundAddr = fundKey.toAddress().toString();
+  const fundPubHex = fundKey.toPublicKey().toBuffer().toString("hex");
+
+  it("signs the vault input with the vault key and funding inputs with the funding key", () => {
+    const nftRedeem = vaultNftRedeemScript(800_000, vaultAddr, testRef);
+    const dummyVaultNft = {
+      txid: "00".repeat(32),
+      vout: 0,
+      value: VAULT_DUST_THRESHOLD,
+      redeemScriptHex: nftRedeem,
+    };
+    const pool: FundingUtxo[] = [
+      {
+        txid: "22".repeat(32),
+        vout: 0,
+        script: Script.fromAddress(fundAddr).toHex(),
+        value: 50_000_000,
+      },
+    ];
+    const selectMoreFunding = (
+      _needed: number,
+      already: FundingUtxo[]
+    ): FundingUtxo[] => {
+      const used = new Set(already.map((u) => `${u.txid}:${u.vout}`));
+      return pool.filter((u) => !used.has(`${u.txid}:${u.vout}`));
+    };
+
+    const result = claimVaultTx(
+      dummyVaultNft,
+      vaultAddr,
+      vaultWif,
+      10000,
+      undefined,
+      fundAddr,
+      selectMoreFunding,
+      fundWif
+    );
+    expect(result.rawTx).toBeTruthy();
+    const tx = new Transaction(result.rawTx);
+    expect(tx.inputs.length).toBe(2);
+    // Vault input (0) is signed by the vault key; funding input (1) by the fund key.
+    expect(tx.inputs[0].script.toHex()).toContain(vaultPubHex);
+    expect(tx.inputs[1].script.toHex()).toContain(fundPubHex);
+    expect(tx.inputs[1].script.toHex()).not.toContain(vaultPubHex);
   });
 });

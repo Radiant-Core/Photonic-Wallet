@@ -1,4 +1,11 @@
-import { Subscription, ElectrumCallback, VaultRecord } from "@app/types";
+import {
+  Subscription,
+  ElectrumCallback,
+  VaultRecord,
+  VaultScanResult,
+  VaultLastScan,
+  VAULT_SCAN_FAILED,
+} from "@app/types";
 import db from "@app/db";
 import ElectrumManager from "@app/electrum/ElectrumManager";
 import { Worker } from "./electrumWorker";
@@ -97,11 +104,11 @@ export class VaultWorker implements Subscription {
    * present on-chain. Repairs false positives from the old updateTxos bug.
    */
   async revalidateClaimed() {
-    const claimed = await db.vault.where("claimed").equals(1).toArray();
-    const relevant = claimed.filter(
-      (v) =>
-        v.recipientAddress === this.address || v.senderAddress === this.address
-    );
+    // Every stored vault record is this wallet's own (verified at create /
+    // import / recovery), and a vault may be locked to EITHER our main or swap
+    // address — so we process all of them rather than filtering on the single
+    // registered (main) address, which would skip swap-locked vaults.
+    const relevant = await db.vault.where("claimed").equals(1).toArray();
 
     for (const vault of relevant) {
       try {
@@ -165,13 +172,11 @@ export class VaultWorker implements Subscription {
   async subscribeToAllVaults() {
     if (!this.address) return;
 
-    const vaults = await db.vault.where("claimed").equals(0).toArray();
-
-    // Filter to vaults involving this wallet address
-    const relevant = vaults.filter(
-      (v) =>
-        v.recipientAddress === this.address || v.senderAddress === this.address
-    );
+    // All unclaimed vault records are this wallet's own and may be locked to
+    // EITHER our main or swap address, so subscribe to every one — filtering on
+    // the single registered (main) address would silently skip swap-locked
+    // (e.g. gifted-to-swap) vaults and they'd never reconcile to claimed.
+    const relevant = await db.vault.where("claimed").equals(0).toArray();
 
     for (const vault of relevant) {
       const scriptHash = vaultScriptHash(vault.redeemScriptHex);
@@ -281,6 +286,19 @@ export class VaultWorker implements Subscription {
   }
 
   /**
+   * Persist the completeness of the most recent discovery scan for an address.
+   * Stored alongside the vault records so the UI can warn when a prior scan was
+   * partial (skipped > 0) instead of silently treating it as authoritative.
+   */
+  private async storeLastScan(address: string, scan: VaultLastScan) {
+    try {
+      await db.kvp.put(scan, `vaultLastScan_${address}`);
+    } catch (e) {
+      console.warn("[Vault] Failed to store scan record:", e);
+    }
+  }
+
+  /**
    * Discover vaults from transaction history by scanning for vault creation
    * transactions and recovering vault metadata from OP_RETURN outputs.
    *
@@ -289,23 +307,26 @@ export class VaultWorker implements Subscription {
    * @param wif The wallet's WIF private key (for decrypting vault OP_RETURN)
    * @param address The address to scan (defaults to registered address if not provided)
    * @param swapWif Optional swap WIF to also try for decryption (vault may be encrypted with swap key)
-   * @returns Number of vaults discovered and added to the database
+   * @returns A {@link VaultScanResult} with discovered/scanned/total/skipped
+   *   counts. Throws an Error carrying {@link VAULT_SCAN_FAILED} if the address
+   *   history could not be loaded at all (so the caller can distinguish a failed
+   *   scan from a genuinely empty one).
    */
   async discoverVaults(
     wif: string,
     address?: string,
     swapWif?: string
-  ): Promise<number> {
+  ): Promise<VaultScanResult> {
     // Prevent concurrent discovery runs
     if (this.discovering) {
       console.warn("[Vault] Discovery already in progress, skipping");
-      return 0;
+      return { discovered: 0, scanned: 0, total: 0, skipped: 0 };
     }
 
     const scanAddress = address || this.address;
     if (!scanAddress) {
       console.warn("[Vault] Cannot discover vaults: no address provided");
-      return 0;
+      return { discovered: 0, scanned: 0, total: 0, skipped: 0 };
     }
 
     this.discovering = true;
@@ -315,15 +336,35 @@ export class VaultWorker implements Subscription {
       // Get P2PKH script hash for this address to fetch its history
       const scriptHash = p2pkhScriptHash(scanAddress);
 
-      // Fetch transaction history for this address
-      const history = (await this.electrum.client?.request(
+      // Fetch transaction history for this address. A cold ElectrumX cache on a
+      // heavy address can exceed the WS slow-method timeout on the first call,
+      // so route through the retry helper. A return of `undefined` means BOTH
+      // attempts failed (or there is no client) — that is a SCAN FAILURE, not an
+      // empty history, and must never be reported as "no vaults found".
+      const history = (await this.requestWithRetry(
         "blockchain.scripthash.get_history",
-        scriptHash
+        [scriptHash],
+        `history:${scanAddress}`
       )) as { tx_hash: string; height: number }[] | undefined;
 
-      if (!history || history.length === 0) {
+      if (history === undefined) {
+        // Retries exhausted — throw a distinct signal so the UI shows a
+        // "could not load history" error instead of a misleading empty result.
+        throw new Error(VAULT_SCAN_FAILED);
+      }
+
+      if (history.length === 0) {
         console.debug("[Vault] No transaction history found");
-        return 0;
+        await this.storeLastScan(scanAddress, {
+          timestamp: Date.now(),
+          address: scanAddress,
+          discovered: 0,
+          scanned: 0,
+          total: 0,
+          skipped: 0,
+          complete: true,
+        });
+        return { discovered: 0, scanned: 0, total: 0, skipped: 0 };
       }
 
       console.debug(`[Vault] Found ${history.length} transactions to scan`);
@@ -495,21 +536,29 @@ export class VaultWorker implements Subscription {
             }
           }
         } catch (error) {
+          // A per-tx failure is a silent miss — count it so the caller knows the
+          // scan was partial rather than letting it masquerade as "no vaults".
+          timeoutCount++;
           console.warn(`[Vault] Error scanning tx ${txid}:`, error);
           // Continue with next transaction
         }
       }
 
       console.log(
-        `[Vault] ✅ Scanned ${scanned}/${history.length} transactions, found ${discoveredCount} vault(s), ${timeoutCount} timeouts`
+        `[Vault] ✅ Scanned ${scanned}/${history.length} transactions, found ${discoveredCount} vault(s), ${timeoutCount} skipped`
       );
 
       if (discoveredCount > 0) {
         console.log(
           `[Vault] Discovered ${discoveredCount} vault(s) from history`
         );
-        // Subscribe to newly discovered vaults
-        await this.subscribeToAllVaults();
+        // Subscribe to newly discovered vaults. A subscription hiccup must not
+        // fail the whole scan (the vaults are already persisted), so swallow it.
+        try {
+          await this.subscribeToAllVaults();
+        } catch (subErr) {
+          console.warn("[Vault] Subscribe after discovery failed:", subErr);
+        }
       } else {
         console.log("[Vault] ℹ️ No vaults discovered in transaction history");
         console.debug(
@@ -518,26 +567,28 @@ export class VaultWorker implements Subscription {
         );
       }
 
-      // Store scan timestamp for this address
-      try {
-        const scanKey = `vaultLastScan_${scanAddress}`;
-        await db.kvp.put(
-          {
-            timestamp: Date.now(),
-            address: scanAddress,
-            discovered: discoveredCount,
-          },
-          scanKey
-        );
-      } catch (e) {
-        console.warn("[Vault] Failed to store scan timestamp:", e);
-      }
+      const result: VaultScanResult = {
+        discovered: discoveredCount,
+        // Successfully examined = everything we looked at minus the misses.
+        scanned: history.length - timeoutCount,
+        total: history.length,
+        skipped: timeoutCount,
+      };
 
-      return discoveredCount;
-    } catch (error) {
-      console.warn("[Vault] Discovery failed:", error);
-      return 0;
+      // Persist completeness so the UI can flag a partial scan in amber and so a
+      // later "skipped > 0" run can be retried rather than trusted.
+      await this.storeLastScan(scanAddress, {
+        timestamp: Date.now(),
+        address: scanAddress,
+        ...result,
+        complete: timeoutCount === 0,
+      });
+
+      return result;
     } finally {
+      // Errors (history-load failure, unexpected faults) now propagate to the
+      // caller so a failed scan is never silently reported as "no vaults". The
+      // lock is always released.
       this.discovering = false;
     }
   }

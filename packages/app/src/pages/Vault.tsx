@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { t } from "@lingui/macro";
 import {
+  Alert,
+  AlertIcon,
   Box,
   Button,
+  Checkbox,
+  CloseButton,
+  Code,
+  Collapse,
   Container,
   Divider,
   FormControl,
@@ -23,15 +29,27 @@ import {
   Tbody,
   Td,
   Text,
+  Textarea,
   Th,
   Thead,
   Tooltip,
   Tr,
+  useClipboard,
   useToast,
   VStack,
 } from "@chakra-ui/react";
-import { TbLock, TbLockOpen, TbPlus, TbTrash, TbWand } from "react-icons/tb";
-import { ExternalLinkIcon } from "@chakra-ui/icons";
+import {
+  TbDownload,
+  TbGift,
+  TbKey,
+  TbLock,
+  TbLockOpen,
+  TbPlus,
+  TbTrash,
+  TbUpload,
+  TbWand,
+} from "react-icons/tb";
+import { CopyIcon, ExternalLinkIcon } from "@chakra-ui/icons";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import Photons from "@app/components/Photons";
@@ -45,6 +63,8 @@ import {
   SmartToken,
   SmartTokenType,
   VaultRecord,
+  VaultLastScan,
+  VAULT_SCAN_FAILED,
 } from "@app/types";
 import { reverseRef } from "@lib/Outpoint";
 import { parseFtScript, parseNftScript } from "@lib/script";
@@ -58,6 +78,10 @@ import {
   vaultClaimableIn,
   claimVaultTx,
   recoverVaultsFromTx,
+  verifyVaultRecoveryInfo,
+  extractVaultSenderAddress,
+  isVaultRecipientAddress,
+  vaultScriptHash,
   VAULT_MAX_LOCKTIME_BLOCKS,
   VAULT_MAX_TRANCHES,
   type VaultParams,
@@ -66,6 +90,10 @@ import {
   type VestingTranche,
   type FundingUtxo,
 } from "@lib/vault";
+import {
+  serializeRecoveryInfo,
+  parseRecoveryPayload,
+} from "@app/vaultRecovery";
 
 // ── Constants ──────────────────────────────────────────────
 const AVG_BLOCK_TIME_SEC = 300; // ~5 min per block
@@ -259,11 +287,10 @@ export default function VaultPage() {
   // List filter state
   const [showClaimed, setShowClaimed] = useState(false);
 
-  // Scan tracking state
-  const [lastScan, setLastScan] = useState<{
-    timestamp: number;
-    discovered: number;
-  } | null>(null);
+  // Scan tracking state. `complete` is false when the last scan skipped any
+  // transactions (timeouts) — surfaced in amber so "no vaults" is never trusted
+  // blindly. Optional fields tolerate legacy records that predate the counts.
+  const [lastScan, setLastScan] = useState<Partial<VaultLastScan> | null>(null);
 
   // Vault discovery state
   const [scanning, setScanning] = useState(false);
@@ -271,6 +298,43 @@ export default function VaultPage() {
   // Manual transaction check state
   const [checkTxId, setCheckTxId] = useState("");
   const [checkingTx, setCheckingTx] = useState(false);
+  // "Recover by TXID" toggle (always available, not just empty-state)
+  const [showRecover, setShowRecover] = useState(false);
+
+  // "Import recovery info" (gifted/inherited vaults shared by the sender)
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  // Acknowledgment required before creating a vault for a third-party address
+  // (the sender must share recovery info or the recipient can't claim it).
+  const [ackGift, setAckGift] = useState(false);
+
+  // Persistent post-create panel. For a self-vault this surfaces the TXID to
+  // back up; for a gift it surfaces the shareable recovery info the recipient
+  // needs. Vault metadata lives only in IndexedDB, never in the seed backup.
+  const [lastCreated, setLastCreated] = useState<{
+    txid: string;
+    isSelf: boolean;
+    recoveryInfo: string;
+  } | null>(null);
+  const { onCopy: copyCreatedTxid, hasCopied: copiedCreated } = useClipboard(
+    lastCreated?.txid ?? ""
+  );
+  const { onCopy: copyCreatedRecovery, hasCopied: copiedCreatedRecovery } =
+    useClipboard(lastCreated?.recoveryInfo ?? "");
+
+  // A vault is a "gift" when its recipient is neither of this wallet's own
+  // (main / swap) addresses. Vaulting to our OWN swap address is self-custody
+  // but still needs self-encryption (the sender key is always main).
+  const recipientTrimmed = recipient.trim();
+  const isOwnSwap =
+    !!wallet.value.swapAddress &&
+    recipientTrimmed === wallet.value.swapAddress;
+  const isGift =
+    !!recipientTrimmed &&
+    recipientTrimmed !== wallet.value.address &&
+    !isOwnSwap;
 
   // Vault detail modal state
   const [selectedVault, setSelectedVault] = useState<VaultRecord | null>(null);
@@ -347,7 +411,7 @@ export default function VaultPage() {
       try {
         const scanKey = `vaultLastScan_${wallet.value.address}`;
         const scanData = (await db.kvp.get(scanKey)) as
-          | { timestamp: number; discovered: number }
+          | Partial<VaultLastScan>
           | undefined;
         if (scanData) {
           setLastScan(scanData);
@@ -760,9 +824,19 @@ export default function VaultPage() {
         if (!lt || !val) {
           throw new Error("Fill in locktime and amount");
         }
-        if (!recipient) {
+        if (!recipientTrimmed) {
           throw new Error(
             t`Recipient address is required. Click 'Self' to use your own address.`
+          );
+        }
+        if (!isVaultRecipientAddress(recipientTrimmed, wallet.value.net)) {
+          throw new Error(
+            t`Recipient must be a valid ${wallet.value.net} address. Funds locked to an invalid or wrong-network address can never be claimed.`
+          );
+        }
+        if (isGift && !ackGift) {
+          throw new Error(
+            t`To lock funds to another address, confirm you'll share the recovery info with the recipient.`
           );
         }
         if (mode === "block" && currentHeight > 0 && lt <= currentHeight) {
@@ -778,7 +852,11 @@ export default function VaultPage() {
           mode,
           locktime: lt,
           assetType,
-          recipientAddress: recipient,
+          recipientAddress: recipientTrimmed,
+          // Third-party gift OR our own swap address: self-encrypt the OP_RETURN
+          // (the sender key is always main). Gifts are claimed via the recovery
+          // info we surface below, not by decrypting the OP_RETURN.
+          shareRecoveryInfo: isGift || isOwnSwap || undefined,
           ref: assetType !== "rxd" ? ref : undefined,
           value: val,
           label: label || undefined,
@@ -805,7 +883,7 @@ export default function VaultPage() {
           assetType,
           mode,
           locktime: lt,
-          recipientAddress: recipient,
+          recipientAddress: recipientTrimmed,
           senderAddress: fromAddress,
           ref: assetType !== "rxd" ? ref : undefined,
           label: label || undefined,
@@ -843,15 +921,38 @@ export default function VaultPage() {
           isClosable: true,
         });
 
+        // Surface the TXID (self) or the shareable recovery info (gift).
+        setLastCreated({
+          txid,
+          isSelf: !isGift,
+          recoveryInfo: serializeRecoveryInfo([record]),
+        });
+
         // Reset form and go to list
         setLocktime("");
         setDatePickerValue("");
         setAmount("");
         setLabel("");
         setRef("");
+        setAckGift(false);
         setTab("list");
       } else {
         // Vesting schedule
+        if (!recipientTrimmed) {
+          throw new Error(
+            t`Recipient address is required. Click 'Self' to use your own address.`
+          );
+        }
+        if (!isVaultRecipientAddress(recipientTrimmed, wallet.value.net)) {
+          throw new Error(
+            t`Recipient must be a valid ${wallet.value.net} address. Funds locked to an invalid or wrong-network address can never be claimed.`
+          );
+        }
+        if (isGift && !ackGift) {
+          throw new Error(
+            t`To lock funds to another address, confirm you'll share the recovery info with the recipient.`
+          );
+        }
         if (
           vestingInputMode === "percentage" &&
           Math.abs(pctAllocated - 100) > 0.01
@@ -903,7 +1004,8 @@ export default function VaultPage() {
             mode,
             locktime: rt.locktime,
             assetType,
-            recipientAddress: recipient,
+            recipientAddress: recipientTrimmed,
+            shareRecoveryInfo: isGift || isOwnSwap || undefined,
             ref: assetType !== "rxd" ? ref : undefined,
             value: rt.value,
             label: label || undefined,
@@ -923,6 +1025,7 @@ export default function VaultPage() {
 
         // Store vault records for each tranche
         const vestingDate = Date.now();
+        const createdRecords: VaultRecord[] = [];
         for (let i = 0; i < vestingTranches.length; i++) {
           const record: VaultRecord = {
             txid,
@@ -931,7 +1034,7 @@ export default function VaultPage() {
             assetType,
             mode,
             locktime: vestingTranches[i].locktime,
-            recipientAddress: recipient,
+            recipientAddress: recipientTrimmed,
             senderAddress: fromAddress,
             ref: assetType !== "rxd" ? ref : undefined,
             label: label
@@ -956,6 +1059,7 @@ export default function VaultPage() {
           };
           await db.vault.put(record);
           await electrumWorker.value.addVault(record);
+          createdRecords.push(record);
         }
         await db.broadcast.put({
           txid,
@@ -971,6 +1075,12 @@ export default function VaultPage() {
           isClosable: true,
         });
 
+        setLastCreated({
+          txid,
+          isSelf: !isGift,
+          recoveryInfo: serializeRecoveryInfo(createdRecords),
+        });
+        setAckGift(false);
         setTranches([{ locktime: "", value: "", pct: "" }]);
         setTotalVestingAmount("");
         setLabel("");
@@ -998,8 +1108,44 @@ export default function VaultPage() {
     }
 
     try {
-      const wif = wallet.value.wif.toString();
+      // A vault may be locked to either of this wallet's addresses (main or
+      // swap). Sign the VAULT input with the key whose pkh matches the redeem
+      // script; fee/funding inputs come from main coins, so they are signed
+      // with the main key. Claimed funds always land in main.
+      const useSwap =
+        !!wallet.value.swapWif &&
+        !!wallet.value.swapAddress &&
+        vault.recipientAddress === wallet.value.swapAddress;
+      const wif = (
+        useSwap ? wallet.value.swapWif! : wallet.value.wif
+      ).toString();
+      const fundingWif = useSwap ? wallet.value.wif.toString() : undefined;
       const toAddress = wallet.value.address;
+
+      // Don't waste a fee on an already-spent vault: confirm the UTXO is still
+      // live before building the claim (covers a stale claimed flag / a claim
+      // made on another device).
+      try {
+        const liveUtxos = await electrumWorker.value.getUtxosByScriptHash(
+          vaultScriptHash(vault.redeemScriptHex)
+        );
+        const stillLive = liveUtxos?.some(
+          (u) => u.tx_hash === vault.txid && u.tx_pos === vault.vout
+        );
+        if (liveUtxos && !stillLive) {
+          await db.vault
+            .where({ txid: vault.txid, vout: vault.vout })
+            .modify({ claimed: 1 });
+          toast({
+            title: t`Already claimed`,
+            description: t`This vault has already been spent.`,
+            status: "info",
+          });
+          return;
+        }
+      } catch {
+        // Couldn't check — proceed; a spent vault fails the broadcast safely.
+      }
 
       // For NFT/FT vaults the locked value is dust (546 photons) and the fee
       // must come from additional RXD UTXOs. For RXD vaults the fee comes out
@@ -1053,7 +1199,8 @@ export default function VaultPage() {
         // itself first and only pull funding if the vault is too small.
         undefined,
         toAddress,
-        selectMoreFunding
+        selectMoreFunding,
+        fundingWif
       );
 
       const claimTxid = await electrumWorker.value.broadcast(result.rawTx);
@@ -1120,32 +1267,49 @@ export default function VaultPage() {
       const wif = wallet.value.wif.toString();
       const swapWif = wallet.value.swapWif?.toString();
       // Scan main address - also try swapWif for decryption if main fails
-      const mainCount = await electrumWorker.value.discoverVaults(
+      const mainResult = await electrumWorker.value.discoverVaults(
         wif,
         wallet.value.address,
         swapWif // Try swap WIF if main fails to decrypt
       );
 
-      // Scan swap address if different
-      let swapCount = 0;
+      // Scan swap address if different, then aggregate both scans so a partial
+      // result on either address is reflected in the combined skipped count.
+      let agg = { ...mainResult };
       if (swapWif && wallet.value.swapAddress) {
-        swapCount = await electrumWorker.value.discoverVaults(
+        const swapResult = await electrumWorker.value.discoverVaults(
           swapWif,
           wallet.value.swapAddress,
           wif // Try main WIF if swap fails to decrypt
         );
+        agg = {
+          discovered: agg.discovered + swapResult.discovered,
+          scanned: agg.scanned + swapResult.scanned,
+          total: agg.total + swapResult.total,
+          skipped: agg.skipped + swapResult.skipped,
+        };
       }
 
-      const totalCount = mainCount + swapCount;
+      const complete = agg.skipped === 0;
 
       // Update last scan state
       const now = Date.now();
-      setLastScan({ timestamp: now, discovered: totalCount });
+      setLastScan({ timestamp: now, ...agg, complete });
 
-      if (totalCount > 0) {
+      if (agg.skipped > 0) {
+        // Partial scan — do NOT show a bare success that could read as "all
+        // clear". Tell the user some history couldn't be reached and to retry.
+        toast({
+          title: t`Scan Incomplete`,
+          description: t`Found ${agg.discovered} vault(s). ${agg.skipped} transaction(s) could not be scanned — tap Scan again to retry.`,
+          status: "warning",
+          duration: 9000,
+          isClosable: true,
+        });
+      } else if (agg.discovered > 0) {
         toast({
           title: t`Vaults Discovered`,
-          description: t`Found ${totalCount} vault(s) in transaction history`,
+          description: t`Found ${agg.discovered} vault(s) in transaction history`,
           status: "success",
           duration: 5000,
         });
@@ -1158,10 +1322,21 @@ export default function VaultPage() {
         });
       }
     } catch (err: unknown) {
+      // A history-load failure throws VAULT_SCAN_FAILED across the worker
+      // boundary (instanceof is lost, so match on the message). Show a load
+      // error rather than the misleading "No vaults found".
+      const historyFailed =
+        err instanceof Error && err.message === VAULT_SCAN_FAILED;
       toast({
         title: t`Scan Failed`,
-        description: err instanceof Error ? err.message : String(err),
+        description: historyFailed
+          ? t`Could not load transaction history — try again`
+          : err instanceof Error
+          ? err.message
+          : String(err),
         status: "error",
+        duration: 7000,
+        isClosable: true,
       });
     } finally {
       setScanning(false);
@@ -1169,7 +1344,237 @@ export default function VaultPage() {
   };
 
   // ────────────────────────────────────────────────────────
-  // Check specific transaction for vault (debug helper)
+  // Export the full vault list to a JSON file. This is the durable backup
+  // that the recovery phrase does NOT provide — it carries the txids and redeem
+  // scripts needed to find and claim every vault after a wallet rebuild.
+  // ────────────────────────────────────────────────────────
+  const handleExport = useCallback(async () => {
+    try {
+      const all = await db.vault.toArray();
+      if (all.length === 0) {
+        toast({
+          title: t`No vaults to export`,
+          description: t`Create or recover a vault first.`,
+          status: "info",
+        });
+        return;
+      }
+      const payload = {
+        type: "photonic-vault-backup",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        address: wallet.value.address,
+        vaults: all,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `photonic-vaults-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: t`Vault list exported`,
+        description: t`${all.length} vault(s) saved. Keep this file with your recovery phrase.`,
+        status: "success",
+        duration: 6000,
+      });
+    } catch (err: unknown) {
+      toast({
+        title: t`Export Failed`,
+        description: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    }
+  }, [toast]);
+
+  // ────────────────────────────────────────────────────────
+  // Import recovery info shared by a sender (gift / inheritance / vesting).
+  // Trustless: each entry is verified against the on-chain output using THIS
+  // wallet's own address, so only vaults actually locked to us are imported —
+  // a forged blob cannot make us adopt a vault that isn't ours.
+  // ────────────────────────────────────────────────────────
+  const handleImportRecovery = useCallback(async () => {
+    if (wallet.value.locked || !wallet.value.wif) {
+      openModal.value = { modal: "unlock" };
+      return;
+    }
+    const { kind, entries } = parseRecoveryPayload(importText);
+    if (entries.length === 0) {
+      toast({
+        title: t`Nothing to import`,
+        description: t`Paste the recovery info (JSON) the sender shared with you.`,
+        status: "warning",
+      });
+      return;
+    }
+    const MAX_IMPORT = 500;
+    if (entries.length > MAX_IMPORT) {
+      toast({
+        title: t`Too many entries`,
+        description: t`Import is limited to ${MAX_IMPORT} vaults at a time.`,
+        status: "warning",
+      });
+      return;
+    }
+    setImporting(true);
+    try {
+      const ownAddresses = [
+        wallet.value.address,
+        wallet.value.swapAddress,
+      ].filter(Boolean) as string[];
+
+      // Fetch each referenced transaction once.
+      const byTxid = new Map<string, typeof entries>();
+      for (const e of entries) {
+        const list = byTxid.get(e.txid) ?? [];
+        list.push(e);
+        byTxid.set(e.txid, list);
+      }
+
+      let added = 0;
+      let rejected = 0;
+      let duplicate = 0;
+      for (const [txid, group] of byTxid) {
+        const rawTx = await electrumWorker.value.getTransaction(txid);
+        if (!rawTx) {
+          rejected += group.length;
+          continue;
+        }
+        // Best-effort provenance: who funded (i.e. sent) this vault. Empty when
+        // it can't be derived — never the importer's own address.
+        const senderAddress =
+          extractVaultSenderAddress(rawTx, wallet.value.net) ?? "";
+        const existing = await db.vault.where("txid").equals(txid).toArray();
+        const knownVouts = new Set(existing.map((v) => v.vout));
+        for (const entry of group) {
+          let matched: ReturnType<typeof verifyVaultRecoveryInfo> = null;
+          for (const addr of ownAddresses) {
+            matched = verifyVaultRecoveryInfo(rawTx, entry, addr);
+            if (matched) break;
+          }
+          if (!matched) {
+            rejected++;
+            continue;
+          }
+          const v = matched; // non-null, stable snapshot for the closures below
+          if (knownVouts.has(v.vout)) {
+            duplicate++;
+            continue;
+          }
+
+          // Capture the confirmation height when the vault output is present in
+          // the (confirmed) UTXO set, so the worker's spent-detection — which
+          // skips height-less records — can reconcile it later. Absence here is
+          // NOT treated as spent: listunspent omits mempool, so a just-broadcast
+          // unconfirmed gift would look absent. A genuinely already-spent vault
+          // is caught by the pre-claim check in handleClaim (a claimable vault
+          // is long past confirmation, so an empty UTXO set there means spent).
+          let height: number | undefined;
+          try {
+            const utxos = await electrumWorker.value.getUtxosByScriptHash(
+              vaultScriptHash(v.redeemScriptHex)
+            );
+            const live = utxos?.find(
+              (u) => u.tx_hash === txid && u.tx_pos === v.vout
+            );
+            if (live && live.height > 0) height = live.height;
+          } catch {
+            // Network hiccup — import without a height; a later scan reconciles.
+          }
+
+          const now = Date.now();
+          const record: VaultRecord = {
+            txid,
+            vout: v.vout,
+            value: v.params.value,
+            assetType: v.params.assetType,
+            mode: v.params.mode,
+            locktime: v.params.locktime,
+            recipientAddress: v.params.recipientAddress,
+            senderAddress,
+            ref: v.params.ref,
+            label: entry.label || v.params.label,
+            redeemScriptHex: v.redeemScriptHex,
+            p2shScriptHex: v.p2shScriptHex,
+            claimed: 0,
+            height,
+            date: now,
+            activityLog: [
+              {
+                timestamp: now,
+                action: "restored",
+                txid,
+                details: `Imported ${v.params.assetType.toUpperCase()} vault from shared recovery info`,
+                height,
+              },
+            ],
+          };
+          try {
+            await electrumWorker.value.addVault(record);
+            knownVouts.add(v.vout);
+            added++;
+          } catch {
+            // Unique [txid+vout] constraint hit by a concurrent writer — treat
+            // as already present rather than aborting the whole batch.
+            duplicate++;
+          }
+        }
+      }
+
+      // A backup file also lists vaults the user SENT to others; those
+      // correctly fail to import (locked to the recipient), so frame the
+      // "rejected" count as expected rather than alarming.
+      const isBackup = kind === "backup";
+      const rejectedNote = isBackup
+        ? t`${rejected} are held by their recipients (vaults you sent)`
+        : t`${rejected} not for this wallet`;
+
+      if (added > 0) {
+        toast({
+          title: t`Recovery info imported`,
+          description: t`Added ${added} vault(s). ${rejectedNote}, ${duplicate} already present.`,
+          status: "success",
+          duration: 7000,
+        });
+        setImportText("");
+        setShowImport(false);
+      } else {
+        toast({
+          title: t`No vaults imported`,
+          description: isBackup
+            ? t`Every vault in this backup is either already in your list or was sent to someone else (only the recipient can import those).`
+            : rejected > 0
+            ? t`None of these vaults are locked to this wallet (they may be for a different address), or the transaction couldn't be found.`
+            : t`These vaults are already in your list.`,
+          status: rejected > 0 && !isBackup ? "error" : "info",
+          duration: 7000,
+        });
+      }
+    } catch (err: unknown) {
+      toast({
+        title: t`Import failed`,
+        description: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    } finally {
+      setImporting(false);
+    }
+  }, [
+    importText,
+    toast,
+    wallet.value.locked,
+    wallet.value.wif,
+    wallet.value.address,
+    wallet.value.swapAddress,
+  ]);
+
+  // ────────────────────────────────────────────────────────
+  // Check specific transaction for vault (manual recovery by TXID)
   const handleCheckTx = useCallback(async () => {
     if (wallet.value.locked || !wallet.value.wif) {
       openModal.value = { modal: "unlock" };
@@ -1233,19 +1638,14 @@ export default function VaultPage() {
       }
 
       if (recovered.length > 0) {
-        console.log(
-          `[Vault Check] Found ${recovered.length} vault(s):`,
-          recovered
-        );
-        toast({
-          title: t`Vault Found!`,
-          description: t`Found ${recovered.length} vault(s) in this transaction. Check console for details.`,
-          status: "success",
-          duration: 10000,
-        });
-
-        // Save to database
+        // Skip outputs already in the DB (re-paste, or a tranche we already
+        // have) — the [txid+vout] unique index would otherwise reject the put.
+        const now = Date.now();
+        const existing = await db.vault.where("txid").equals(txid).toArray();
+        const knownVouts = new Set(existing.map((v) => v.vout));
+        let added = 0;
         for (const vaultData of recovered) {
+          if (knownVouts.has(vaultData.vout)) continue;
           const record: VaultRecord = {
             txid,
             vout: vaultData.vout,
@@ -1253,24 +1653,47 @@ export default function VaultPage() {
             assetType: vaultData.params.assetType,
             mode: vaultData.params.mode,
             locktime: vaultData.params.locktime,
+            // recoverVaultsFromTx only returns a vault when THIS wallet is the
+            // recipient, so the matched address is the recipient (and, for
+            // self-vaults, also the sender). Don't fabricate a different sender.
             recipientAddress: vaultData.params.recipientAddress,
-            senderAddress: wallet.value.address,
+            senderAddress: vaultData.params.recipientAddress,
             ref: vaultData.params.ref,
             label: vaultData.params.label,
             redeemScriptHex: vaultData.redeemScriptHex,
             p2shScriptHex: vaultData.p2shScriptHex,
             claimed: 0,
-            date: Date.now(),
+            date: now,
+            activityLog: [
+              {
+                timestamp: now,
+                action: "restored",
+                txid,
+                details: `Recovered ${vaultData.params.assetType.toUpperCase()} vault by transaction ID`,
+              },
+            ],
           };
-          await db.vault.put(record);
+          // addVault persists AND subscribes for spent/claim detection.
+          await electrumWorker.value.addVault(record);
+          added++;
         }
-      } else {
-        console.log(`[Vault Check] No vaults found in transaction ${txid}`);
         toast({
-          title: t`No Vault Found`,
-          description: t`This transaction does not contain a recoverable vault. Check console for debug info.`,
+          title: added > 0 ? t`Vault recovered` : t`Already in your list`,
+          description:
+            added > 0
+              ? t`Added ${added} vault(s) from this transaction to My Vaults.`
+              : t`This vault is already in My Vaults.`,
+          status: "success",
+          duration: 6000,
+        });
+        setCheckTxId("");
+        setShowRecover(false);
+      } else {
+        toast({
+          title: t`No vault found`,
+          description: t`No vault for this wallet was found in that transaction. If someone gifted you a vault, use "Import recovery info" with the details they shared instead. Otherwise, double-check the transaction ID and that you're using the right wallet.`,
           status: "info",
-          duration: 5000,
+          duration: 8000,
         });
       }
     } catch (err: unknown) {
@@ -1327,7 +1750,11 @@ export default function VaultPage() {
               <HStack>
                 <Input
                   value={recipient}
-                  onChange={(e) => setRecipient(e.target.value)}
+                  onChange={(e) => {
+                    setRecipient(e.target.value);
+                    // Re-confirm the gift acknowledgment for each new recipient.
+                    setAckGift(false);
+                  }}
                   placeholder={t`Radiant address`}
                   fontFamily="mono"
                   size="sm"
@@ -1337,6 +1764,36 @@ export default function VaultPage() {
                 </Button>
               </HStack>
             </FormControl>
+
+            {/* Gifting / inheritance / vesting-to-others guidance */}
+            {isGift && (
+              <Alert
+                status="warning"
+                variant="subtle"
+                borderRadius="md"
+                alignItems="flex-start"
+                fontSize="sm"
+              >
+                <AlertIcon as={TbGift} />
+                <Box>
+                  <Text fontWeight="semibold">
+                    {t`You're locking funds to someone else's address`}
+                  </Text>
+                  <Text fontSize="xs" color="whiteAlpha.700" mb={2}>
+                    {t`This is a gift, inheritance, or vesting for another person. Their wallet can't discover it on its own and their recovery phrase won't reveal it. After you create it, you'll get a "recovery info" blob — send it to them so they can import and claim the vault when it unlocks.`}
+                  </Text>
+                  <Checkbox
+                    size="sm"
+                    isChecked={ackGift}
+                    onChange={(e) => setAckGift(e.target.checked)}
+                  >
+                    <Text fontSize="xs">
+                      {t`I understand I must share the recovery info with the recipient, or they can't claim it.`}
+                    </Text>
+                  </Checkbox>
+                </Box>
+              </Alert>
+            )}
 
             <SimpleGrid columns={2} gap={4}>
               <FormControl>
@@ -1793,70 +2250,127 @@ export default function VaultPage() {
         {/* ───────── LIST TAB ───────── */}
         {tab === "list" && (
           <Box overflowX="auto">
-            {/* Filter controls */}
-            {vaults && vaults.length > 0 && (
-              <HStack mb={3} gap={3} justify="space-between">
-                <HStack gap={3}>
-                  <FormControl
-                    display="flex"
-                    alignItems="center"
-                    gap={2}
-                    w="auto"
-                  >
-                    <Switch
-                      size="sm"
-                      isChecked={showClaimed}
-                      onChange={(e) => setShowClaimed(e.target.checked)}
-                    />
-                    <FormLabel
-                      mb={0}
-                      fontSize="xs"
-                    >{t`Show Claimed`}</FormLabel>
-                  </FormControl>
-                  <Text fontSize="xs" color="whiteAlpha.500">
-                    {vaults.filter((v) => !v.claimed).length} {t`active`}
-                    {showClaimed &&
-                      ` / ${
-                        vaults.filter((v) => v.claimed).length
-                      } ${t`claimed`}`}
+            {/* Durability reminder — vault records live only on this device */}
+            <Alert
+              status="info"
+              variant="subtle"
+              borderRadius="md"
+              mb={4}
+              alignItems="flex-start"
+              fontSize="sm"
+            >
+              <AlertIcon />
+              <Box>
+                <Text fontWeight="semibold">
+                  {t`Vault records are stored only on this device`}
+                </Text>
+                <Text fontSize="xs" color="whiteAlpha.700">
+                  {t`Your recovery phrase does not back up vaults. Save each vault's transaction ID — and export your vault list — so you can restore access after a wallet rebuild, a browser-data clear, or on a new device.`}
+                </Text>
+              </Box>
+            </Alert>
+
+            {/* Just-created vault — surface the TXID to back up */}
+            {lastCreated && (
+              <Alert
+                status="success"
+                variant="subtle"
+                borderRadius="md"
+                mb={4}
+                alignItems="flex-start"
+              >
+                <AlertIcon />
+                <Box flex={1} minW={0}>
+                  <Text fontWeight="semibold" fontSize="sm">
+                    {lastCreated.isSelf
+                      ? t`Vault created — save this transaction ID`
+                      : t`Vault created — send the recovery info to the recipient`}
                   </Text>
-                </HStack>
-                <VStack align="end" spacing={0}>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    leftIcon={<Icon as={TbWand} />}
-                    onClick={handleScan}
-                    isLoading={scanning}
-                    loadingText={t`Scanning...`}
+                  <Text fontSize="xs" color="whiteAlpha.700" mb={2}>
+                    {lastCreated.isSelf
+                      ? t`This TXID is your off-chain record. Keep it safe — you can recover this vault by pasting it into "Recover by TXID" after a wallet rebuild.`
+                      : t`The recipient's wallet can't find this vault on its own. Send them the recovery info below — it's the only way they can import and claim it. Their recovery phrase alone won't reveal it.`}
+                  </Text>
+                  <HStack
+                    bg="blackAlpha.300"
+                    borderRadius="md"
+                    px={2}
+                    py={1}
+                    gap={2}
                   >
-                    {t`Scan for Vaults`}
-                  </Button>
-                  {lastScan && (
-                    <Text fontSize="xs" color="whiteAlpha.500">
-                      {t`Last scan`}: {formatScanTime(lastScan.timestamp)}
-                      {lastScan.discovered > 0 && (
-                        <Text as="span" color="green.400" ml={1}>
-                          ({lastScan.discovered} {t`found`})
-                        </Text>
-                      )}
-                    </Text>
+                    <Code
+                      bg="transparent"
+                      fontSize="xs"
+                      wordBreak="break-all"
+                      flex={1}
+                    >
+                      {lastCreated.txid}
+                    </Code>
+                    <Tooltip
+                      label={copiedCreated ? t`Copied!` : t`Copy TXID`}
+                      placement="top"
+                    >
+                      <IconButton
+                        aria-label={t`Copy TXID`}
+                        icon={<CopyIcon />}
+                        size="xs"
+                        variant="ghost"
+                        onClick={copyCreatedTxid}
+                      />
+                    </Tooltip>
+                  </HStack>
+                  {!lastCreated.isSelf && (
+                    <Button
+                      size="xs"
+                      mt={2}
+                      leftIcon={<CopyIcon />}
+                      variant="primary"
+                      onClick={copyCreatedRecovery}
+                    >
+                      {copiedCreatedRecovery
+                        ? t`Recovery info copied`
+                        : t`Copy recovery info for recipient`}
+                    </Button>
                   )}
-                </VStack>
-              </HStack>
+                </Box>
+                <CloseButton onClick={() => setLastCreated(null)} size="sm" />
+              </Alert>
             )}
 
-            {!vaults || vaults.length === 0 ? (
-              <VStack gap={4} py={8} align="center">
-                <Text color="whiteAlpha.500" textAlign="center">
-                  {t`No vaults yet. Create one to get started.`}
-                </Text>
-                <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
-                  {t`Or scan your transaction history for existing timelocked coins.`}
-                </Text>
+            {/* Controls: filters (when populated) + Scan + Recover + Export */}
+            <HStack mb={2} gap={3} justify="space-between" wrap="wrap">
+              <HStack gap={3}>
+                {vaults && vaults.length > 0 && (
+                  <>
+                    <FormControl
+                      display="flex"
+                      alignItems="center"
+                      gap={2}
+                      w="auto"
+                    >
+                      <Switch
+                        size="sm"
+                        isChecked={showClaimed}
+                        onChange={(e) => setShowClaimed(e.target.checked)}
+                      />
+                      <FormLabel mb={0} fontSize="xs">
+                        {t`Show Claimed`}
+                      </FormLabel>
+                    </FormControl>
+                    <Text fontSize="xs" color="whiteAlpha.500">
+                      {vaults.filter((v) => !v.claimed).length} {t`active`}
+                      {showClaimed &&
+                        ` / ${
+                          vaults.filter((v) => v.claimed).length
+                        } ${t`claimed`}`}
+                    </Text>
+                  </>
+                )}
+              </HStack>
+              <HStack gap={1}>
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  variant="ghost"
                   leftIcon={<Icon as={TbWand} />}
                   onClick={handleScan}
                   isLoading={scanning}
@@ -1864,13 +2378,71 @@ export default function VaultPage() {
                 >
                   {t`Scan for Vaults`}
                 </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  leftIcon={<Icon as={TbKey} />}
+                  onClick={() => setShowRecover((s) => !s)}
+                >
+                  {t`Recover by TXID`}
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  leftIcon={<Icon as={TbUpload} />}
+                  onClick={() => setShowImport((s) => !s)}
+                >
+                  {t`Import recovery info`}
+                </Button>
+                {vaults && vaults.length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    leftIcon={<Icon as={TbDownload} />}
+                    onClick={handleExport}
+                  >
+                    {t`Export`}
+                  </Button>
+                )}
+              </HStack>
+            </HStack>
+            {lastScan && (
+              <Text
+                fontSize="xs"
+                color={
+                  lastScan.complete === false ? "orange.300" : "whiteAlpha.500"
+                }
+                textAlign="right"
+                mb={2}
+              >
+                {t`Last scan`}: {formatScanTime(lastScan.timestamp ?? 0)}
+                {lastScan.complete === false ? (
+                  <Text as="span" color="orange.300" ml={1}>
+                    — {t`incomplete (${lastScan.skipped ?? 0} not scanned)`}
+                  </Text>
+                ) : (
+                  (lastScan.discovered ?? 0) > 0 && (
+                    <Text as="span" color="green.400" ml={1}>
+                      ({lastScan.discovered} {t`found`})
+                    </Text>
+                  )
+                )}
+              </Text>
+            )}
 
-                <Divider my={4} />
-
-                <Text color="whiteAlpha.400" fontSize="xs" textAlign="center">
-                  {t`Know a specific vault transaction? Paste the TXID below:`}
+            {/* Recover by TXID — always available, not just empty-state */}
+            <Collapse in={showRecover} animateOpacity>
+              <Box
+                mb={4}
+                p={3}
+                borderWidth="1px"
+                borderColor="whiteAlpha.200"
+                borderRadius="md"
+              >
+                <Text fontSize="xs" color="whiteAlpha.600" mb={2}>
+                  {t`Paste a vault's creation transaction ID to recover it. Use this to restore a vault that didn't appear after a rebuild, or one someone sent you.`}
                 </Text>
-                <HStack w="100%" maxW="md">
+                <HStack>
                   <Input
                     size="sm"
                     placeholder={t`Paste transaction ID (txid)`}
@@ -1884,9 +2456,53 @@ export default function VaultPage() {
                     isLoading={checkingTx}
                     loadingText={t`Checking...`}
                   >
-                    {t`Check`}
+                    {t`Recover`}
                   </Button>
                 </HStack>
+              </Box>
+            </Collapse>
+
+            {/* Import recovery info shared by a sender (gift / inheritance) */}
+            <Collapse in={showImport} animateOpacity>
+              <Box
+                mb={4}
+                p={3}
+                borderWidth="1px"
+                borderColor="whiteAlpha.200"
+                borderRadius="md"
+              >
+                <Text fontSize="xs" color="whiteAlpha.600" mb={2}>
+                  {t`Someone locked a vault to your address and shared its recovery info? Paste it here. It's verified against the blockchain — only vaults actually locked to your wallet are imported.`}
+                </Text>
+                <Textarea
+                  size="sm"
+                  rows={4}
+                  placeholder={t`Paste recovery info (JSON)`}
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  fontFamily="mono"
+                  fontSize="xs"
+                  mb={2}
+                />
+                <Button
+                  size="sm"
+                  onClick={handleImportRecovery}
+                  isLoading={importing}
+                  loadingText={t`Importing...`}
+                >
+                  {t`Import`}
+                </Button>
+              </Box>
+            </Collapse>
+
+            {!vaults || vaults.length === 0 ? (
+              <VStack gap={3} py={8} align="center">
+                <Text color="whiteAlpha.500" textAlign="center">
+                  {t`No vaults yet. Create one to get started.`}
+                </Text>
+                <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
+                  {t`Already have vaults? Use "Scan for Vaults" to find timelocked coins in your history, or "Recover by TXID" to restore a specific one.`}
+                </Text>
               </VStack>
             ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
               <Text color="whiteAlpha.500" py={8} textAlign="center">
@@ -1940,8 +2556,11 @@ export default function VaultPage() {
                         currentHeight,
                         currentTimestamp
                       );
+                      // The wallet is a fixed two-address model (main + swap);
+                      // a vault addressed to EITHER is claimable by this wallet.
                       const isRecipient =
-                        v.recipientAddress === wallet.value.address;
+                        v.recipientAddress === wallet.value.address ||
+                        v.recipientAddress === wallet.value.swapAddress;
 
                       return (
                         <Tr
@@ -2058,7 +2677,7 @@ export default function VaultPage() {
                                   </Button>
                                 ) : (
                                   <Tooltip
-                                    label={t`You are not the recipient`}
+                                    label={t`You created this vault for another address. Only the recipient's wallet can claim it once it unlocks.`}
                                     placement="top"
                                   >
                                     <Button

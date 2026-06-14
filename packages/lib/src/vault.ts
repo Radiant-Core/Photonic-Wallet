@@ -40,7 +40,8 @@ import { randomBytes } from "@noble/hashes/utils";
 import { normalizeFeeRate } from "./feePolicy";
 import { bnFromValue, transactionFromHex, setInputSequence } from "./rjsCompat";
 
-const { Script, Opcode, Address, Transaction, PrivateKey, crypto } = rjs;
+const { Script, Opcode, Address, Transaction, PrivateKey, PublicKey, crypto } =
+  rjs;
 type Script = rjs.Script;
 
 // ============================================================================
@@ -134,6 +135,18 @@ export type VaultParams = {
    * MUST hash to `recipientAddress`'s pkh; mismatches are rejected.
    */
   recipientPubKey?: string;
+  /**
+   * Share-recovery-info mode (gifting / inheritance / vesting-to-others).
+   *
+   * When `true` AND the recipient differs from the sender AND no
+   * `recipientPubKey` is supplied, the OP_RETURN recovery metadata is
+   * SELF-encrypted to the sender instead of throwing. The covenant still locks
+   * to `recipientAddress`; the recipient claims by importing the recovery info
+   * the sender shares out-of-band (see `verifyVaultRecoveryInfo`), not by
+   * decrypting the OP_RETURN. This avoids the recipient having to pre-share a
+   * public key.
+   */
+  shareRecoveryInfo?: boolean;
   /** For NFT/FT: the token ref in little-endian hex (72 chars) */
   ref?: string;
   /** Amount in photons (RXD/FT) or 1 for NFT */
@@ -399,7 +412,16 @@ export function p2shAddress(redeemScriptHex: string): string {
  * SHA256 of the output script, reversed.
  */
 export function vaultScriptHash(redeemScriptHex: string): string {
-  const outputScript = p2shOutputScript(redeemScriptHex);
+  // FT vaults lock to a NATIVE output script (the script itself IS the output);
+  // RXD/NFT wrap the redeem script in P2SH. Detect which so the ElectrumX
+  // scripthash matches the real on-chain output — otherwise FT vault
+  // subscriptions and spent-detection query the wrong hash (a recovered FT
+  // vault would be wrongly flagged claimed, and live ones never update).
+  const parsed = parseVaultRedeemScript(redeemScriptHex);
+  const outputScript =
+    parsed && isNativeVault(parsed.assetType)
+      ? redeemScriptHex
+      : p2shOutputScript(redeemScriptHex);
   return Buffer.from(sha256(Buffer.from(outputScript, "hex")))
     .reverse()
     .toString("hex");
@@ -442,6 +464,31 @@ export function buildRedeemScript(params: VaultParams): string {
  */
 export function isNativeVault(assetType: VaultAssetType): boolean {
   return assetType === "ft";
+}
+
+/**
+ * Validate that `address` is a real P2PKH address a vault can lock to AND, when
+ * `net` is given, that it belongs to the active network. Vault covenants embed
+ * the address's pkh directly, so a scripthash address, a wrong-network address,
+ * or a typo would silently lock funds to an output NOBODY can claim. Callers
+ * MUST gate vault creation on this. Returns false (never throws) for any
+ * malformed / non-P2PKH / wrong-network address.
+ */
+export function isVaultRecipientAddress(
+  address: string,
+  net?: "mainnet" | "testnet"
+): boolean {
+  try {
+    const addr = new Address(address.trim());
+    if (addr.type !== "pubkeyhash") return false;
+    if (net) {
+      const want = net === "mainnet" ? "livenet" : "testnet";
+      if (addr.network?.name !== want) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ============================================================================
@@ -588,9 +635,18 @@ function resolveRecipientPubKey(
     return senderPubBytes;
   }
 
+  // Share-recovery-info path: a third-party vault whose OP_RETURN is
+  // self-encrypted to the sender. The recipient cannot (and is not meant to)
+  // decrypt it — they claim via imported recovery info. The covenant still
+  // locks to the recipient's pkh; only the OP_RETURN audience is the sender.
+  if (params.shareRecoveryInfo) {
+    return senderPubBytes;
+  }
+
   throw new Error(
     "Vault recipient differs from sender; supply params.recipientPubKey " +
-      "(33-byte compressed secp256k1, hex) — it cannot be derived from a P2PKH address."
+      "(33-byte compressed secp256k1, hex) or set params.shareRecoveryInfo " +
+      "to self-encrypt and share recovery info out-of-band."
   );
 }
 
@@ -813,10 +869,15 @@ export function decodeVaultMetadata(data: Uint8Array): VaultParams | null {
 }
 
 /**
- * Attempt to decrypt and parse a vault OP_RETURN from a transaction output
- * script. Either the sender or the recipient can call this — the function
- * inspects the embedded pubkeys to determine which side `ownWif` represents
- * and runs ECDH against the counterparty's pubkey.
+ * Decrypt a vault OP_RETURN to its raw plaintext metadata. Either the sender or
+ * the recipient can call this — the function inspects the embedded pubkeys to
+ * determine which side `ownWif` represents and runs ECDH against the
+ * counterparty's pubkey.
+ *
+ * The returned plaintext is EITHER a single `encodeVaultMetadata` blob (simple
+ * vault) OR the concatenated vesting layout `[count][len][meta]…` emitted by
+ * buildVestingTx. Use `decodeVaultMetadata` for the simple case or
+ * `decodeVaultMetadataList` to handle both transparently.
  *
  * Returns `null` for any of:
  *   - The script is not a vault OP_RETURN.
@@ -824,14 +885,13 @@ export function decodeVaultMetadata(data: Uint8Array): VaultParams | null {
  *     payloads from earlier alpha builds are permanently rejected).
  *   - `ownWif`'s pubkey is neither party of the vault.
  *   - AEAD decryption fails (tampered, wrong key, or truncated payload).
- *   - The decrypted metadata fails to decode.
  *
  * Never throws on malformed input — returns `null`.
  */
-export function parseVaultOpReturn(
+export function decryptVaultOpReturnPlaintext(
   scriptHex: string,
   ownWif: string
-): VaultParams | null {
+): Uint8Array | null {
   try {
     // OP_RETURN (6a) + push "vault" (05 7661756c74) + push <body>
     if (!scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)) {
@@ -901,10 +961,72 @@ export function parseVaultOpReturn(
       return null;
     }
 
-    return decodeVaultMetadata(plaintext);
+    return plaintext;
   } catch {
     return null;
   }
+}
+
+/**
+ * Decrypt and decode a SIMPLE (single-vault) OP_RETURN. Returns the vault's
+ * params, or `null` if the script isn't decryptable by `ownWif` or the
+ * plaintext isn't a single-vault blob. For vesting payloads (which decode to
+ * multiple tranches) use `decodeVaultMetadataList` on the decrypted plaintext.
+ */
+export function parseVaultOpReturn(
+  scriptHex: string,
+  ownWif: string
+): VaultParams | null {
+  const plaintext = decryptVaultOpReturnPlaintext(scriptHex, ownWif);
+  return plaintext ? decodeVaultMetadata(plaintext) : null;
+}
+
+/**
+ * Decode a decrypted vault OP_RETURN plaintext into one or more VaultParams,
+ * transparently handling both payload shapes:
+ *   - simple vault   → a single `encodeVaultMetadata` blob ([version=1]…)
+ *   - vesting schedule → `[trancheCount:1][len:2][meta]…` (see buildVestingTx)
+ *
+ * The two shapes can share a first byte (version 1 vs a tranche count of 1), so
+ * BOTH interpretations are returned as candidates. `recoverVaultsFromTx`
+ * validates each candidate against the actual on-chain outputs, so a wrong
+ * interpretation simply fails to match and is discarded.
+ */
+export function decodeVaultMetadataList(plaintext: Uint8Array): VaultParams[] {
+  const candidates: VaultParams[] = [];
+  const vesting = tryDecodeVestingMetadata(plaintext);
+  if (vesting) candidates.push(...vesting);
+  const single = decodeVaultMetadata(plaintext);
+  if (single) candidates.push(single);
+  return candidates;
+}
+
+/**
+ * Attempt to decode a plaintext as the vesting layout `[count][len][meta]…`.
+ * Returns the per-tranche params only when the structure parses cleanly AND
+ * consumes the buffer exactly; otherwise `null` (so the caller falls back to the
+ * single-vault decode).
+ */
+function tryDecodeVestingMetadata(data: Uint8Array): VaultParams[] | null {
+  if (data.length < 3) return null;
+  const count = data[0];
+  if (count < 1 || count > VAULT_MAX_TRANCHES) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let offset = 1;
+  const out: VaultParams[] = [];
+  for (let i = 0; i < count; i++) {
+    if (offset + 2 > data.length) return null;
+    const len = view.getUint16(offset, true);
+    offset += 2;
+    if (len === 0 || offset + len > data.length) return null;
+    const params = decodeVaultMetadata(data.slice(offset, offset + len));
+    if (!params) return null;
+    out.push(params);
+    offset += len;
+  }
+  // Structural integrity: the tranche records must consume the whole plaintext.
+  if (offset !== data.length) return null;
+  return out;
 }
 
 // ============================================================================
@@ -1336,7 +1458,8 @@ export function claimVaultTx(
   feeRate: number,
   additionalFundingUtxos?: FundingUtxo[],
   fundingAddress?: string,
-  selectMoreFunding?: SelectMoreFunding
+  selectMoreFunding?: SelectMoreFunding,
+  fundingWif?: string
 ): { rawTx: string; txid: string } {
   const parsed = parseVaultRedeemScript(vaultUtxo.redeemScriptHex);
   if (!parsed) {
@@ -1350,6 +1473,13 @@ export function claimVaultTx(
 
   const privKey = PrivateKey.fromWIF(wif);
   const pubKey = privKey.toPublicKey();
+
+  // Funding inputs may belong to a DIFFERENT key than the vault recipient — e.g.
+  // claiming a swap-address-locked NFT/FT vault while paying the fee from
+  // main-address coins. Default to the vault key when no separate funding key
+  // is supplied (the common same-key case).
+  const fundingPrivKey = fundingWif ? PrivateKey.fromWIF(fundingWif) : privKey;
+  const fundingPubKey = fundingPrivKey.toPublicKey();
 
   // Build the primary output script up-front so the fee estimator uses its
   // real byte size (NFT and FT outputs are 2-3x larger than P2PKH).
@@ -1536,7 +1666,7 @@ export function claimVaultTx(
       }
       const fundingSig = Transaction.Sighash.sign(
         tx,
-        privKey,
+        fundingPrivKey,
         sigType,
         i,
         inputOutput.script,
@@ -1544,7 +1674,7 @@ export function claimVaultTx(
       );
       const fundingScriptSig = Script.empty()
         .add(Buffer.concat([fundingSig.toBuffer(), Buffer.from([sigType])]))
-        .add(pubKey.toBuffer());
+        .add(fundingPubKey.toBuffer());
       tx.inputs[i].setScript(fundingScriptSig);
     }
   }
@@ -1692,9 +1822,15 @@ export function findVaultOpReturnOutputs(rawTxHex: string): number[] {
  * the OP_RETURN metadata with the wallet's private key.
  *
  * Used during wallet restore from seed. For each vault creation transaction
- * found in history, this function tries to decrypt the OP_RETURN (works
- * whether the wallet was the sender or the recipient) and reconstructs the
- * full VaultRecord including the redeem script.
+ * found in history, this function decrypts the OP_RETURN (works whether the
+ * wallet was the sender or the recipient) and reconstructs the full
+ * VaultRecord(s) including the redeem script. Handles all vault shapes:
+ *   - simple RXD / NFT vaults (P2SH)
+ *   - FT vaults (native locking script — matched without P2SH wrapping)
+ *   - vesting schedules (one OP_RETURN → one record per matching tranche output)
+ *
+ * Only outputs whose rebuilt locking script matches on-chain are returned, so a
+ * record is produced exactly when this wallet is the vault's recipient.
  *
  * @param rawTxHex Raw transaction hex
  * @param _txid Transaction ID (unused; retained for caller logging)
@@ -1721,47 +1857,195 @@ export function recoverVaultsFromTx(
     params: VaultParams;
   }[] = [];
 
-  // Find OP_RETURN outputs with vault magic
+  // A vault tx carries one OP_RETURN that describes either a single vault or
+  // every tranche of a vesting schedule. We never know the recipient pkh from
+  // the metadata alone, so we rebuild the locking script with OUR address and
+  // keep only candidates whose script byte-matches an actual on-chain output —
+  // which holds exactly when this wallet is the true recipient.
+  const matchedVouts = new Set<number>();
+
   for (let i = 0; i < tx.outputs.length; i++) {
     const scriptHex = tx.outputs[i].script.toHex();
     if (!scriptHex.startsWith("6a05" + VAULT_MAGIC_BYTES)) continue;
 
-    const parsed = parseVaultOpReturn(scriptHex, wif);
-    if (!parsed) continue;
+    const plaintext = decryptVaultOpReturnPlaintext(scriptHex, wif);
+    if (!plaintext) continue;
 
-    // Reconstruct the redeem script from decoded metadata
-    try {
-      // The recipient address can't be fully recovered from just pkh,
-      // but we know our wallet address. For self-vaults, the recipient IS us.
-      const params: VaultParams = {
-        ...parsed,
-        recipientAddress: walletAddress,
-      };
+    // Decode every candidate (1 for a simple vault, N for a vesting schedule).
+    // The on-chain output match below arbitrates between interpretations.
+    const candidates = decodeVaultMetadataList(plaintext);
 
-      const redeemScriptHex = buildRedeemScript(params);
-      const p2sh = p2shOutputScript(redeemScriptHex);
+    for (const parsed of candidates) {
+      try {
+        const params: VaultParams = {
+          ...parsed,
+          recipientAddress: walletAddress,
+        };
 
-      // Verify: check if any non-OP_RETURN output matches this P2SH script
-      for (let j = 0; j < tx.outputs.length; j++) {
-        if (j === i) continue; // skip OP_RETURN itself
-        const outScript = tx.outputs[j].script.toHex();
-        if (outScript === p2sh) {
-          results.push({
-            vout: j,
-            redeemScriptHex,
-            p2shScriptHex: p2sh,
-            params: {
-              ...params,
-              value: tx.outputs[j].satoshis,
-            },
-          });
+        const redeemScriptHex = buildRedeemScript(params);
+        // RXD/NFT vaults lock to P2SH; FT vaults lock to the native script
+        // itself. Compare against whichever the on-chain output actually uses.
+        const lockingScript = isNativeVault(params.assetType)
+          ? redeemScriptHex
+          : p2shOutputScript(redeemScriptHex);
+
+        // Verify against each non-OP_RETURN output not already claimed.
+        for (let j = 0; j < tx.outputs.length; j++) {
+          if (j === i || matchedVouts.has(j)) continue;
+          if (tx.outputs[j].script.toHex() === lockingScript) {
+            matchedVouts.add(j);
+            results.push({
+              vout: j,
+              redeemScriptHex,
+              p2shScriptHex: p2shOutputScript(redeemScriptHex),
+              params: {
+                ...params,
+                value: tx.outputs[j].satoshis,
+              },
+            });
+          }
         }
+      } catch {
+        // Script reconstruction failed — skip this candidate.
+        continue;
       }
-    } catch {
-      // Script reconstruction failed — skip
-      continue;
     }
   }
 
   return results;
+}
+
+/**
+ * Minimal, shareable description of a single vault output — everything a
+ * recipient needs to reconstruct and claim a gifted vault WITHOUT decrypting
+ * the OP_RETURN. Produced by the sender (share-recovery-info mode), consumed by
+ * `verifyVaultRecoveryInfo` on the recipient's side.
+ *
+ * Note: `recipientAddress` here is advisory/display only — verification ignores
+ * it and rebuilds the locking script from the IMPORTER's own address, so a
+ * forged value cannot trick the recipient (see `verifyVaultRecoveryInfo`).
+ */
+export type VaultRecoveryInfo = {
+  txid: string;
+  vout: number;
+  assetType: VaultAssetType;
+  mode: VaultMode;
+  locktime: number;
+  ref?: string;
+  label?: string;
+  recipientAddress?: string;
+};
+
+/**
+ * Trustlessly verify a shared vault recovery blob against the on-chain
+ * transaction, from the importing wallet's point of view.
+ *
+ * This is the recipient-side counterpart to share-recovery-info gifting. It
+ * does NOT trust any sender-provided script or recipient address: it rebuilds
+ * the locking script from `importerAddress` + the (txid, vout, locktime, mode,
+ * assetType, ref) tuple and accepts ONLY if the rebuilt script byte-matches the
+ * actual output at `info.vout`. Consequences:
+ *
+ *   - A forged `recipientAddress`/`redeemScriptHex` is ignored — the importer
+ *     always rebuilds with their OWN address, so a vault not locked to them
+ *     fails to match and is rejected.
+ *   - A lie about locktime / assetType / ref breaks the match and is rejected.
+ *   - A poisoned transaction (server returns a different tx than `info.txid`)
+ *     is rejected by the txid recomputation.
+ *
+ * Returns the reconstructed vault (with the on-chain value) on success, or
+ * `null` for any mismatch / malformed input. Never throws.
+ */
+export function verifyVaultRecoveryInfo(
+  rawTxHex: string,
+  info: VaultRecoveryInfo,
+  importerAddress: string
+): {
+  vout: number;
+  redeemScriptHex: string;
+  p2shScriptHex: string;
+  params: VaultParams;
+} | null {
+  try {
+    if (!rawTxHex || !info || typeof info.txid !== "string") return null;
+    // Reject non-integer / negative / NaN vout and locktime up front — a
+    // malicious blob must not be able to smuggle a float locktime that encodes
+    // to the same bytes yet pollutes the stored record.
+    if (!Number.isInteger(info.vout) || info.vout < 0) return null;
+    if (!Number.isInteger(info.locktime) || info.locktime <= 0) return null;
+
+    // Normalize the txid: canonical lower-case hex, no surrounding whitespace.
+    const wantTxid = info.txid.trim().toLowerCase();
+
+    // Anti-poisoning: the supplied raw tx must actually hash to info.txid.
+    const computedTxid = bytesToHex(
+      Buffer.from(sha256(sha256(hexToBytes(rawTxHex)))).reverse()
+    );
+    if (computedTxid !== wantTxid) return null;
+
+    const tx = transactionFromHex(rawTxHex);
+    if (info.vout >= tx.outputs.length) return null;
+
+    const params: VaultParams = {
+      mode: info.mode,
+      locktime: info.locktime,
+      assetType: info.assetType,
+      // Trust anchor: always rebuild with the importer's own address.
+      recipientAddress: importerAddress,
+      ref: info.ref,
+      value: 0,
+      label: info.label,
+    };
+
+    const redeemScriptHex = buildRedeemScript(params);
+    // FT vaults lock to the native script; RXD/NFT to P2SH.
+    const native = isNativeVault(params.assetType);
+    const lockingScript = native
+      ? redeemScriptHex
+      : p2shOutputScript(redeemScriptHex);
+
+    if (tx.outputs[info.vout].script.toHex() !== lockingScript) return null;
+
+    return {
+      vout: info.vout,
+      redeemScriptHex,
+      // For native FT vaults the "p2sh" field is the native script itself —
+      // mirror parseVaultRedeemScript / the create path so it stays consistent.
+      p2shScriptHex: native ? redeemScriptHex : p2shOutputScript(redeemScriptHex),
+      params: { ...params, value: tx.outputs[info.vout].satoshis },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort recovery of the SENDER's address from a vault creation tx, for
+ * provenance on imported gifts (the recovery blob doesn't carry the sender and
+ * the OP_RETURN is self-encrypted to them). The sender signs every input, so
+ * the first input's scriptSig reveals their compressed pubkey (standard
+ * `<sig> <pubkey>` form). Returns the derived P2PKH address, or `undefined` for
+ * any non-standard input / parse failure. Never throws.
+ *
+ * Trust note: this is DISPLAY-ONLY provenance — it does not gate claiming and
+ * must not be relied on for security (an input could be crafted).
+ */
+export function extractVaultSenderAddress(
+  rawTxHex: string,
+  net?: "mainnet" | "testnet"
+): string | undefined {
+  try {
+    const tx = transactionFromHex(rawTxHex);
+    const scriptSig = tx.inputs?.[0]?.script;
+    const chunks = (scriptSig?.chunks ?? []) as { buf?: Uint8Array }[];
+    if (chunks.length < 2) return undefined; // expect <sig> <pubkey>
+    const buf = chunks[chunks.length - 1]?.buf;
+    if (!buf || (buf.length !== 33 && buf.length !== 65)) return undefined;
+    const network = net === "testnet" ? "testnet" : "livenet";
+    return PublicKey.fromBuffer(Buffer.from(buf), true)
+      .toAddress(network)
+      .toString();
+  } catch {
+    return undefined;
+  }
 }

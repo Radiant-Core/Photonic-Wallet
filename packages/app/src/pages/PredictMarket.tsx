@@ -309,7 +309,7 @@ function OrdersPanel({
           Refresh
         </Button>
       </Flex>
-      {bookOdds && bookOdds.mid !== null && (
+      {live.state.status === Status.OPEN && bookOdds && bookOdds.mid !== null && (
         <Flex align="center" gap={2} my={1} color="gray.500" fontSize="xs">
           <Box flex="1" borderBottom="1px solid" borderColor="whiteAlpha.200" />
           <Text whiteSpace="nowrap">
@@ -590,7 +590,7 @@ export default function PredictMarket() {
         {tracked.createTxid.substring(0, 8)}…
       </Text>
 
-      {odds && odds.yesProb !== null ? (
+      {open && odds && odds.yesProb !== null ? (
         <Box mb={5} maxW="3xl">
           <Flex justify="space-between" align="flex-end" mb={2}>
             <Box>
@@ -644,13 +644,11 @@ export default function PredictMarket() {
             </Flex>
           )}
         </Box>
-      ) : (
-        book?.available && (
-          <Text fontSize="sm" color="gray.500" mb={4}>
-            No market price yet — post the first order below to set the odds.
-          </Text>
-        )
-      )}
+      ) : open && book?.available ? (
+        <Text fontSize="sm" color="gray.500" mb={4}>
+          No market price yet — post the first order below to set the odds.
+        </Text>
+      ) : null}
 
       {error && (
         <Alert status="error" mb={4} borderRadius="md">
@@ -660,7 +658,20 @@ export default function PredictMarket() {
       )}
 
       {!live ? (
-        !error && <Spinner />
+        error ? (
+          <Button
+            size="sm"
+            isLoading={busy !== ""}
+            onClick={() => {
+              refresh();
+              loadBook();
+            }}
+          >
+            Retry
+          </Button>
+        ) : (
+          <Spinner />
+        )
       ) : (
         <>
           <Grid templateColumns={{ base: "1fr 1fr", md: "repeat(4, 1fr)" }} gap={4} mb={6}>

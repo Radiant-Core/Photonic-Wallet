@@ -80,7 +80,9 @@ vi.mock("@app/electrum/Electrum", () => ({
       getBlockHeight: vi.fn().mockResolvedValue(100000),
       broadcast: vi.fn().mockResolvedValue("mock-txid-123"),
       addVault: vi.fn().mockResolvedValue(undefined),
-      discoverVaults: vi.fn().mockResolvedValue(0),
+      discoverVaults: vi
+        .fn()
+        .mockResolvedValue({ discovered: 0, scanned: 0, total: 0, skipped: 0 }),
       getTransaction: vi.fn().mockResolvedValue(null),
     },
   },
