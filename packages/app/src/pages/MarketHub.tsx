@@ -57,15 +57,21 @@ import type {
 } from "@app/electrum/worker/electrumWorker";
 import { electrumStatus, openModal } from "@app/signals";
 import {
+  ContractType,
   CovenantStatus,
   CovenantType,
   ElectrumStatus,
   SmartToken,
   SmartTokenType,
 } from "@app/types";
-import { isWaveNameGlyph } from "@lib/wave";
+import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
 import { photonsToRXD } from "@lib/format";
-import { swapIndexRefToRef } from "@app/swapBroadcast";
+import { assetToSwapTokenId } from "@app/swapBroadcast";
+import { parseNftScript, parseFtScript } from "@lib/script";
+import { reverseRef } from "@lib/Outpoint";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — radiantjs ships partial types
+import { Transaction } from "@radiant-core/radiantjs";
 import { decodeListingDescriptor } from "@app/covenant";
 import {
   executeRoyaltyBuy,
@@ -84,6 +90,10 @@ import {
 import rxdIcon from "/rxd.png";
 
 const PAGE_SIZE = 50;
+// Per-round cap on glyph fetches for tokens not in the local DB (other wallets'
+// names/NFTs). Mirrors OpenOrders' bounded resolver; the resolver re-runs as
+// results arrive, walking the feed in batches of this size.
+const RESOLVE_CAP = 30;
 
 type MarketFilter = "all" | "ft" | "nft" | "names" | "royalty";
 
@@ -94,6 +104,25 @@ const FILTERS: { key: MarketFilter; label: string }[] = [
   { key: "names", label: "Names" },
   { key: "royalty", label: "Royalty" },
 ];
+
+// The order's token-of-interest id. The swap index normalises pair refs
+// token-as-base, so base_ref carries the token's SWAP token-id (sha256 of the
+// ref) as its leading 64 hex; quote is RXD. (base_ref is NOT the real ref.)
+function orderTokenId(l: UnifiedSwapListing): string | null {
+  return l.baseRef ? l.baseRef.split("_")[0] : null;
+}
+
+// Recover the offered token's backing outpoint from a swap order_id. order_id is
+// hash_to_hex_str(utxoHash_LE + vout_LE) = vout_BE(4) + txid_BE(32), so the
+// display txid is the trailing 64 hex and the vout the leading 8 (big-endian).
+function backingOutpoint(
+  orderId: string | null
+): { txid: string; vout: number } | null {
+  if (!orderId || orderId.length !== 72 || !/^[0-9a-f]{72}$/i.test(orderId)) {
+    return null;
+  }
+  return { txid: orderId.slice(8), vout: parseInt(orderId.slice(0, 8), 16) };
+}
 
 function statusColor(status: string): string {
   switch (status) {
@@ -131,7 +160,10 @@ function AssetLabel({
       </HStack>
     );
   }
-  const name = glyph?.name || ticker || undefined;
+  // WAVE name glyphs carry their human name in attrs (getWaveDisplay), not
+  // glyph.name — without this a resolved name would still show a raw ref.
+  const wave = glyph ? getWaveDisplay(glyph) : undefined;
+  const name = wave?.full || glyph?.name || ticker || undefined;
   return (
     <HStack spacing={2} minW={0}>
       {glyph ? (
@@ -241,6 +273,13 @@ export default function MarketHub() {
   const [buyInput, setBuyInput] = useState("");
   const [buying, setBuying] = useState(false);
   const [buyingKey, setBuyingKey] = useState<string | null>(null);
+  // Glyphs fetched by ref for tokens the wallet doesn't own locally (other
+  // wallets' WAVE names / NFTs). Keyed by 72-hex ref; null = fetched-not-found
+  // (don't retry). Without this, the global feed (which carries no names) shows
+  // raw refs and the Names filter can't classify other wallets' listings.
+  const [resolvedGlyphs, setResolvedGlyphs] = useState<
+    Map<string, SmartToken | null>
+  >(new Map());
 
   const filter = (searchParams.get("filter") as MarketFilter) || "all";
   const setFilter = (f: MarketFilter) => {
@@ -265,14 +304,42 @@ export default function MarketHub() {
     () => new Map((glyphs || []).map((g) => [g.ref, g])),
     [glyphs]
   );
-  // Resolve a swap-index display ref ("txid_vout") to a local glyph, if known.
-  const glyphForDisplayRef = useCallback(
-    (displayRef: string | null): SmartToken | undefined => {
-      if (!displayRef) return undefined;
-      const r = swapIndexRefToRef(displayRef);
-      return r ? glyphByRef.get(r) : undefined;
+  // Owned glyphs keyed by SWAP token-id (sha256 of the ref) — the form the global
+  // feed's base_ref carries. We match by token-id (NOT ref, since base_ref is the
+  // hash, not a resolvable ref), so a token the wallet owns is named with no fetch.
+  const glyphByTokenId = useMemo(
+    () =>
+      new Map(
+        (glyphs || []).map((g) => [
+          assetToSwapTokenId(
+            g.tokenType === SmartTokenType.NFT
+              ? ContractType.NFT
+              : ContractType.FT,
+            g.ref
+          ),
+          g,
+        ])
+      ),
+    [glyphs]
+  );
+
+  // The order's token glyph: owned (by token-id) first, else the network-resolved
+  // cache (keyed by order key — populated by the resolver below).
+  const tokenGlyphFor = useCallback(
+    (l: UnifiedSwapListing): SmartToken | undefined => {
+      const tid = orderTokenId(l);
+      if (!tid) return undefined;
+      return glyphByTokenId.get(tid) || resolvedGlyphs.get(l.key) || undefined;
     },
-    [glyphByRef]
+    [glyphByTokenId, resolvedGlyphs]
+  );
+
+  // The quote side's glyph iff it's a token the wallet owns (token-for-token
+  // swaps; quote is normally RXD → null). No network resolve for the quote side.
+  const quoteGlyphFor = useCallback(
+    (l: UnifiedSwapListing): SmartToken | undefined =>
+      l.quoteRef ? glyphByTokenId.get(l.quoteRef.split("_")[0]) : undefined,
+    [glyphByTokenId]
   );
 
   // This wallet's own active royalty listings (local tracking).
@@ -337,6 +404,62 @@ export default function MarketHub() {
     () => orders.map(swapOrderToListing),
     [orders]
   );
+
+  // Resolve glyphs for offered tokens the wallet doesn't own (every other wallet's
+  // WAVE name / NFT). The feed's base_ref is the sha256 token-id, NOT a resolvable
+  // ref — so we recover the offered token's REAL ref from the order's backing UTXO
+  // (order_id) → fetch that tx → parse the NFT/FT script → fetchGlyph. Same path
+  // the per-token Open Orders book uses. Only SELL orders carry the offered token
+  // at the backing UTXO; a BUY offers RXD (its base token is wanted, not there).
+  useEffect(() => {
+    const pending: UnifiedSwapListing[] = [];
+    const seen = new Set<string>();
+    for (const l of swapListings) {
+      if (l.side !== "sell" || !orderTokenId(l)) continue;
+      if (tokenGlyphFor(l) || resolvedGlyphs.has(l.key) || seen.has(l.key)) {
+        continue;
+      }
+      seen.add(l.key);
+      pending.push(l);
+    }
+    if (pending.length === 0) return;
+    const batch = pending.slice(0, RESOLVE_CAP);
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        batch.map(async (l) => {
+          const op = backingOutpoint(l.order.order_id);
+          if (!op) return [l.key, null] as const;
+          const hex = await electrumWorker.value.getTransaction(op.txid);
+          if (!hex) return [l.key, null] as const;
+          const out = new Transaction(hex).outputs[op.vout];
+          if (!out) return [l.key, null] as const;
+          const script = out.script.toHex();
+          let refLE = parseNftScript(script).ref || parseFtScript(script).ref;
+          // Defensive fallback for covenant variants: pull the singleton ref
+          // straight from the OP_PUSHINPUTREFSINGLETON operand (d8 <ref> 75).
+          if (!refLE) {
+            refLE = script.match(/d8([0-9a-f]{72})75/)?.[1];
+          }
+          if (!refLE) return [l.key, null] as const;
+          const g = await electrumWorker.value.fetchGlyph(reverseRef(refLE));
+          return [l.key, g || null] as const;
+        })
+      );
+      if (cancelled) return;
+      setResolvedGlyphs((prev) => {
+        const next = new Map(prev);
+        for (const l of batch) if (!next.has(l.key)) next.set(l.key, null);
+        for (const res of results) {
+          if (res.status === "fulfilled") next.set(res.value[0], res.value[1]);
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [swapListings, tokenGlyphFor, resolvedGlyphs]);
   const myRoyaltyListings: UnifiedRoyaltyListing[] = useMemo(
     () =>
       (myCovenants || [])
@@ -358,18 +481,18 @@ export default function MarketHub() {
     return [...byKey.values()];
   }, [royaltyFeed, myRoyaltyListings]);
 
-  // assetKind classification (best-effort from local glyphs; unknown swap tokens
-  // surface under "All" only — the global swap feed doesn't carry FT/NFT type).
+  // assetKind classification from the order's token glyph (owned-by-token-id or
+  // network-resolved). Unresolved tokens are "unknown" → shown under "All" only.
   const swapAssetKind = useCallback(
     (l: UnifiedSwapListing): "ft" | "nft" | "name" | "rxd" | "unknown" => {
       if (!l.baseRef && !l.quoteRef) return "rxd";
-      const g = l.tokenRef72 ? glyphByRef.get(l.tokenRef72) : undefined;
+      const g = tokenGlyphFor(l);
       if (g && isWaveNameGlyph(g)) return "name";
       if (g?.tokenType === SmartTokenType.FT) return "ft";
       if (g?.tokenType === SmartTokenType.NFT) return "nft";
       return "unknown";
     },
-    [glyphByRef]
+    [tokenGlyphFor]
   );
 
   const visible: UnifiedListing[] = useMemo(() => {
@@ -596,60 +719,79 @@ export default function MarketHub() {
                           </Td>
                         </Tr>
                       ) : (
-                        <Tr key={l.key}>
-                          <Td>
+                        (() => {
+                          // The index normalises pair refs token-as-base: base_ref
+                          // is the token, quote is RXD. Side decides which column
+                          // the token sits in — a SELL offers the token (wants RXD),
+                          // a BUY offers RXD (wants the token).
+                          const isBuy = l.side === "buy";
+                          const tokenCell = (
                             <AssetLabel
                               displayRef={l.baseRef}
                               ticker={l.order.base_ticker}
-                              glyph={glyphForDisplayRef(l.baseRef)}
+                              glyph={tokenGlyphFor(l)}
                             />
-                          </Td>
-                          <Td>
-                            <HStack spacing={2} minW={0}>
-                              <Icon
-                                as={MdOutlineSwapHoriz}
-                                boxSize={4}
-                                color="gray.400"
-                                display={{ base: "none", sm: "inline" }}
-                              />
-                              <AssetLabel
-                                displayRef={l.quoteRef}
-                                ticker={l.order.quote_ticker}
-                                glyph={glyphForDisplayRef(l.quoteRef)}
-                              />
-                            </HStack>
-                          </Td>
-                          <Td display={{ base: "none", md: "table-cell" }}>
-                            <HStack spacing={1}>
-                              <MechanismBadge mechanism="swap" />
-                              <Badge
-                                colorScheme={statusColor(l.status)}
-                                variant="subtle"
-                              >
-                                {l.status}
-                              </Badge>
-                            </HStack>
-                          </Td>
-                          <Td textAlign="right">
-                            <Tooltip
-                              label={
-                                l.tokenRef72
-                                  ? "Open this token's order book to view exact terms and buy"
-                                  : "RXD-only order"
-                              }
-                            >
-                              <Button
-                                size="sm"
-                                colorScheme="blue"
-                                variant="outline"
-                                isDisabled={!l.tokenRef72}
-                                onClick={() => openSwap(l)}
-                              >
-                                View / Buy
-                              </Button>
-                            </Tooltip>
-                          </Td>
-                        </Tr>
+                          );
+                          const quoteCell = (
+                            <AssetLabel
+                              displayRef={l.quoteRef}
+                              ticker={l.order.quote_ticker}
+                              glyph={quoteGlyphFor(l)}
+                            />
+                          );
+                          return (
+                            <Tr key={l.key}>
+                              <Td>{isBuy ? quoteCell : tokenCell}</Td>
+                              <Td>
+                                <HStack spacing={2} minW={0}>
+                                  <Icon
+                                    as={MdOutlineSwapHoriz}
+                                    boxSize={4}
+                                    color="gray.400"
+                                    display={{ base: "none", sm: "inline" }}
+                                  />
+                                  {isBuy ? tokenCell : quoteCell}
+                                </HStack>
+                              </Td>
+                              <Td display={{ base: "none", md: "table-cell" }}>
+                                <HStack spacing={1}>
+                                  <MechanismBadge mechanism="swap" />
+                                  <Badge
+                                    colorScheme={isBuy ? "green" : "orange"}
+                                    variant="subtle"
+                                  >
+                                    {isBuy ? "Buy" : "Sell"}
+                                  </Badge>
+                                  <Badge
+                                    colorScheme={statusColor(l.status)}
+                                    variant="subtle"
+                                  >
+                                    {l.status}
+                                  </Badge>
+                                </HStack>
+                              </Td>
+                              <Td textAlign="right">
+                                <Tooltip
+                                  label={
+                                    l.tokenRef72
+                                      ? "Open this token's order book to view exact terms and buy"
+                                      : "RXD-only order"
+                                  }
+                                >
+                                  <Button
+                                    size="sm"
+                                    colorScheme="blue"
+                                    variant="outline"
+                                    isDisabled={!l.tokenRef72}
+                                    onClick={() => openSwap(l)}
+                                  >
+                                    View / Buy
+                                  </Button>
+                                </Tooltip>
+                              </Td>
+                            </Tr>
+                          );
+                        })()
                       )
                     )}
                   </Tbody>

@@ -196,13 +196,18 @@ export function royaltyFromCovenant(
   return royaltyFromDescriptor(descriptor, { mine: true });
 }
 
-/** Stable identity for an NFT ref, used to dedupe across sources. */
+/** Short, human display of a ref. Handles the swap-index "txid_vout" display
+ *  form directly (Outpoint.fromString expects 72-hex and would otherwise throw
+ *  on the "_vout" tail). Never returns blank for a non-empty ref. */
 export function shortRef(displayRef: string): string {
+  const sep = displayRef.indexOf("_");
+  if (sep > 0) {
+    const head = displayRef.slice(0, sep);
+    return `${head.slice(0, 8)}…${head.slice(-4)}`;
+  }
   try {
     return Outpoint.fromString(displayRef).shortRef();
   } catch {
-    const sep = displayRef.indexOf("_");
-    const head = sep > 0 ? displayRef.slice(0, sep) : displayRef;
-    return `${head.slice(0, 8)}…${head.slice(-4)}`;
+    return `${displayRef.slice(0, 8)}…${displayRef.slice(-4)}`;
   }
 }
