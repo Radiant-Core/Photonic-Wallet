@@ -29,6 +29,7 @@ import {
 } from "@chakra-ui/react";
 import { CAT_OPEN, CAT_REVERTED, type Utxo } from "radiantswap";
 import Photons from "@app/components/Photons";
+import { MarketHeroFrame, OutcomeChips } from "@app/predict/ui";
 import {
   catStatusLabel,
   fetchLiveCatMarket,
@@ -109,18 +110,32 @@ export default function PredictCatMarket() {
     refresh();
   }, [refresh]);
 
-  const sets = useMemo(() => (live ? completeCatSets(live.myShares) : []), [live]);
-  const soloOracle = useMemo(() => (tracked ? walletIsCatSoloOracle(tracked) : false), [tracked]);
+  const sets = useMemo(
+    () => (live ? completeCatSets(live.myShares) : []),
+    [live]
+  );
+  const soloOracle = useMemo(
+    () => (tracked ? walletIsCatSoloOracle(tracked) : false),
+    [tracked]
+  );
   const isScalar = tracked ? marketKind(tracked) === "scalar" : false;
 
   const run = async (label: string, fn: () => Promise<string>) => {
     setBusy(label);
     try {
       const txid = await fn();
-      toast({ title: `${label} broadcast`, description: txid, status: "success" });
+      toast({
+        title: `${label} broadcast`,
+        description: txid,
+        status: "success",
+      });
       await refresh();
     } catch (e) {
-      toast({ title: `${label} failed`, description: (e as Error).message, status: "error" });
+      toast({
+        title: `${label} failed`,
+        description: (e as Error).message,
+        status: "error",
+      });
     } finally {
       setBusy("");
     }
@@ -145,26 +160,47 @@ export default function PredictCatMarket() {
   const st = live?.state.status;
   const open = st === CAT_OPEN;
   const reverted = st === CAT_REVERTED;
-  const resolvedOutcome = st !== undefined && st >= 1 && st <= (live?.outcomes ?? 0) ? st : 0; // 1-based, 0 = not resolved
+  const resolvedOutcome =
+    st !== undefined && st >= 1 && st <= (live?.outcomes ?? 0) ? st : 0; // 1-based, 0 = not resolved
   const revertibleAt = tracked.expiry + tracked.grace;
   const canRevert = open && live !== null && live.height >= revertibleAt;
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
-      <Heading size="md" mb={1}>
-        {tracked.question}
-      </Heading>
+      <MarketHeroFrame question={tracked.question} headerMb={4} mb={4}>
+        <Text
+          fontSize="xs"
+          fontFamily="mono"
+          letterSpacing="0.1em"
+          textTransform="uppercase"
+          color="whiteAlpha.500"
+          mb={4}
+        >
+          {marketKind(tracked) === "scalar" ? "Scalar" : "Categorical"} ·{" "}
+          {tracked.outcomeRefs?.length ?? 0} outcomes
+          {resolvedOutcome > 0 && labels[resolvedOutcome - 1]
+            ? ` · resolved ${labels[resolvedOutcome - 1]}`
+            : ""}
+        </Text>
+        {labels.length > 0 ? (
+          <OutcomeChips labels={labels} winner={resolvedOutcome} />
+        ) : (
+          <Text fontSize="sm" color="whiteAlpha.500" fontFamily="mono">
+            {tracked.outcomeRefs?.length ?? 0} outcomes
+          </Text>
+        )}
+      </MarketHeroFrame>
+
       <Text fontFamily="mono" fontSize="xs" color="gray.500" mb={4}>
-        {marketKind(tracked) === "scalar" ? "scalar" : "categorical"} · {tracked.outcomeRefs?.length}{" "}
-        outcomes · market {tracked.marketRef.substring(0, 16)}… · created{" "}
+        market {tracked.marketRef.substring(0, 16)}… · created{" "}
         {tracked.createTxid.substring(0, 8)}…
       </Text>
 
       <Alert status="warning" mb={4} borderRadius="md" maxW="3xl">
         <AlertIcon />
-        Advanced market type — mint, settle, redeem and merge are supported here, but there is no
-        peer-to-peer order book or market discovery for it yet (only binary markets are fully
-        tradeable and discoverable).
+        Advanced market type — mint, settle, redeem and merge are supported
+        here, but there is no peer-to-peer order book or market discovery for it
+        yet (only binary markets are fully tradeable and discoverable).
       </Alert>
 
       {error && (
@@ -178,7 +214,11 @@ export default function PredictCatMarket() {
         !error && <Spinner />
       ) : (
         <>
-          <Grid templateColumns={{ base: "1fr 1fr", md: "repeat(4, 1fr)" }} gap={4} mb={6}>
+          <Grid
+            templateColumns={{ base: "1fr 1fr", md: "repeat(4, 1fr)" }}
+            gap={4}
+            mb={6}
+          >
             <GridItem as={Stat}>
               <StatLabel>Status</StatLabel>
               <StatNumber>
@@ -199,12 +239,15 @@ export default function PredictCatMarket() {
             <GridItem as={Stat}>
               <StatLabel>Expiry / grace</StatLabel>
               <StatNumber fontSize="lg">
-                {tracked.expiry.toLocaleString()} + {tracked.grace.toLocaleString()}
+                {tracked.expiry.toLocaleString()} +{" "}
+                {tracked.grace.toLocaleString()}
               </StatNumber>
             </GridItem>
             <GridItem as={Stat}>
               <StatLabel>Chain height</StatLabel>
-              <StatNumber fontSize="lg">{live.height.toLocaleString()}</StatNumber>
+              <StatNumber fontSize="lg">
+                {live.height.toLocaleString()}
+              </StatNumber>
             </GridItem>
           </Grid>
 
@@ -214,9 +257,9 @@ export default function PredictCatMarket() {
                 Mint complete sets
               </Heading>
               <Text fontSize="sm" color="gray.400" mb={2}>
-                Lock N RXD to mint N of every outcome. A complete set (one share of each outcome) can
-                always be merged back for the collateral — only holding a non-winning outcome at
-                resolution loses value.
+                Lock N RXD to mint N of every outcome. A complete set (one share
+                of each outcome) can always be merged back for the collateral —
+                only holding a non-winning outcome at resolution loses value.
               </Text>
               <Flex gap={2} maxW="md">
                 <InputGroup>
@@ -233,7 +276,10 @@ export default function PredictCatMarket() {
                   onClick={() => {
                     const n = Math.round(parseFloat(splitRxd) * RXD);
                     if (!Number.isFinite(n) || n < 546) {
-                      toast({ title: "Enter an amount ≥ 546 photons", status: "warning" });
+                      toast({
+                        title: "Enter an amount ≥ 546 photons",
+                        status: "warning",
+                      });
                       return;
                     }
                     run("Split", () => splitCatAction(tracked, live, n));
@@ -267,7 +313,11 @@ export default function PredictCatMarket() {
                   shares.map((u) => (
                     <Tr key={`${oi}-${u.txid}-${u.vout}`}>
                       <Td>
-                        <Badge colorScheme={resolvedOutcome === oi + 1 ? "green" : "gray"}>
+                        <Badge
+                          colorScheme={
+                            resolvedOutcome === oi + 1 ? "green" : "gray"
+                          }
+                        >
                           {labels[oi] || `outcome ${oi + 1}`}
                         </Badge>
                       </Td>
@@ -282,7 +332,11 @@ export default function PredictCatMarket() {
                           <Button
                             size="xs"
                             isLoading={busy === "Redeem"}
-                            onClick={() => run("Redeem", () => redeemCatAction(tracked, live, u))}
+                            onClick={() =>
+                              run("Redeem", () =>
+                                redeemCatAction(tracked, live, u)
+                              )
+                            }
                           >
                             Redeem 1:1
                           </Button>
@@ -298,7 +352,8 @@ export default function PredictCatMarket() {
           {sets.length > 0 && (
             <Box mb={6}>
               <Text fontSize="sm" color="gray.400" mb={2}>
-                {sets.length} complete set{sets.length > 1 ? "s" : ""} mergeable back to RXD:
+                {sets.length} complete set{sets.length > 1 ? "s" : ""} mergeable
+                back to RXD:
               </Text>
               {sets.map((set, i) => (
                 <Flex key={i} align="center" gap={3} mb={1}>
@@ -309,7 +364,9 @@ export default function PredictCatMarket() {
                   <Button
                     size="xs"
                     isLoading={busy === "Merge"}
-                    onClick={() => run("Merge", () => mergeCatAction(tracked, live, set))}
+                    onClick={() =>
+                      run("Merge", () => mergeCatAction(tracked, live, set))
+                    }
                   >
                     Merge → RXD
                   </Button>
@@ -332,17 +389,24 @@ export default function PredictCatMarket() {
                       value={scalarValue}
                       onChange={(e) => setScalarValue(e.target.value)}
                     />
-                    {tracked.scalar?.unit && <InputRightAddon>{tracked.scalar.unit}</InputRightAddon>}
+                    {tracked.scalar?.unit && (
+                      <InputRightAddon>{tracked.scalar.unit}</InputRightAddon>
+                    )}
                   </InputGroup>
                   <Button
                     isLoading={busy === "Resolve"}
                     onClick={() => {
                       const v = parseFloat(scalarValue);
                       if (!Number.isFinite(v)) {
-                        toast({ title: "Enter a numeric value", status: "warning" });
+                        toast({
+                          title: "Enter a numeric value",
+                          status: "warning",
+                        });
                         return;
                       }
-                      run("Resolve", () => resolveScalarAction(tracked, live, v));
+                      run("Resolve", () =>
+                        resolveScalarAction(tracked, live, v)
+                      );
                     }}
                   >
                     Resolve to bucket
@@ -365,7 +429,11 @@ export default function PredictCatMarket() {
                     isLoading={busy === "Resolve"}
                     onClick={() =>
                       run("Resolve", () =>
-                        resolveCatAction(tracked, live, parseInt(resolveOutcome, 10))
+                        resolveCatAction(
+                          tracked,
+                          live,
+                          parseInt(resolveOutcome, 10)
+                        )
                       )
                     }
                   >
@@ -378,8 +446,8 @@ export default function PredictCatMarket() {
           {open && !soloOracle && (
             <Alert status="info" mb={6} borderRadius="md" maxW="2xl">
               <AlertIcon />
-              This market resolves via a committee — in-wallet resolution currently supports
-              solo-operator markets only.
+              This market resolves via a committee — in-wallet resolution
+              currently supports solo-operator markets only.
             </Alert>
           )}
 
@@ -389,7 +457,9 @@ export default function PredictCatMarket() {
               variant="outline"
               isDisabled={!canRevert}
               isLoading={busy === "Revert"}
-              onClick={() => run("Revert", () => revertCatAction(tracked, live))}
+              onClick={() =>
+                run("Revert", () => revertCatAction(tracked, live))
+              }
             >
               {canRevert
                 ? "Revert (reclaim via merge)"

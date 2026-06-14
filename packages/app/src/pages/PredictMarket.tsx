@@ -66,6 +66,12 @@ import {
   type TrackedMarket,
 } from "@app/predict/predict";
 import { bestDirectAsk, deriveMarketOdds } from "@app/predict/odds";
+import {
+  MarketHeroFrame,
+  NeonBuyButton,
+  NeonSplitBar,
+  NEON,
+} from "@app/predict/ui";
 
 const RXD = 100_000_000;
 
@@ -156,18 +162,25 @@ function OrdersPanel({
     try {
       setPreview(await tradeFromAdTxid(tracked, adTxid));
     } catch (e) {
-      toast({ title: "Ad lookup failed", description: (e as Error).message, status: "error" });
+      toast({
+        title: "Ad lookup failed",
+        description: (e as Error).message,
+        status: "error",
+      });
     }
   };
 
   const fillTrade = async (trade: AdTrade): Promise<string> => {
     if (!trade.open) throw new Error("Order already filled or cancelled");
-    if (trade.kind === "bid") return await fillBidAction(tracked, live, trade.buy!);
+    if (trade.kind === "bid")
+      return await fillBidAction(tracked, live, trade.buy!);
     return await fillOrderAction(tracked, trade.sell!);
   };
 
   const fillFromBook = (ask: IndexedAsk) => {
-    run("Fill", async () => fillTrade(await tradeFromAdTxid(tracked, ask.adTxid)));
+    run("Fill", async () =>
+      fillTrade(await tradeFromAdTxid(tracked, ask.adTxid))
+    );
   };
 
   const postBid = () => {
@@ -202,7 +215,9 @@ function OrdersPanel({
           >
             {positions.map((p, i) => (
               <option key={`${p.u.txid}:${p.u.vout}`} value={i}>
-                {p.side.toUpperCase()} {(p.u.satoshis / 100_000_000).toLocaleString()} RXD ({p.u.txid.substring(0, 6)}…:{p.u.vout})
+                {p.side.toUpperCase()}{" "}
+                {(p.u.satoshis / 100_000_000).toLocaleString()} RXD (
+                {p.u.txid.substring(0, 6)}…:{p.u.vout})
               </option>
             ))}
           </Select>
@@ -276,11 +291,19 @@ function OrdersPanel({
                     <Photons value={o.amount} />
                   </Td>
                   <Td>
-                    for <Photons value={o.priceSats} /> ({pct(askProbability(o.priceSats, o.amount))})
+                    for <Photons value={o.priceSats} /> (
+                    {pct(askProbability(o.priceSats, o.amount))})
                   </Td>
                   <Td>
-                    <Badge colorScheme={openMap[o.adTxid] ? "blue" : "gray"} fontSize="xs">
-                      {openMap[o.adTxid] === undefined ? "…" : openMap[o.adTxid] ? "open" : "closed"}
+                    <Badge
+                      colorScheme={openMap[o.adTxid] ? "blue" : "gray"}
+                      fontSize="xs"
+                    >
+                      {openMap[o.adTxid] === undefined
+                        ? "…"
+                        : openMap[o.adTxid]
+                        ? "open"
+                        : "closed"}
                     </Badge>
                   </Td>
                   <Td>
@@ -288,7 +311,9 @@ function OrdersPanel({
                       <Button
                         size="xs"
                         isLoading={busy === "Cancel order"}
-                        onClick={() => run("Cancel order", () => cancelOrderAction(o))}
+                        onClick={() =>
+                          run("Cancel order", () => cancelOrderAction(o))
+                        }
                       >
                         Cancel
                       </Button>
@@ -309,15 +334,26 @@ function OrdersPanel({
           Refresh
         </Button>
       </Flex>
-      {live.state.status === Status.OPEN && bookOdds && bookOdds.mid !== null && (
-        <Flex align="center" gap={2} my={1} color="gray.500" fontSize="xs">
-          <Box flex="1" borderBottom="1px solid" borderColor="whiteAlpha.200" />
-          <Text whiteSpace="nowrap">
-            spread {bookOdds.spread!.toFixed(2)} · mid {bookOdds.mid.toFixed(2)}
-          </Text>
-          <Box flex="1" borderBottom="1px solid" borderColor="whiteAlpha.200" />
-        </Flex>
-      )}
+      {live.state.status === Status.OPEN &&
+        bookOdds &&
+        bookOdds.mid !== null && (
+          <Flex align="center" gap={2} my={1} color="gray.500" fontSize="xs">
+            <Box
+              flex="1"
+              borderBottom="1px solid"
+              borderColor="whiteAlpha.200"
+            />
+            <Text whiteSpace="nowrap">
+              spread {bookOdds.spread!.toFixed(2)} · mid{" "}
+              {bookOdds.mid.toFixed(2)}
+            </Text>
+            <Box
+              flex="1"
+              borderBottom="1px solid"
+              borderColor="whiteAlpha.200"
+            />
+          </Flex>
+        )}
       {book === null ? (
         <Spinner size="sm" />
       ) : !book.available ? (
@@ -358,7 +394,9 @@ function OrdersPanel({
                 <Td textAlign="right">
                   <Photons value={a.priceSats} />
                 </Td>
-                <Td textAlign="right">{pct(askProbability(a.priceSats, a.amount))}</Td>
+                <Td textAlign="right">
+                  {pct(askProbability(a.priceSats, a.amount))}
+                </Td>
                 <Td>
                   {a.makerAddress === wallet.value.address ? (
                     <Badge fontSize="xs">you</Badge>
@@ -368,7 +406,11 @@ function OrdersPanel({
                 </Td>
                 <Td>
                   {a.makerAddress !== wallet.value.address && (
-                    <Button size="xs" isLoading={busy === "Fill"} onClick={() => fillFromBook(a)}>
+                    <Button
+                      size="xs"
+                      isLoading={busy === "Fill"}
+                      onClick={() => fillFromBook(a)}
+                    >
                       Fill
                     </Button>
                   )}
@@ -454,7 +496,10 @@ export default function PredictMarket() {
   const [splitRxd, setSplitRxd] = useState("1");
   const [ckeys, setCkeys] = useState("");
   const [cwifs, setCwifs] = useState("");
-  const [book, setBook] = useState<{ available: boolean; asks: IndexedAsk[] } | null>(null);
+  const [book, setBook] = useState<{
+    available: boolean;
+    asks: IndexedAsk[];
+  } | null>(null);
 
   useEffect(() => {
     listTracked().then((rows) => {
@@ -540,7 +585,16 @@ export default function PredictMarket() {
 
   if (!tracked) {
     return (
-      <Box mx={4}>{error ? <Alert status="warning"><AlertIcon />{error}</Alert> : <Spinner />}</Box>
+      <Box mx={4}>
+        {error ? (
+          <Alert status="warning">
+            <AlertIcon />
+            {error}
+          </Alert>
+        ) : (
+          <Spinner />
+        )}
+      </Box>
     );
   }
 
@@ -555,18 +609,27 @@ export default function PredictMarket() {
   // consts (not useMemo): they must NOT sit after the `if (!tracked) return` guard above as hooks,
   // and they're cheap O(book) pure computations that also need to track the wallet address signal.
   const odds = book?.available ? deriveMarketOdds(book.asks) : null;
-  const yesAsk = book?.available ? bestDirectAsk(book.asks, "yes", wallet.value.address) : null;
-  const noAsk = book?.available ? bestDirectAsk(book.asks, "no", wallet.value.address) : null;
+  const yesAsk = book?.available
+    ? bestDirectAsk(book.asks, "yes", wallet.value.address)
+    : null;
+  const noAsk = book?.available
+    ? bestDirectAsk(book.asks, "no", wallet.value.address)
+    : null;
   const buyBest = (side: "yes" | "no", ask: IndexedAsk | null) => {
     if (!live) return;
     if (!ask) {
-      toast({ title: `No ${side.toUpperCase()} sell orders to fill yet`, status: "warning" });
+      toast({
+        title: `No ${side.toUpperCase()} sell orders to fill yet`,
+        status: "warning",
+      });
       return;
     }
     run(`Buy ${side.toUpperCase()}`, async () => {
       const trade = await tradeFromAdTxid(tracked, ask.adTxid);
-      if (!trade.open) throw new Error("That order was just filled — refresh and retry");
-      if (trade.kind !== "ask" || !trade.sell) throw new Error("Unexpected order kind");
+      if (!trade.open)
+        throw new Error("That order was just filled — refresh and retry");
+      if (trade.kind !== "ask" || !trade.sell)
+        throw new Error("Unexpected order kind");
       return await fillOrderAction(tracked, trade.sell);
     });
   };
@@ -575,80 +638,115 @@ export default function PredictMarket() {
   const optimistic = isOptimistic(tracked);
   const proposed = st === Status.PROPOSED_YES || st === Status.PROPOSED_NO;
   const proposedSide = st === Status.PROPOSED_YES ? "YES" : "NO";
-  const canPropose = optimistic && open && live !== null && live.height >= tracked.expiry;
+  const canPropose =
+    optimistic && open && live !== null && live.height >= tracked.expiry;
   const challengeLeft =
-    optimistic && proposed && live ? challengeBlocksRemaining(tracked, live) : 0;
+    optimistic && proposed && live
+      ? challengeBlocksRemaining(tracked, live)
+      : 0;
   const canFinalize = proposed && challengeLeft === 0;
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
-      <Heading size="md" mb={1}>
-        {tracked.question}
-      </Heading>
-      <Text fontFamily="mono" fontSize="xs" color="gray.500" mb={4}>
-        market {tracked.marketRef.substring(0, 16)}… · created{" "}
-        {tracked.createTxid.substring(0, 8)}…
-      </Text>
-
-      {open && odds && odds.yesProb !== null ? (
-        <Box mb={5} maxW="3xl">
-          <Flex justify="space-between" align="flex-end" mb={2}>
-            <Box>
-              <Text as="span" fontSize="3xl" fontWeight="bold" color="green.300" lineHeight="1">
-                {pct(odds.yesProb)}
-              </Text>{" "}
-              <Text as="span" fontSize="md" color="green.300" fontWeight="semibold">
-                YES
-              </Text>
-            </Box>
-            <Box textAlign="right">
-              <Text as="span" fontSize="md" color="red.300" fontWeight="semibold">
-                NO
-              </Text>{" "}
-              <Text as="span" fontSize="3xl" fontWeight="bold" color="red.300" lineHeight="1">
-                {/* Derive NO from the rounded YES so the two halves always sum to 100%. */}
-                {100 - Math.round(odds.yesProb * 100)}%
-              </Text>
-            </Box>
-          </Flex>
-          <Flex h="10px" borderRadius="full" overflow="hidden" bg="whiteAlpha.200" mb={3}>
-            <Box bg="green.400" w={`${Math.max(0, Math.min(100, odds.yesProb * 100))}%`} />
-            <Box bg="red.400" flex="1" />
-          </Flex>
-          {open && (
-            <Flex gap={3} wrap="wrap">
-              <Button
-                flex="1"
-                minW="40"
-                colorScheme="green"
-                variant="outline"
+      {/* Neon market hero — dark glass card with the question, RadiantSwap badge, live
+          YES/NO odds, split probability bar, and one-click buy buttons. */}
+      <MarketHeroFrame
+        question={tracked.question}
+        headerMb={open && odds && odds.yesProb !== null ? 6 : 3}
+        mb={4}
+      >
+        {open && odds && odds.yesProb !== null ? (
+          <>
+            <Flex
+              justify="space-between"
+              align="flex-end"
+              mb={3}
+              fontFamily="mono"
+            >
+              <Box textShadow="0 0 22px rgba(63, 230, 164, 0.55)">
+                <Text
+                  as="span"
+                  fontSize={{ base: "3xl", md: "4xl" }}
+                  fontWeight="bold"
+                  color={NEON.yes}
+                  lineHeight="1"
+                >
+                  {pct(odds.yesProb)}
+                </Text>{" "}
+                <Text
+                  as="span"
+                  fontSize={{ base: "lg", md: "2xl" }}
+                  color={NEON.yes}
+                  fontWeight="bold"
+                  letterSpacing="0.06em"
+                >
+                  YES
+                </Text>
+              </Box>
+              <Box
+                textAlign="right"
+                textShadow="0 0 22px rgba(255, 101, 133, 0.5)"
+              >
+                <Text
+                  as="span"
+                  fontSize={{ base: "lg", md: "2xl" }}
+                  color={NEON.no}
+                  fontWeight="bold"
+                  letterSpacing="0.06em"
+                >
+                  NO
+                </Text>{" "}
+                <Text
+                  as="span"
+                  fontSize={{ base: "3xl", md: "4xl" }}
+                  fontWeight="bold"
+                  color={NEON.no}
+                  lineHeight="1"
+                >
+                  {/* Derive NO from the rounded YES so the two halves always sum to 100%. */}
+                  {100 - Math.round(odds.yesProb * 100)}%
+                </Text>
+              </Box>
+            </Flex>
+            <NeonSplitBar yesPct={odds.yesProb * 100} mb={6} />
+            <Flex gap={4} wrap="wrap">
+              <NeonBuyButton
+                side="yes"
                 isLoading={busy === "Buy YES"}
                 isDisabled={!yesAsk || !live}
                 onClick={() => buyBest("yes", yesAsk)}
               >
-                Buy YES
-                {yesAsk ? ` · ${pct(askProbability(yesAsk.priceSats, yesAsk.amount))}` : ""}
-              </Button>
-              <Button
-                flex="1"
-                minW="40"
-                colorScheme="red"
-                variant="outline"
+                BUY YES
+                {yesAsk
+                  ? ` · ${pct(askProbability(yesAsk.priceSats, yesAsk.amount))}`
+                  : ""}
+              </NeonBuyButton>
+              <NeonBuyButton
+                side="no"
                 isLoading={busy === "Buy NO"}
                 isDisabled={!noAsk || !live}
                 onClick={() => buyBest("no", noAsk)}
               >
-                Buy NO
-                {noAsk ? ` · ${pct(askProbability(noAsk.priceSats, noAsk.amount))}` : ""}
-              </Button>
+                BUY NO
+                {noAsk
+                  ? ` · ${pct(askProbability(noAsk.priceSats, noAsk.amount))}`
+                  : ""}
+              </NeonBuyButton>
             </Flex>
-          )}
-        </Box>
-      ) : open && book?.available ? (
-        <Text fontSize="sm" color="gray.500" mb={4}>
-          No market price yet — post the first order below to set the odds.
-        </Text>
-      ) : null}
+          </>
+        ) : (
+          <Text fontSize="sm" color="whiteAlpha.500" fontFamily="mono">
+            {open
+              ? "No live odds yet — post or fill an order below to set the price."
+              : "Market closed — see resolution below."}
+          </Text>
+        )}
+      </MarketHeroFrame>
+
+      <Text fontFamily="mono" fontSize="xs" color="gray.500" mb={5}>
+        market {tracked.marketRef.substring(0, 16)}… · created{" "}
+        {tracked.createTxid.substring(0, 8)}…
+      </Text>
 
       {error && (
         <Alert status="error" mb={4} borderRadius="md">
@@ -674,7 +772,11 @@ export default function PredictMarket() {
         )
       ) : (
         <>
-          <Grid templateColumns={{ base: "1fr 1fr", md: "repeat(4, 1fr)" }} gap={4} mb={6}>
+          <Grid
+            templateColumns={{ base: "1fr 1fr", md: "repeat(4, 1fr)" }}
+            gap={4}
+            mb={6}
+          >
             <GridItem as={Stat}>
               <StatLabel>Status</StatLabel>
               <StatNumber>
@@ -703,12 +805,15 @@ export default function PredictMarket() {
             <GridItem as={Stat}>
               <StatLabel>Expiry / grace</StatLabel>
               <StatNumber fontSize="lg">
-                {tracked.expiry.toLocaleString()} + {tracked.grace.toLocaleString()}
+                {tracked.expiry.toLocaleString()} +{" "}
+                {tracked.grace.toLocaleString()}
               </StatNumber>
             </GridItem>
             <GridItem as={Stat}>
               <StatLabel>Chain height</StatLabel>
-              <StatNumber fontSize="lg">{live.height.toLocaleString()}</StatNumber>
+              <StatNumber fontSize="lg">
+                {live.height.toLocaleString()}
+              </StatNumber>
             </GridItem>
           </Grid>
 
@@ -718,8 +823,8 @@ export default function PredictMarket() {
                 Mint complete sets
               </Heading>
               <Text fontSize="sm" color="gray.400" mb={2}>
-                Lock N RXD collateral (plus N+N carrier value) to mint N YES +
-                N NO. A complete set can always be merged back — only a losing
+                Lock N RXD collateral (plus N+N carrier value) to mint N YES + N
+                NO. A complete set can always be merged back — only a losing
                 single side at resolution loses value.
               </Text>
               <Flex gap={2} maxW="md">
@@ -737,7 +842,10 @@ export default function PredictMarket() {
                   onClick={() => {
                     const n = Math.round(parseFloat(splitRxd) * RXD);
                     if (!Number.isFinite(n) || n < 546) {
-                      toast({ title: "Enter an amount ≥ 546 photons", status: "warning" });
+                      toast({
+                        title: "Enter an amount ≥ 546 photons",
+                        status: "warning",
+                      });
                       return;
                     }
                     run("Split", () => splitAction(tracked, live, n));
@@ -773,7 +881,9 @@ export default function PredictMarket() {
                 ].map(({ u, side }) => (
                   <Tr key={`${side}-${u.txid}-${u.vout}`}>
                     <Td>
-                      <Badge colorScheme={side === "YES" ? "green" : "red"}>{side}</Badge>
+                      <Badge colorScheme={side === "YES" ? "green" : "red"}>
+                        {side}
+                      </Badge>
                     </Td>
                     <Td>
                       {u.txid.substring(0, 8)}…:{u.vout}
@@ -786,7 +896,9 @@ export default function PredictMarket() {
                         <Button
                           size="xs"
                           isLoading={busy === "Redeem"}
-                          onClick={() => run("Redeem", () => redeemAction(tracked, live, u))}
+                          onClick={() =>
+                            run("Redeem", () => redeemAction(tracked, live, u))
+                          }
                         >
                           Redeem 1:1
                         </Button>
@@ -809,7 +921,11 @@ export default function PredictMarket() {
                     key={`${s.yes.txid}-${s.yes.vout}`}
                     size="sm"
                     isLoading={busy === "Merge"}
-                    onClick={() => run("Merge", () => mergeAction(tracked, live, s.yes, s.no))}
+                    onClick={() =>
+                      run("Merge", () =>
+                        mergeAction(tracked, live, s.yes, s.no)
+                      )
+                    }
                   >
                     Merge <Photons value={s.yes.satoshis} />
                   </Button>
@@ -860,19 +976,27 @@ export default function PredictMarket() {
 
           {/* Optimistic proposal status + challenge-window countdown. */}
           {optimistic && proposed && live && tracked.optimistic && (
-            <Alert status="info" mb={3} borderRadius="md" maxW="2xl" alignItems="flex-start">
+            <Alert
+              status="info"
+              mb={3}
+              borderRadius="md"
+              maxW="2xl"
+              alignItems="flex-start"
+            >
               <AlertIcon />
               <Box fontSize="sm">
                 <Text>
                   Proposed <b>{proposedSide}</b> — challenge window{" "}
-                  {proposalConfirmations(live)}/{tracked.optimistic.liveness} blocks.{" "}
+                  {proposalConfirmations(live)}/{tracked.optimistic.liveness}{" "}
+                  blocks.{" "}
                   {challengeLeft > 0
                     ? `${challengeLeft} block(s) until anyone can finalize.`
                     : "Finalizable now."}
                 </Text>
                 <Text color="gray.400" mt={1}>
-                  Proposer bond <Photons value={tracked.optimistic.bond} /> is repaid on
-                  finalize, or slashed if the committee overrides the proposal.
+                  Proposer bond <Photons value={tracked.optimistic.bond} /> is
+                  repaid on finalize, or slashed if the committee overrides the
+                  proposal.
                 </Text>
               </Box>
             </Alert>
@@ -919,9 +1043,13 @@ export default function PredictMarket() {
                   colorScheme="blue"
                   isLoading={busy === "Finalize"}
                   isDisabled={!canFinalize}
-                  onClick={() => run("Finalize", () => finalizeAction(tracked, live))}
+                  onClick={() =>
+                    run("Finalize", () => finalizeAction(tracked, live))
+                  }
                 >
-                  {canFinalize ? `Finalize ${proposedSide}` : `Finalize (in ${challengeLeft})`}
+                  {canFinalize
+                    ? `Finalize ${proposedSide}`
+                    : `Finalize (in ${challengeLeft})`}
                 </Button>
                 <Button
                   size="sm"
@@ -930,7 +1058,12 @@ export default function PredictMarket() {
                   isLoading={busy === "Override YES"}
                   onClick={() =>
                     run("Override YES", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_YES, committeeInput())
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_YES,
+                        committeeInput()
+                      )
                     )
                   }
                 >
@@ -943,7 +1076,12 @@ export default function PredictMarket() {
                   isLoading={busy === "Override NO"}
                   onClick={() =>
                     run("Override NO", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_NO, committeeInput())
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_NO,
+                        committeeInput()
+                      )
                     )
                   }
                 >
@@ -963,7 +1101,12 @@ export default function PredictMarket() {
                   isLoading={busy === "Resolve YES"}
                   onClick={() =>
                     run("Resolve YES", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_YES, committeeInput())
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_YES,
+                        committeeInput()
+                      )
                     )
                   }
                 >
@@ -976,7 +1119,12 @@ export default function PredictMarket() {
                   isLoading={busy === "Resolve NO"}
                   onClick={() =>
                     run("Resolve NO", () =>
-                      resolveAction(tracked, live, Status.RESOLVED_NO, committeeInput())
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_NO,
+                        committeeInput()
+                      )
                     )
                   }
                 >
@@ -987,7 +1135,9 @@ export default function PredictMarket() {
                   variant="outline"
                   isDisabled={!canRevert}
                   isLoading={busy === "Revert"}
-                  onClick={() => run("Revert", () => revertAction(tracked, live))}
+                  onClick={() =>
+                    run("Revert", () => revertAction(tracked, live))
+                  }
                 >
                   Revert{!canRevert && ` (at ${revertibleAt.toLocaleString()})`}
                 </Button>
