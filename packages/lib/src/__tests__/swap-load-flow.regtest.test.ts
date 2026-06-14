@@ -31,7 +31,10 @@ import { nftScript, p2pkhScript, parseNftScript } from "../script";
 import { createWaveNameMetadata } from "../wave";
 import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "../types";
 
-const { PrivateKey, Networks, Transaction } = rjs;
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// radiantjs ships incomplete typings for Networks.regtest / PrivateKey.fromRandom;
+// cast as any for the regtest harness (runtime is correct — see test output).
+const { PrivateKey, Networks, Transaction } = rjs as any;
 
 const RPC_URL = "http://127.0.0.1:17443/";
 const RPC_USER = "radiantrpc";
