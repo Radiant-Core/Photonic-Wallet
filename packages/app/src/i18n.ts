@@ -1,17 +1,13 @@
 import { i18n } from "@lingui/core";
 
-// Lingui's `compile` command emits CommonJS (`module.exports = { messages:
-// JSON.parse("…") }`) and the `compileNamespace: "es"` option is silently
-// ignored on the version we depend on. Vite's dev server can't execute CJS
-// in the browser — a dynamic `import("./locales/en.js")` throws
-// `ReferenceError: module is not defined` and the wallet white-screens.
-//
-// Workaround: fetch the catalog as raw text, pull the JSON payload out of
-// the `JSON.parse("…")` literal via regex, and feed it to lingui. Works
-// against both CJS (current) and ESM (future) lingui outputs because both
-// embed the same `JSON.parse("…")` literal.
+// Lingui `compile` with `compileNamespace: "es"` emits ESM to `<locale>.mjs`
+// (`export const messages = JSON.parse("…")`). We fetch the catalog as raw
+// text and extract the JSON payload via regex so the same loader works for
+// both CJS (`.js`, `module.exports = …`) and ESM (`.mjs`, `export const …`).
+// Vite's dev server cannot execute CJS in the browser; the fetch+regex path
+// avoids that constraint entirely.
 async function fetchCatalogJSON(locale: string): Promise<unknown | null> {
-  const url = new URL(`./locales/${locale}.js`, import.meta.url).href;
+  const url = new URL(`./locales/${locale}.mjs`, import.meta.url).href;
   let src: string;
   try {
     const resp = await fetch(url);
