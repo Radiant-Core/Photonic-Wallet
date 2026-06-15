@@ -3,6 +3,8 @@ import { Box, Icon, Image, Text, HStack, Badge } from "@chakra-ui/react";
 import { QRCodeSVG } from "qrcode.react";
 import { SmartToken } from "@app/types";
 import { TbLink } from "react-icons/tb";
+import { HiOutlineAtSymbol } from "react-icons/hi";
+import { isWaveNameGlyph } from "@lib/wave";
 import { FaCircleXmark } from "react-icons/fa6";
 import {
   BsFileEarmarkFill,
@@ -60,6 +62,20 @@ export default function TokenContent({
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isTimelocked, decryptedBytes]);
+
+  // WAVE names carry no image, so the default file icon renders as a "broken"
+  // thumbnail. Show the @ glyph instead (matches the Open Orders / WaveAssetLabel
+  // treatment) everywhere a WAVE-name thumbnail is rendered.
+  if (thumbnail && glyph && isWaveNameGlyph(glyph)) {
+    return (
+      <Icon
+        as={HiOutlineAtSymbol}
+        width="100%"
+        height="100%"
+        color="brand.400"
+      />
+    );
+  }
 
   if (isEncrypted && !decryptedBytes) {
     type CryptoStub = {
