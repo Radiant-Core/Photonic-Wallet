@@ -30,6 +30,7 @@ import {
 import { CAT_OPEN, CAT_REVERTED, type Utxo } from "radiantswap";
 import Photons from "@app/components/Photons";
 import { MarketHeroFrame, OutcomeChips } from "@app/predict/ui";
+import { OracleTrustBadge, TrustPanel } from "@app/predict/trust";
 import {
   catStatusLabel,
   fetchLiveCatMarket,
@@ -191,10 +192,13 @@ export default function PredictCatMarket() {
         )}
       </MarketHeroFrame>
 
-      <Text fontFamily="mono" fontSize="xs" color="gray.500" mb={4}>
-        market {tracked.marketRef.substring(0, 16)}… · created{" "}
-        {tracked.createTxid.substring(0, 8)}…
-      </Text>
+      <Flex align="center" gap={3} mb={4} flexWrap="wrap">
+        <OracleTrustBadge t={tracked} />
+        <Text fontFamily="mono" fontSize="xs" color="gray.500">
+          market {tracked.marketRef.substring(0, 16)}… · created{" "}
+          {tracked.createTxid.substring(0, 8)}…
+        </Text>
+      </Flex>
 
       <Alert status="warning" mb={4} borderRadius="md" maxW="3xl">
         <AlertIcon />
@@ -250,6 +254,28 @@ export default function PredictCatMarket() {
               </StatNumber>
             </GridItem>
           </Grid>
+
+          {/* Plain-language trust + recourse (committee/solo only — categorical/scalar markets carry
+              no optimistic terms). Terminal state is passed explicitly since the status enum and the
+              winning outcome aren't binary YES/NO. */}
+          <Box mb={6}>
+            <TrustPanel
+              t={tracked}
+              height={live.height}
+              terminal={
+                open
+                  ? undefined
+                  : {
+                      reverted,
+                      label:
+                        resolvedOutcome > 0
+                          ? labels[resolvedOutcome - 1] ||
+                            `outcome ${resolvedOutcome}`
+                          : undefined,
+                    }
+              }
+            />
+          </Box>
 
           {open && (
             <Box mb={6}>

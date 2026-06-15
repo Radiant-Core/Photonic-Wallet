@@ -61,6 +61,7 @@ import {
   statusLabel,
   tradeFromAdTxid,
   walletIsSoloOracle,
+  walletPkh,
   type AdTrade,
   type IndexedAsk,
   type LiveMarket,
@@ -74,6 +75,13 @@ import {
   NeonSplitBar,
   NEON,
 } from "@app/predict/ui";
+import {
+  OracleTrustBadge,
+  ProposerTag,
+  ResolutionTimeline,
+  TrustPanel,
+} from "@app/predict/trust";
+import { blockEta, blocksToDuration } from "@app/predict/time";
 
 const RXD = 100_000_000;
 
@@ -702,6 +710,20 @@ export default function PredictMarket() {
       : 0;
   const canFinalize = proposed && challengeLeft === 0;
 
+  // Proposer identity for a live optimistic proposal (trust transparency): who put the outcome
+  // up, and whether it's this wallet. walletPkh() throws on a locked/empty wallet → guard it.
+  const proposerPkh = live?.state.optimistic?.proposerPkh ?? null;
+  const proposerIsYou = (() => {
+    if (!proposerPkh) return false;
+    try {
+      return (
+        Buffer.from(proposerPkh).toString("hex") === walletPkh().toString("hex")
+      );
+    } catch {
+      return false;
+    }
+  })();
+
   return (
     <Box mx={{ base: 2, md: 4 }}>
       {/* Neon market hero — dark glass card with the question, RadiantSwap badge, live
@@ -799,10 +821,13 @@ export default function PredictMarket() {
         )}
       </MarketHeroFrame>
 
-      <Text fontFamily="mono" fontSize="xs" color="gray.500" mb={5}>
-        market {tracked.marketRef.substring(0, 16)}… · created{" "}
-        {tracked.createTxid.substring(0, 8)}…
-      </Text>
+      <Flex align="center" gap={3} mb={5} flexWrap="wrap">
+        <OracleTrustBadge t={tracked} pool={live?.market.satoshis} />
+        <Text fontFamily="mono" fontSize="xs" color="gray.500">
+          market {tracked.marketRef.substring(0, 16)}… · created{" "}
+          {tracked.createTxid.substring(0, 8)}…
+        </Text>
+      </Flex>
 
       {error && (
         <Alert status="error" mb={4} borderRadius="md">
@@ -864,6 +889,11 @@ export default function PredictMarket() {
                 {tracked.expiry.toLocaleString()} +{" "}
                 {tracked.grace.toLocaleString()}
               </StatNumber>
+              {open && live.height < tracked.expiry && (
+                <Text fontSize="xs" color="whiteAlpha.500" fontFamily="mono">
+                  expires {blockEta(live.height, tracked.expiry)}
+                </Text>
+              )}
             </GridItem>
             <GridItem as={Stat}>
               <StatLabel>Chain height</StatLabel>
@@ -1002,6 +1032,13 @@ export default function PredictMarket() {
           <Heading size="sm" mb={2}>
             Resolution
           </Heading>
+
+          {/* Plain-language trust + recourse: who can call the outcome, what it costs them to
+              lie, and the trader's fallback if the resolver goes dark. */}
+          <Box mb={4}>
+            <TrustPanel t={tracked} live={live} />
+          </Box>
+
           {/* Committee/oracle key inputs — needed to resolve a classic market, or to OVERRIDE a
               proposal on an optimistic one. Shown while the market is open or has a live proposal. */}
           {!soloOracle && (open || proposed) && (
@@ -1030,32 +1067,42 @@ export default function PredictMarket() {
             </Box>
           )}
 
-          {/* Optimistic proposal status + challenge-window countdown. */}
+          {/* Optimistic proposal status + challenge-window countdown + lifecycle timeline. */}
           {optimistic && proposed && live && tracked.optimistic && (
-            <Alert
-              status="info"
-              mb={3}
-              borderRadius="md"
-              maxW="2xl"
-              alignItems="flex-start"
-            >
-              <AlertIcon />
-              <Box fontSize="sm">
-                <Text>
-                  Proposed <b>{proposedSide}</b> — challenge window{" "}
-                  {proposalConfirmations(live)}/{tracked.optimistic.liveness}{" "}
-                  blocks.{" "}
-                  {challengeLeft > 0
-                    ? `${challengeLeft} block(s) until anyone can finalize.`
-                    : "Finalizable now."}
-                </Text>
-                <Text color="gray.400" mt={1}>
-                  Proposer bond <Photons value={tracked.optimistic.bond} /> is
-                  repaid on finalize, or slashed if the committee overrides the
-                  proposal.
-                </Text>
-              </Box>
-            </Alert>
+            <Box maxW="2xl" mb={3}>
+              <ResolutionTimeline t={tracked} live={live} />
+              <Alert
+                status="info"
+                mt={2}
+                borderRadius="md"
+                alignItems="flex-start"
+              >
+                <AlertIcon />
+                <Box fontSize="sm">
+                  <Text>
+                    Proposed <b>{proposedSide}</b> — challenge window{" "}
+                    {proposalConfirmations(live)}/{tracked.optimistic.liveness}{" "}
+                    blocks.{" "}
+                    {challengeLeft > 0
+                      ? `${challengeLeft} block(s) (≈${blocksToDuration(
+                          challengeLeft
+                        )}) until anyone can finalize.`
+                      : "Finalizable now."}
+                  </Text>
+                  {proposerPkh && (
+                    <Text color="gray.400" mt={1}>
+                      Proposed by{" "}
+                      <ProposerTag pkh={proposerPkh} isYou={proposerIsYou} />
+                    </Text>
+                  )}
+                  <Text color="gray.400" mt={1}>
+                    Proposer bond <Photons value={tracked.optimistic.bond} /> is
+                    repaid on finalize, or slashed if the committee overrides the
+                    proposal.
+                  </Text>
+                </Box>
+              </Alert>
+            </Box>
           )}
 
           <HStack wrap="wrap" mb={2}>
@@ -1105,7 +1152,7 @@ export default function PredictMarket() {
                 >
                   {canFinalize
                     ? `Finalize ${proposedSide}`
-                    : `Finalize (in ${challengeLeft})`}
+                    : `Finalize (≈${blocksToDuration(challengeLeft)})`}
                 </Button>
                 <Button
                   size="sm"
@@ -1195,7 +1242,12 @@ export default function PredictMarket() {
                     run("Revert", () => revertAction(tracked, live))
                   }
                 >
-                  Revert{!canRevert && ` (at ${revertibleAt.toLocaleString()})`}
+                  Revert
+                  {!canRevert &&
+                    ` (at ${revertibleAt.toLocaleString()} · ${blockEta(
+                      live.height,
+                      revertibleAt
+                    )})`}
                 </Button>
               </>
             )}
@@ -1209,7 +1261,8 @@ export default function PredictMarket() {
           {optimistic && open && live && live.height < tracked.expiry && (
             <Text fontSize="xs" color="gray.500" maxW="2xl" mb={1}>
               Proposals open at block {tracked.expiry.toLocaleString()} (current{" "}
-              {live.height.toLocaleString()}).
+              {live.height.toLocaleString()} · {blockEta(live.height, tracked.expiry)}
+              ).
             </Text>
           )}
           <Text fontSize="xs" color="gray.500" maxW="2xl">

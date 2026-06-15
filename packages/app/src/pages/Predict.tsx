@@ -6,20 +6,25 @@ import {
   Badge,
   Box,
   Button,
+  ButtonGroup,
   Flex,
   Heading,
   IconButton,
   Input,
+  InputGroup,
+  InputLeftElement,
   LinkBox,
   LinkOverlay,
+  Select,
   SimpleGrid,
   Spinner,
   Text,
   useToast,
 } from "@chakra-ui/react";
-import { DeleteIcon, RepeatIcon } from "@chakra-ui/icons";
+import { DeleteIcon, RepeatIcon, SearchIcon } from "@chakra-ui/icons";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
+  currentHeight,
   discoverMarkets,
   fetchMarketStatus,
   indexedOrderbook,
@@ -34,6 +39,9 @@ import {
 } from "@app/predict/predict";
 import { deriveMarketOdds } from "@app/predict/odds";
 import { HeroCard, NeonSplitBar, NEON } from "@app/predict/ui";
+import { OracleTrustBadge } from "@app/predict/trust";
+import { blockEta } from "@app/predict/time";
+import Photons from "@app/components/Photons";
 
 /** A market shown on the list: the market plus whether it's in the local watchlist (controls the
  *  untrack button) and whether the indexer discovered it. */
@@ -42,6 +50,9 @@ interface ListEntry {
   tracked: boolean;
   discovered: boolean;
 }
+
+type StatusFilter = "all" | "open" | "proposed" | "resolved";
+type SortMode = "newest" | "closing";
 
 /** Chakra colorScheme for a live status badge. */
 function statusScheme(info: MarketStatusInfo): string {
@@ -63,10 +74,22 @@ export default function Predict() {
   const [discovered, setDiscovered] = useState<TrackedMarket[]>([]);
   const [discovering, setDiscovering] = useState(true);
 
+  // Discovery controls: free-text search over the question, a status filter, and a sort order.
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<SortMode>("newest");
+  // Chain tip, fetched once per refresh, to humanise "closes in ≈X" on each card.
+  const [height, setHeight] = useState<number | null>(null);
+
   const loadDiscovered = useCallback(async () => {
     setDiscovering(true);
     try {
-      setDiscovered(await discoverMarkets(100));
+      const [markets, h] = await Promise.all([
+        discoverMarkets(100),
+        currentHeight(),
+      ]);
+      setDiscovered(markets);
+      setHeight(h);
     } finally {
       setDiscovering(false);
     }
@@ -153,14 +176,38 @@ export default function Predict() {
     };
   }, [txKey]);
 
+  // Apply search + status filter + sort. A market with no status probe yet (null) is treated as
+  // "open/unknown" so it shows under All and Open and never silently vanishes.
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matchStatus = (e: ListEntry): boolean => {
+      const s = statusMap[e.m.createTxid];
+      switch (statusFilter) {
+        case "open":
+          return !s || (!s.resolved && !s.pending);
+        case "proposed":
+          return !!s?.pending;
+        case "resolved":
+          return !!s?.resolved;
+        default:
+          return true;
+      }
+    };
+    const list = entries.filter(
+      (e) => (!q || e.m.question.toLowerCase().includes(q)) && matchStatus(e)
+    );
+    if (sort === "closing") return [...list].sort((a, b) => a.m.expiry - b.m.expiry);
+    return list; // "newest": preserve discovery order (newest-first)
+  }, [entries, statusMap, query, statusFilter, sort]);
+
   const { active, resolved } = useMemo(() => {
     const a: ListEntry[] = [];
     const r: ListEntry[] = [];
-    for (const e of entries) {
+    for (const e of shown) {
       (statusMap[e.m.createTxid]?.resolved ? r : a).push(e);
     }
     return { active: a, resolved: r };
-  }, [entries, statusMap]);
+  }, [shown, statusMap]);
 
   const importMarket = async () => {
     const q = txid.trim();
@@ -201,7 +248,6 @@ export default function Predict() {
         ? `/predict/m/${m.createTxid}`
         : `/predict/cat/${m.createTxid}`;
     const yesProb = kind === "binary" ? oddsMap[m.createTxid] : undefined;
-    const threshold = parseInt(m.oracle.substring(0, 2), 16);
     const yesPctRounded = yesProb != null ? Math.round(yesProb * 100) : null;
     const status = statusMap[m.createTxid];
     return (
@@ -279,6 +325,17 @@ export default function Predict() {
                 Watchlist
               </Badge>
             )}
+            {m.optimistic && (
+              <Badge
+                colorScheme="teal"
+                variant="outline"
+                display="inline-flex"
+                alignItems="center"
+                gap={1}
+              >
+                bond <Photons value={m.optimistic.bond} />
+              </Badge>
+            )}
             <Text fontFamily="mono" fontSize="xs" color="whiteAlpha.400">
               {m.createTxid.substring(0, 8)}…
             </Text>
@@ -334,12 +391,22 @@ export default function Predict() {
 
           <Flex
             justify="space-between"
+            align="center"
+            gap={2}
             fontSize="xs"
             fontFamily="mono"
             color="whiteAlpha.500"
           >
-            <Text>expiry block {m.expiry.toLocaleString()}</Text>
-            <Text>{threshold}-of-N oracle</Text>
+            <Text>
+              expiry {m.expiry.toLocaleString()}
+              {height != null && !status?.resolved && height < m.expiry && (
+                <Text as="span" color="whiteAlpha.400">
+                  {" "}
+                  · closes {blockEta(height, m.expiry)}
+                </Text>
+              )}
+            </Text>
+            <OracleTrustBadge t={m} withTooltip={false} />
           </Flex>
         </HeroCard>
       </LinkBox>
@@ -369,9 +436,50 @@ export default function Predict() {
         </Button>
       </Flex>
 
+      {entries.length > 0 && (
+        <Flex gap={3} mb={4} wrap="wrap" align="center">
+          <InputGroup maxW="sm" flex="1 1 220px">
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="whiteAlpha.400" />
+            </InputLeftElement>
+            <Input
+              placeholder="Search markets"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </InputGroup>
+          <ButtonGroup size="sm" isAttached variant="outline">
+            {(["all", "open", "proposed", "resolved"] as StatusFilter[]).map(
+              (f) => (
+                <Button
+                  key={f}
+                  onClick={() => setStatusFilter(f)}
+                  variant={statusFilter === f ? "solid" : "outline"}
+                  colorScheme={statusFilter === f ? "teal" : "gray"}
+                  textTransform="capitalize"
+                >
+                  {f}
+                </Button>
+              )
+            )}
+          </ButtonGroup>
+          <Select
+            size="sm"
+            maxW="44"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortMode)}
+          >
+            <option value="newest">Newest</option>
+            <option value="closing">Closing soon</option>
+          </Select>
+        </Flex>
+      )}
+
       <Flex align="center" gap={3} mb={3} px={1}>
         <Text fontSize="sm" color="gray.400">
-          {entries.length} market{entries.length === 1 ? "" : "s"}
+          {shown.length === entries.length
+            ? `${entries.length} market${entries.length === 1 ? "" : "s"}`
+            : `${shown.length} of ${entries.length} markets`}
         </Text>
         <Button
           size="xs"
@@ -398,11 +506,17 @@ export default function Predict() {
             No markets found yet — create one, or import by creation txid.
           </Text>
         )
+      ) : shown.length === 0 ? (
+        <Text color="gray.400" px={2}>
+          No markets match your search or filter.
+        </Text>
       ) : (
         <>
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} maxW="4xl">
-            {active.map(renderCard)}
-          </SimpleGrid>
+          {active.length > 0 && (
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} maxW="4xl">
+              {active.map(renderCard)}
+            </SimpleGrid>
+          )}
 
           {resolved.length > 0 && (
             <>

@@ -104,6 +104,10 @@ export interface TrackedMarket {
   /** Optimistic-oracle (MarketOpt) terms, fixed at creation. Present iff this is an optimistic
    *  binary market — the singleton then carries a 74-byte state and supports propose/finalize. */
   optimistic?: { bond: number; liveness: number };
+  /** Display-only optimistic flag from the indexer beacon, set on discovered markets where the full
+   *  `optimistic` bond/liveness terms aren't loaded yet (they're re-anchored from chain on open). Lets
+   *  the trust badge classify a discovered optimistic market without fabricating bond/liveness. */
+  optimisticHint?: boolean;
 }
 
 /** True for an optimistic (MarketOpt) binary market — its singleton carries a 74-byte state and
@@ -207,6 +211,7 @@ function indexedToTracked(im: IndexedMarket): TrackedMarket {
     oracle: im.oracle,
     addedAt: 0,
     kind: "binary",
+    optimisticHint: im.optimistic,
   };
 }
 
@@ -700,6 +705,17 @@ export async function fetchMarketStatus(
       }
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Current chain tip height, or null when disconnected. Cheap one-shot for the Markets list to
+ *  humanise "closes in ≈X" — never throws so a missing height just hides the estimate. */
+export async function currentHeight(): Promise<number | null> {
+  try {
+    if (!(await electrumWorker.value.isReady())) return null;
+    return await electrumWorker.value.getBlockHeight();
   } catch {
     return null;
   }
