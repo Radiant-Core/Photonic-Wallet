@@ -52,7 +52,6 @@ import {
 } from "react-icons/md";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
-import ContentContainer from "@app/components/ContentContainer";
 import TokenContent from "@app/components/TokenContent";
 import { WaveExpiryBadge } from "@app/components/WaveAssetLabel";
 import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
@@ -1503,31 +1502,29 @@ export default function OpenOrders({
 
   if (indexAvailable === false) {
     return (
-      <ContentContainer>
-        <Container maxW="container.lg" px={4}>
-          <VStack spacing={4} align="stretch">
-            <MyOffersPanel />
-            <Card p={8}>
-              <VStack spacing={4}>
-                <Alert status="warning">
-                  <AlertIcon />
-                  Swap index not available. Connect to a Radiant Core node with
-                  -swapindex=1 enabled.
-                </Alert>
-                <HStack>
-                  <Input
-                    placeholder="RPC URL (e.g., http://127.0.0.1:7332)"
-                    value={rpcUrl}
-                    onChange={(e) => setRpcUrl(e.target.value)}
-                    width="300px"
-                  />
-                  <Button onClick={handleSaveConfig}>Connect</Button>
-                </HStack>
-              </VStack>
-            </Card>
-          </VStack>
-        </Container>
-      </ContentContainer>
+      <Container maxW="container.xl" px={4}>
+        <VStack spacing={4} align="stretch">
+          <MyOffersPanel />
+          <Card p={8}>
+            <VStack spacing={4}>
+              <Alert status="warning">
+                <AlertIcon />
+                Swap index not available. Connect to a Radiant Core node with
+                -swapindex=1 enabled.
+              </Alert>
+              <HStack>
+                <Input
+                  placeholder="RPC URL (e.g., http://127.0.0.1:7332)"
+                  value={rpcUrl}
+                  onChange={(e) => setRpcUrl(e.target.value)}
+                  width="300px"
+                />
+                <Button onClick={handleSaveConfig}>Connect</Button>
+              </HStack>
+            </VStack>
+          </Card>
+        </VStack>
+      </Container>
     );
   }
 
@@ -1570,302 +1567,297 @@ export default function OpenOrders({
   const emptyState = getEmptyStateMessage();
 
   return (
-    <ContentContainer>
-      <Container maxW="container.xl" px={4}>
-        <VStack spacing={4} align="stretch">
-          {/* Header with controls */}
-          <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
-            <Heading size="lg">{"Open Orders"}</Heading>
-            <HStack spacing={2}>
-              {lastUpdated && (
-                <HStack
-                  spacing={1}
-                  color="gray.500"
-                  fontSize="xs"
-                  display={{ base: "none", md: "flex" }}
-                >
-                  <Icon as={TimeIcon} boxSize={3} />
-                  <Text>Updated {dayjs(lastUpdated).format("HH:mm:ss")}</Text>
-                </HStack>
-              )}
-              <Tooltip
-                label={
-                  autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"
-                }
+    <Container maxW="container.xl" px={4}>
+      <VStack spacing={4} align="stretch">
+        {/* Header with controls */}
+        <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+          <Heading size="lg">{"Open Orders"}</Heading>
+          <HStack spacing={2}>
+            {lastUpdated && (
+              <HStack
+                spacing={1}
+                color="gray.500"
+                fontSize="xs"
+                display={{ base: "none", md: "flex" }}
               >
-                <IconButton
-                  aria-label="Toggle auto-refresh"
-                  icon={<Icon as={MdRefresh} />}
-                  size="sm"
-                  variant={autoRefreshEnabled ? "solid" : "ghost"}
-                  colorScheme={autoRefreshEnabled ? "green" : "gray"}
-                  onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-                />
-              </Tooltip>
-              <Button
+                <Icon as={TimeIcon} boxSize={3} />
+                <Text>Updated {dayjs(lastUpdated).format("HH:mm:ss")}</Text>
+              </HStack>
+            )}
+            <Tooltip
+              label={
+                autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"
+              }
+            >
+              <IconButton
+                aria-label="Toggle auto-refresh"
+                icon={<Icon as={MdRefresh} />}
                 size="sm"
-                variant="ghost"
-                onClick={() => setShowConfig(!showConfig)}
-              >
-                Settings
-              </Button>
-              <Button
+                variant={autoRefreshEnabled ? "solid" : "ghost"}
+                colorScheme={autoRefreshEnabled ? "green" : "gray"}
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+              />
+            </Tooltip>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowConfig(!showConfig)}
+            >
+              Settings
+            </Button>
+            <Button
+              size="sm"
+              leftIcon={<Icon as={MdRefresh} />}
+              onClick={() => fetchOrders()}
+              isLoading={loading}
+            >
+              {"Refresh"}
+            </Button>
+          </HStack>
+        </Flex>
+
+        {/* Config panel */}
+        {showConfig && (
+          <Card p={4}>
+            <HStack>
+              <Input
+                placeholder="RPC URL"
+                value={rpcUrl}
+                onChange={(e) => setRpcUrl(e.target.value)}
                 size="sm"
-                leftIcon={<Icon as={MdRefresh} />}
-                onClick={() => fetchOrders()}
-                isLoading={loading}
-              >
-                {"Refresh"}
+              />
+              <Button size="sm" onClick={handleSaveConfig}>
+                Save
               </Button>
             </HStack>
-          </Flex>
-
-          {/* Config panel */}
-          {showConfig && (
-            <Card p={4}>
-              <HStack>
-                <Input
-                  placeholder="RPC URL"
-                  value={rpcUrl}
-                  onChange={(e) => setRpcUrl(e.target.value)}
-                  size="sm"
-                />
-                <Button size="sm" onClick={handleSaveConfig}>
-                  Save
-                </Button>
-              </HStack>
-            </Card>
-          )}
-
-          {/* The wallet's own broadcast offers, read from local db */}
-          <MyOffersPanel />
-
-          {/* Search and filters */}
-          <Card p={4}>
-            <VStack spacing={3} align="stretch">
-              {/* Search bar */}
-              <InputGroup>
-                <InputLeftElement pointerEvents="none">
-                  <SearchIcon color="gray.400" />
-                </InputLeftElement>
-                <Input
-                  placeholder={"Search by token ref or name..."}
-                  value={searchRef}
-                  onChange={(e) => setSearchRef(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                />
-                <Button ml={2} onClick={handleSearch} isLoading={loading}>
-                  {"Search"}
-                </Button>
-              </InputGroup>
-
-              {/* Filter and view controls */}
-              <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
-                <HStack spacing={2}>
-                  <Icon as={MdFilterList} color="gray.400" />
-                  <Select
-                    size="sm"
-                    value={filterType}
-                    onChange={(e) =>
-                      setFilterType(e.target.value as FilterType)
-                    }
-                    width="140px"
-                    aria-label="Filter by type"
-                  >
-                    <option value="all">All Types</option>
-                    <option value="ft">Fungible</option>
-                    <option value="nft">NFT</option>
-                    <option value="names">WAVE Names</option>
-                    <option value="rxd-in">Buying RXD</option>
-                    <option value="rxd-out">Selling RXD</option>
-                  </Select>
-                  <Tooltip label="Offers older than ~30 days are hidden by default. They have no on-chain expiry and can still execute at the original price unless the maker cancels them.">
-                    <Box>
-                      <Checkbox
-                        size="sm"
-                        isChecked={showExpired}
-                        onChange={(e) => setShowExpired(e.target.checked)}
-                      >
-                        Show expired
-                        {expiredCount > 0 ? ` (${expiredCount})` : ""}
-                      </Checkbox>
-                    </Box>
-                  </Tooltip>
-                </HStack>
-
-                <ButtonGroup size="sm" isAttached variant="outline">
-                  <IconButton
-                    aria-label="Table view"
-                    icon={<Icon as={MdTableRows} />}
-                    colorScheme={viewMode === "table" ? "blue" : undefined}
-                    onClick={() => setViewMode("table")}
-                  />
-                  <IconButton
-                    aria-label="Grid view"
-                    icon={<Icon as={MdGridView} />}
-                    colorScheme={viewMode === "grid" ? "blue" : undefined}
-                    onClick={() => setViewMode("grid")}
-                  />
-                </ButtonGroup>
-              </Flex>
-
-              {/* Names market discovery notice */}
-              {filterType === "names" && (
-                <Alert status="info" borderRadius="md" fontSize="sm">
-                  <AlertIcon />
-                  <Text>
-                    Showing WAVE name listings among loaded offers. The swap
-                    index can't enumerate every name for sale — search a name
-                    (e.g.{" "}
-                    <Text as="span" fontFamily="mono">
-                      alice.rxd
-                    </Text>
-                    ) or paste a token ref to find a specific listing.
-                  </Text>
-                </Alert>
-              )}
-
-              {/* Stats */}
-              {orders.length > 0 && (
-                <Flex
-                  justify="space-between"
-                  align="center"
-                  fontSize="sm"
-                  color="gray.500"
-                >
-                  <Text>
-                    Showing {displayedOrders.length} of{" "}
-                    {filteredAndSortedOrders.length} orders
-                    {filteredAndSortedOrders.length !== orders.length &&
-                      ` (filtered from ${orders.length})`}
-                  </Text>
-                </Flex>
-              )}
-            </VStack>
           </Card>
+        )}
 
-          {/* Results */}
-          <Card>
-            {loading && orders.length === 0 ? (
-              <VStack p={8} spacing={4}>
-                <Skeleton height="40px" width="100%" />
-                <Skeleton height="40px" width="100%" />
-                <Skeleton height="40px" width="100%" />
-              </VStack>
-            ) : emptyState ? (
-              <Box p={8} textAlign="center">
-                <Text color="gray.500" fontWeight="medium">
-                  {emptyState.title}
+        {/* The wallet's own broadcast offers, read from local db */}
+        <MyOffersPanel />
+
+        {/* Search and filters */}
+        <Card p={4}>
+          <VStack spacing={3} align="stretch">
+            {/* Search bar */}
+            <InputGroup>
+              <InputLeftElement pointerEvents="none">
+                <SearchIcon color="gray.400" />
+              </InputLeftElement>
+              <Input
+                placeholder={"Search by token ref or name..."}
+                value={searchRef}
+                onChange={(e) => setSearchRef(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleSearch()}
+              />
+              <Button ml={2} onClick={handleSearch} isLoading={loading}>
+                {"Search"}
+              </Button>
+            </InputGroup>
+
+            {/* Filter and view controls */}
+            <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+              <HStack spacing={2}>
+                <Icon as={MdFilterList} color="gray.400" />
+                <Select
+                  size="sm"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as FilterType)}
+                  width="140px"
+                  aria-label="Filter by type"
+                >
+                  <option value="all">All Types</option>
+                  <option value="ft">Fungible</option>
+                  <option value="nft">NFT</option>
+                  <option value="names">WAVE Names</option>
+                  <option value="rxd-in">Buying RXD</option>
+                  <option value="rxd-out">Selling RXD</option>
+                </Select>
+                <Tooltip label="Offers older than ~30 days are hidden by default. They have no on-chain expiry and can still execute at the original price unless the maker cancels them.">
+                  <Box>
+                    <Checkbox
+                      size="sm"
+                      isChecked={showExpired}
+                      onChange={(e) => setShowExpired(e.target.checked)}
+                    >
+                      Show expired
+                      {expiredCount > 0 ? ` (${expiredCount})` : ""}
+                    </Checkbox>
+                  </Box>
+                </Tooltip>
+              </HStack>
+
+              <ButtonGroup size="sm" isAttached variant="outline">
+                <IconButton
+                  aria-label="Table view"
+                  icon={<Icon as={MdTableRows} />}
+                  colorScheme={viewMode === "table" ? "blue" : undefined}
+                  onClick={() => setViewMode("table")}
+                />
+                <IconButton
+                  aria-label="Grid view"
+                  icon={<Icon as={MdGridView} />}
+                  colorScheme={viewMode === "grid" ? "blue" : undefined}
+                  onClick={() => setViewMode("grid")}
+                />
+              </ButtonGroup>
+            </Flex>
+
+            {/* Names market discovery notice */}
+            {filterType === "names" && (
+              <Alert status="info" borderRadius="md" fontSize="sm">
+                <AlertIcon />
+                <Text>
+                  Showing WAVE name listings among loaded offers. The swap index
+                  can't enumerate every name for sale — search a name (e.g.{" "}
+                  <Text as="span" fontFamily="mono">
+                    alice.rxd
+                  </Text>
+                  ) or paste a token ref to find a specific listing.
                 </Text>
-                <Text fontSize="sm" color="gray.400" mt={2}>
-                  {emptyState.description}
-                </Text>
-              </Box>
-            ) : viewMode === "table" ? (
-              <Box overflowX="auto">
-                <Table size="sm">
-                  <Thead>
-                    <Tr>
-                      <Th>{"Swap"}</Th>
-                      <Th
-                        cursor="pointer"
-                        onClick={() => handleSort("name")}
-                        _hover={{ color: "blue.400" }}
-                      >
-                        {"Offering"}{" "}
-                        {sortField === "name" &&
-                          (sortDirection === "asc" ? "↑" : "↓")}
-                      </Th>
-                      <Th
-                        cursor="pointer"
-                        onClick={() => handleSort("value")}
-                        _hover={{ color: "blue.400" }}
-                      >
-                        {"Wants"}{" "}
-                        {sortField === "value" &&
-                          (sortDirection === "asc" ? "↑" : "↓")}
-                      </Th>
-                      <Th
-                        display={{ base: "none", md: "table-cell" }}
-                        cursor="pointer"
-                        onClick={() => handleSort("block")}
-                        _hover={{ color: "blue.400" }}
-                      >
-                        {"Block"}{" "}
-                        {sortField === "block" &&
-                          (sortDirection === "asc" ? "↑" : "↓")}
-                      </Th>
-                      <Th></Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {displayedOrders.map((order, idx) => (
-                      <OrderRow
-                        key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
-                        order={order}
-                        onAccept={handleAcceptOrder}
-                        onCopy={copyToClipboard}
-                        currentHeight={currentHeight}
-                      />
-                    ))}
-                  </Tbody>
-                </Table>
-              </Box>
-            ) : (
-              <Grid
-                templateColumns={{
-                  base: "1fr",
-                  md: "repeat(2, 1fr)",
-                  lg: "repeat(3, 1fr)",
-                }}
-                gap={4}
-                p={4}
+              </Alert>
+            )}
+
+            {/* Stats */}
+            {orders.length > 0 && (
+              <Flex
+                justify="space-between"
+                align="center"
+                fontSize="sm"
+                color="gray.500"
               >
-                {displayedOrders.map((order, idx) => (
-                  <GridItem
-                    key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
-                  >
-                    <OrderCard
+                <Text>
+                  Showing {displayedOrders.length} of{" "}
+                  {filteredAndSortedOrders.length} orders
+                  {filteredAndSortedOrders.length !== orders.length &&
+                    ` (filtered from ${orders.length})`}
+                </Text>
+              </Flex>
+            )}
+          </VStack>
+        </Card>
+
+        {/* Results */}
+        <Card>
+          {loading && orders.length === 0 ? (
+            <VStack p={8} spacing={4}>
+              <Skeleton height="40px" width="100%" />
+              <Skeleton height="40px" width="100%" />
+              <Skeleton height="40px" width="100%" />
+            </VStack>
+          ) : emptyState ? (
+            <Box p={8} textAlign="center">
+              <Text color="gray.500" fontWeight="medium">
+                {emptyState.title}
+              </Text>
+              <Text fontSize="sm" color="gray.400" mt={2}>
+                {emptyState.description}
+              </Text>
+            </Box>
+          ) : viewMode === "table" ? (
+            <Box overflowX="auto">
+              <Table size="sm">
+                <Thead>
+                  <Tr>
+                    <Th>{"Swap"}</Th>
+                    <Th
+                      cursor="pointer"
+                      onClick={() => handleSort("name")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Offering"}{" "}
+                      {sortField === "name" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th
+                      cursor="pointer"
+                      onClick={() => handleSort("value")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Wants"}{" "}
+                      {sortField === "value" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th
+                      display={{ base: "none", md: "table-cell" }}
+                      cursor="pointer"
+                      onClick={() => handleSort("block")}
+                      _hover={{ color: "blue.400" }}
+                    >
+                      {"Block"}{" "}
+                      {sortField === "block" &&
+                        (sortDirection === "asc" ? "↑" : "↓")}
+                    </Th>
+                    <Th></Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {displayedOrders.map((order, idx) => (
+                    <OrderRow
+                      key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
                       order={order}
                       onAccept={handleAcceptOrder}
                       onCopy={copyToClipboard}
                       currentHeight={currentHeight}
                     />
-                  </GridItem>
-                ))}
-              </Grid>
-            )}
-
-            {/* Load more */}
-            {hasMoreOrders && (
-              <Box p={4} textAlign="center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleLoadMore}
-                  isLoading={loading}
-                >
-                  Load More ({filteredAndSortedOrders.length - displayCount}{" "}
-                  remaining)
-                </Button>
-              </Box>
-            )}
-          </Card>
-
-          {/* Help text */}
-          <Alert status="info" variant="subtle">
-            <AlertIcon />
-            <Box>
-              <Text fontWeight="medium">{"How it works"}</Text>
-              <Text fontSize="sm">
-                {
-                  "Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction."
-                }
-              </Text>
+                  ))}
+                </Tbody>
+              </Table>
             </Box>
-          </Alert>
-        </VStack>
-      </Container>
-    </ContentContainer>
+          ) : (
+            <Grid
+              templateColumns={{
+                base: "1fr",
+                md: "repeat(2, 1fr)",
+                lg: "repeat(3, 1fr)",
+              }}
+              gap={4}
+              p={4}
+            >
+              {displayedOrders.map((order, idx) => (
+                <GridItem
+                  key={`${order.offer.utxo.txid}-${order.offer.utxo.vout}-${idx}`}
+                >
+                  <OrderCard
+                    order={order}
+                    onAccept={handleAcceptOrder}
+                    onCopy={copyToClipboard}
+                    currentHeight={currentHeight}
+                  />
+                </GridItem>
+              ))}
+            </Grid>
+          )}
+
+          {/* Load more */}
+          {hasMoreOrders && (
+            <Box p={4} textAlign="center">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleLoadMore}
+                isLoading={loading}
+              >
+                Load More ({filteredAndSortedOrders.length - displayCount}{" "}
+                remaining)
+              </Button>
+            </Box>
+          )}
+        </Card>
+
+        {/* Help text */}
+        <Alert status="info" variant="subtle">
+          <AlertIcon />
+          <Box>
+            <Text fontWeight="medium">{"How it works"}</Text>
+            <Text fontSize="sm">
+              {
+                "Browse swap offers broadcast to the network. When you accept an offer, you complete the atomic swap by providing the requested asset and broadcasting the final transaction."
+              }
+            </Text>
+          </Box>
+        </Alert>
+      </VStack>
+    </Container>
   );
 }
