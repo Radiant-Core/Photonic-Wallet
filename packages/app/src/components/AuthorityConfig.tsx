@@ -73,7 +73,6 @@ export default function AuthorityConfig({
       expires: iso,
       revocable,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, scope, permissions, expires, revocable]);
 
   return (

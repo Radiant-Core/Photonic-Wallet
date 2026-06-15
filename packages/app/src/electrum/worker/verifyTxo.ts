@@ -174,19 +174,15 @@ export async function verifyFtRefCommitment(
   const { ref: claimedRefLE } = parseFtScript(claimedScript);
   if (!claimedRefLE) return false;
 
-  let rawTx: string;
-  try {
-    rawTx = await electrum.request<string>(
-      "blockchain.transaction.get",
-      utxo.tx_hash
-    );
-  } catch (err) {
-    // TRANSIENT failure (socket dropped / timeout) — NOT a token-identity
-    // problem. Returning false here would make updateTxos silently skip the
-    // UTXO and still persist the subscription status, stranding the token
-    // un-retryably. Propagate so the sync fails and retries (with backoff).
-    throw err;
-  }
+  // We deliberately DON'T catch a fetch failure here: a TRANSIENT error (socket
+  // dropped / timeout) is NOT a token-identity problem, and returning false would
+  // make updateTxos silently skip the UTXO yet still persist the subscription
+  // status, stranding the token un-retryably. Letting it propagate fails the sync
+  // so it retries (with backoff).
+  const rawTx = await electrum.request<string>(
+    "blockchain.transaction.get",
+    utxo.tx_hash
+  );
   if (!rawTx) return false;
 
   // The raw tx must hash to the claimed txid before we trust any of its bytes
