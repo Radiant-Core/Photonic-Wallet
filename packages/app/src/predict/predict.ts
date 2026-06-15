@@ -336,6 +336,58 @@ export async function openMarketByCreateTxid(
   };
 }
 
+/** Normalise any market-ref spelling to the 72-hex DISPLAY ref `blockchain.ref.get` expects
+ *  (txid big-endian + vout big-endian): accepts the indexer `txid_vout` form (big-endian txid +
+ *  decimal vout) or the internal 72-hex form a TrackedMarket stores (txid little-endian + vout
+ *  little-endian). */
+function toDisplayRef72(ref: string): string {
+  const s = ref.trim().toLowerCase();
+  if (s.includes("_")) {
+    const [txid, voutStr] = s.split("_");
+    const vout = parseInt(voutStr, 10);
+    if (!/^[0-9a-f]{64}$/.test(txid) || !Number.isFinite(vout)) {
+      throw new Error("Bad market ref — expected txid_vout");
+    }
+    const voutBE = Buffer.alloc(4);
+    voutBE.writeUInt32BE(vout, 0);
+    return txid + voutBE.toString("hex");
+  }
+  if (/^[0-9a-f]{72}$/.test(s)) {
+    return displayRef(s); // internal (LE) -> display (BE)
+  }
+  throw new Error("Bad market ref — expected txid_vout or 72-hex");
+}
+
+/** Recover/import a market from its singleton ref instead of its creation txid. Resolves the ref's
+ *  on-chain locations (oldest-first) and imports from whichever one is the RMKT-beacon creation tx
+ *  — complements openMarketByCreateTxid so a market can be shared by its ref. */
+export async function openMarketByRef(ref: string): Promise<TrackedMarket> {
+  const resp = await electrumWorker.value.getRef(toDisplayRef72(ref));
+  const locs = Array.isArray(resp) ? resp : [];
+  if (!locs.length) {
+    throw new Error("That market ref has no on-chain history");
+  }
+  // ref.get lists the ref's locations oldest-first; the creation tx is the earliest carrying the
+  // RMKT beacon. Walk them and import from the first that parses as a market-create.
+  let lastErr: unknown;
+  const seen = new Set<string>();
+  for (const loc of locs) {
+    const txh = (loc as { tx_hash?: string })?.tx_hash;
+    if (!txh || seen.has(txh)) continue;
+    seen.add(txh);
+    try {
+      return await openMarketByCreateTxid(txh);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(
+    `No market-creation transaction found for that ref${
+      lastErr ? ` — ${(lastErr as Error).message}` : ""
+    }`
+  );
+}
+
 // Mirror of RXinDexer's Script.zero_refs (electrumx/lib/script.py): the indexer keys a UTXO's
 // scripthash on the script with every 36-byte ref operand ZEROED — but only for scripts that
 // contain a checksig opcode (so one watch key covers a wallet's holdings across all refs).
@@ -471,11 +523,16 @@ async function locateBinarySingleton(
     grace: t.grace,
     oracle: Buffer.from(t.oracle, "hex"),
   };
+  // Terminal statuses are probed BEFORE OPEN so a stale-cached OPEN can never mask a real
+  // resolution: a binary market advances OPEN -> {RESOLVED_*/REVERTED} monotonically and never
+  // returns to OPEN, so any unspent terminal variant IS the truth even if ElectrumX's listunspent
+  // cache still lists the just-spent OPEN singleton for a few seconds (the lag that left resolved
+  // markets showing "live").
   const statuses = [
-    Status.OPEN,
     Status.RESOLVED_YES,
     Status.RESOLVED_NO,
     Status.REVERTED,
+    Status.OPEN,
   ];
   const byStatus = await Promise.all(
     statuses.map((status) =>
@@ -571,6 +628,81 @@ async function locateOptimisticSingleton(
     }
   }
   throw new Error("Market singleton not found in its latest transaction");
+}
+
+/** Status-only descriptor for the Markets list — does the market still take action (Active) or has
+ *  it resolved (Resolved)? */
+export interface MarketStatusInfo {
+  status: number; // Status enum (binary) or CAT status byte (categorical/scalar)
+  resolved: boolean; // terminal: settled or reverted — no further trading
+  pending: boolean; // optimistic PROPOSED_* — in the challenge window, still Active
+  label: string;
+}
+
+/** Lightweight live-status probe for the Markets list: locates the singleton the same way
+ *  fetchLiveMarket does, but WITHOUT the anchor/position reads, and buckets the market as Active vs
+ *  Resolved. Returns null when the status can't be read right now (disconnected, not yet on chain)
+ *  — the caller treats null as "Active/unknown" so a market never silently disappears. */
+export async function fetchMarketStatus(
+  t: TrackedMarket
+): Promise<MarketStatusInfo | null> {
+  try {
+    if (!(await electrumWorker.value.isReady())) return null;
+    if (marketKind(t) === "binary") {
+      const scripts = scriptsOf(t);
+      const refs = refsOf(t);
+      const located = isOptimistic(t)
+        ? await locateOptimisticSingleton(t, scripts, refs)
+        : await locateBinarySingleton(t, scripts, refs);
+      const s = located.state.status;
+      const pending = s === Status.PROPOSED_YES || s === Status.PROPOSED_NO;
+      return {
+        status: s,
+        resolved: s !== Status.OPEN && !pending,
+        pending,
+        label: statusLabel[s as Status] ?? "Unknown",
+      };
+    }
+    // Categorical / scalar: probe the K+2 status variants (terminal-first, see fetchLiveCatMarket).
+    const refs = catRefsOf(t);
+    const K = refs.outcomeRefs.length;
+    const scripts = catScriptsOf(t);
+    const base = {
+      expiry: t.expiry,
+      grace: t.grace,
+      oracle: Buffer.from(t.oracle, "hex"),
+    };
+    const candidateStatuses = [
+      ...Array.from({ length: K }, (_, i) => i + 1),
+      CAT_REVERTED,
+      CAT_OPEN,
+    ];
+    const byStatus = await Promise.all(
+      candidateStatuses.map((status) =>
+        unspentByScript(
+          buildStatefulOutput(
+            encodeCatState({ status, ...base }),
+            scripts.marketCode
+          ),
+          refs.marketRef
+        )
+      )
+    );
+    for (let i = 0; i < candidateStatuses.length; i++) {
+      if (byStatus[i].length > 0) {
+        const s = candidateStatuses[i];
+        return {
+          status: s,
+          resolved: s !== CAT_OPEN,
+          pending: false,
+          label: catStatusLabel(t, s),
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------- wallet funding ------------------------------- */
@@ -1016,10 +1148,12 @@ export async function fetchLiveCatMarket(
     grace: t.grace,
     oracle: Buffer.from(t.oracle, "hex"),
   };
+  // Terminal statuses (resolved outcome 1..K, reverted) probed before CAT_OPEN, so a stale-cached
+  // OPEN singleton can't mask a real resolution (see locateBinarySingleton's tie-break).
   const candidateStatuses = [
-    CAT_OPEN,
     ...Array.from({ length: K }, (_, i) => i + 1),
     CAT_REVERTED,
+    CAT_OPEN,
   ];
   const [height, ...byStatus] = await Promise.all([
     electrumWorker.value.getBlockHeight(),

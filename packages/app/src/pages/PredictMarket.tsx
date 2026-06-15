@@ -562,6 +562,42 @@ export default function PredictMarket() {
     refresh();
   }, [refresh]);
 
+  // Self-heal: a market resolved/reverted in another wallet doesn't push an event here, so poll
+  // while it's still actionable (Open, or an optimistic challenge window) and refresh whenever the
+  // tab regains focus. Stops once terminal — a resolved/reverted singleton never changes again, so
+  // a stale "live" view can't linger.
+  useEffect(() => {
+    if (!tracked) return;
+    const s = live?.state.status;
+    const terminal =
+      s !== undefined &&
+      s !== Status.OPEN &&
+      s !== Status.PROPOSED_YES &&
+      s !== Status.PROPOSED_NO;
+    if (terminal) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refresh);
+    const id = setInterval(refresh, 20000);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [tracked, live?.state.status, refresh]);
+
+  // After an action broadcasts, ElectrumX's listunspent cache can briefly still list the spent
+  // singleton, so a single refresh may render the pre-action status. Re-probe a few times with
+  // backoff to converge on the new on-chain state.
+  const refreshSettled = useCallback(async () => {
+    for (const ms of [0, 2500, 5000, 8000]) {
+      if (ms) await new Promise((r) => setTimeout(r, ms));
+      await refresh();
+    }
+  }, [refresh]);
+
   const loadBook = useCallback(async () => {
     if (!tracked) return;
     try {
@@ -588,8 +624,9 @@ export default function PredictMarket() {
         description: txid,
         status: "success",
       });
-      // Singleton chain advances one tx per action; refetch the live view + order book.
-      await refresh();
+      // Singleton chain advances one tx per action; refetch the live view (with settle-retry to
+      // beat the listunspent cache lag) + order book.
+      await refreshSettled();
       await loadBook();
     } catch (e) {
       toast({
