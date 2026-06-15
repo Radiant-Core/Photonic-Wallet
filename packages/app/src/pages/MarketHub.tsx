@@ -514,7 +514,12 @@ export default function MarketHub() {
   }, [filter, royaltyListings, swapListings, swapAssetKind, glyphByRef]);
 
   const openSwap = (l: UnifiedSwapListing) => {
-    if (l.tokenRef72) navigate(`/swap/orders?ref=${l.tokenRef72}`);
+    // Deep-link with the SWAP token-id (base_ref's 64-hex) — the per-token book's
+    // getopenorders/getopenordersbywant key on it directly. (base_ref is already
+    // the sha256 token-id, NOT a real ref, so we must NOT pass the 72-hex form,
+    // which OpenOrders would re-hash into a wrong id and find nothing.)
+    const tid = orderTokenId(l);
+    if (tid) navigate(`/swap/orders?ref=${tid}`);
     else navigate("/swap/orders");
   };
 
@@ -773,7 +778,7 @@ export default function MarketHub() {
                               <Td textAlign="right">
                                 <Tooltip
                                   label={
-                                    l.tokenRef72
+                                    orderTokenId(l)
                                       ? "Open this token's order book to view exact terms and buy"
                                       : "RXD-only order"
                                   }
@@ -782,7 +787,7 @@ export default function MarketHub() {
                                     size="sm"
                                     colorScheme="blue"
                                     variant="outline"
-                                    isDisabled={!l.tokenRef72}
+                                    isDisabled={!orderTokenId(l)}
                                     onClick={() => openSwap(l)}
                                   >
                                     View / Buy
