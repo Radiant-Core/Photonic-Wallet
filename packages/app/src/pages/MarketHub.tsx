@@ -107,7 +107,8 @@ const FILTERS: { key: MarketFilter; label: string }[] = [
 
 // The order's token-of-interest id. The swap index normalises pair refs
 // token-as-base, so base_ref carries the token's SWAP token-id (sha256 of the
-// ref) as its leading 64 hex; quote is RXD. (base_ref is NOT the real ref.)
+// LE/script-operand ref — same as assetToSwapTokenId) as its leading 64 hex;
+// quote is RXD. (base_ref is NOT the real ref.)
 function orderTokenId(l: UnifiedSwapListing): string | null {
   return l.baseRef ? l.baseRef.split("_")[0] : null;
 }
@@ -304,9 +305,10 @@ export default function MarketHub() {
     () => new Map((glyphs || []).map((g) => [g.ref, g])),
     [glyphs]
   );
-  // Owned glyphs keyed by SWAP token-id (sha256 of the ref) — the form the global
-  // feed's base_ref carries. We match by token-id (NOT ref, since base_ref is the
-  // hash, not a resolvable ref), so a token the wallet owns is named with no fetch.
+  // Owned glyphs keyed by SWAP token-id (sha256 of the LE/script-operand ref) — the
+  // form the global feed's base_ref carries. We match by token-id (NOT ref, since
+  // base_ref is the hash, not a resolvable ref), so a token the wallet owns is named
+  // with no fetch.
   const glyphByTokenId = useMemo(
     () =>
       new Map(

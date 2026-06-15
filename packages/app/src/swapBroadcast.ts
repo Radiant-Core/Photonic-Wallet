@@ -1,4 +1,4 @@
-import Outpoint from "@lib/Outpoint";
+import Outpoint, { reverseRef } from "@lib/Outpoint";
 import { sha256 } from "@noble/hashes/sha256";
 import { Buffer } from "buffer";
 import { ContractType, SmartTokenType } from "./types";
@@ -535,8 +535,17 @@ export function assetToSwapTokenId(
     return "00".repeat(32);
   }
 
+  // The canonical RSWP swap token id (node `-swapindex`, RXinDexer `swap_index.py`,
+  // and RadiantSwap's `rswp.swapTokenId`) is sha256 of the 36-byte ref in its
+  // *little-endian script-operand* order — exactly the bytes pushed by
+  // OP_PUSHINPUTREF. `glyphRef` is the big-endian display ref (`reverseRef(ref_le)`,
+  // see marketModel.royaltyFromIndexer), so it MUST be reversed back to LE before
+  // hashing. Hashing the BE form yields a different id that never matches an
+  // on-chain `tokenid`/`want_tokenid`, which silently routes every token order to
+  // the wrong (or no) book. Verified on chain: ref `eef6f61e…00000001` →
+  // sha256(LE) == want_tokenid `2b568707…d589`.
   return Buffer.from(
-    sha256(Buffer.from(Outpoint.fromString(glyphRef).ref(), "hex"))
+    sha256(Buffer.from(reverseRef(glyphRef), "hex"))
   ).toString("hex");
 }
 
@@ -544,11 +553,12 @@ export function assetToSwapTokenId(
  * Convert a swap-index display ref (`<txid_be>_<vout_decimal>`, as emitted by
  * RXinDexer's `_format_ref` in the global `swap.get_orders` feed) to the 72-hex
  * ref form the wallet uses internally — txid big-endian + 4-byte big-endian vout.
- * This is exactly the `glyph.ref` form that `assetToSwapTokenId` / `Outpoint.refHash`
- * hash to derive the node swapindex tokenid, so the result can deep-link a
- * discovered order into the per-token Open Orders book (which fetches the fillable
- * offer via the node's `getopenorders`). Returns null for an RXD side (no ref) or a
- * malformed input. See OpenOrders deep-link handling and Outpoint.fromShortInput.
+ * This is the `glyph.ref` (display, BE) form; `assetToSwapTokenId` reverses it to
+ * little-endian before hashing to derive the node swapindex tokenid, so the result
+ * can deep-link a discovered order into the per-token Open Orders book (which
+ * fetches the fillable offer via the node's `getopenorders`). Returns null for an
+ * RXD side (no ref) or a malformed input. See OpenOrders deep-link handling and
+ * Outpoint.fromShortInput.
  */
 export function swapIndexRefToRef(displayRef?: string | null): string | null {
   if (!displayRef) return null;

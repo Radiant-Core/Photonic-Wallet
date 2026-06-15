@@ -815,7 +815,12 @@ export default function OpenOrders({
 
     const trimmed = tokenRef.trim();
     if (trimmed.length === 72) {
-      return Outpoint.fromString(trimmed).refHash();
+      // A 72-hex glyph.ref (display/BE). The node swapindex tokenid is sha256 of
+      // the little-endian ref, so derive it via assetToSwapTokenId (which reverses
+      // before hashing) rather than refHash() — refHash would hash the BE form and
+      // query the wrong book. The contract type only matters for the RXD
+      // short-circuit, which a 72-hex ref never hits.
+      return assetToSwapTokenId(ContractType.NFT, trimmed);
     }
     return trimmed;
   };
