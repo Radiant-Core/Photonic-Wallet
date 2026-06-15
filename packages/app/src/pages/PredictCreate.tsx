@@ -17,6 +17,7 @@ import {
   Textarea,
   useToast,
 } from "@chakra-ui/react";
+import { MdKey } from "react-icons/md";
 import {
   createMarketAction,
   createCategoricalAction,
@@ -24,6 +25,9 @@ import {
   supportedOutcomeCounts,
 } from "@app/predict/predict";
 import { electrumWorker } from "@app/electrum/Electrum";
+import { wallet } from "@app/signals";
+import { withWif } from "@app/wallet";
+import { publicKeyHexFromWif } from "@lib/wallet";
 import { MAX_QUESTION_BYTES } from "radiantswap";
 
 type MarketKind = "binary" | "categorical" | "scalar";
@@ -53,6 +57,32 @@ export default function PredictCreate() {
   const [scalarMax, setScalarMax] = useState("100");
   const [scalarBins, setScalarBins] = useState(String(supportedOutcomeCounts[0] ?? 3));
   const [scalarUnit, setScalarUnit] = useState("");
+
+  // Append this wallet's own compressed pubkey to the committee list (deduped).
+  // The user is usually a committee member; this saves them deriving it by hand.
+  const addMyKey = () => {
+    let pk = "";
+    try {
+      pk = withWif(publicKeyHexFromWif) ?? "";
+    } catch {
+      pk = "";
+    }
+    if (!pk) {
+      toast({
+        title: "Unlock your wallet to use your key",
+        status: "warning",
+      });
+      return;
+    }
+    setCommitteeKeys((prev) => {
+      const lines = prev
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (lines.includes(pk)) return prev;
+      return [...lines, pk].join("\n");
+    });
+  };
 
   useEffect(() => {
     electrumWorker.value
@@ -360,7 +390,21 @@ export default function PredictCreate() {
       {useCommittee && (
         <>
           <FormControl mb={4} isRequired>
-            <FormLabel>Committee member pubkeys (slot order, one per line)</FormLabel>
+            <HStack justify="space-between" align="center" mb={2}>
+              <FormLabel mb={0}>
+                Committee member pubkeys (slot order, one per line)
+              </FormLabel>
+              <Button
+                size="xs"
+                variant="link"
+                colorScheme="brand"
+                leftIcon={<MdKey />}
+                onClick={addMyKey}
+                isDisabled={wallet.value.locked}
+              >
+                Use my key
+              </Button>
+            </HStack>
             <Textarea
               fontFamily="mono"
               fontSize="sm"

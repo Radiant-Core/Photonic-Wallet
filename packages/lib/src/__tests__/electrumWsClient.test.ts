@@ -263,6 +263,75 @@ describe("ElectrumWS — reconnect / resubscribe", () => {
     await client.close("done");
   });
 
+  it("backs off exponentially (with a jitter floor) across repeated drops", async () => {
+    // Pin jitter to its floor so the delay is deterministic: equal jitter with
+    // Math.random() === 0 gives exactly capped/2 = 1000 * 2^attempt / 2.
+    const rnd = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const client = makeClient({ reconnect: true });
+
+      // 500, 1000, 2000, 4000 … — each drop (before the 30s stability window)
+      // doubles the backoff instead of retrying on a fixed 1s timer.
+      const expectedDelays = [500, 1000, 2000, 4000];
+      let instances = 1;
+
+      for (const delay of expectedDelays) {
+        const sock = MockSocket.last();
+        sock.emitOpen();
+        await vi.advanceTimersByTimeAsync(500); // CONNECTED_TIMEOUT
+        expect(client.isConnected()).toBe(true);
+
+        sock.close(1006, "lost");
+
+        // No reconnect until the (now deterministic) backoff delay elapses.
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(MockSocket.instances).toHaveLength(instances);
+        await vi.advanceTimersByTimeAsync(1);
+        instances += 1;
+        expect(MockSocket.instances).toHaveLength(instances);
+      }
+
+      await client.close("done");
+    } finally {
+      rnd.mockRestore();
+    }
+  });
+
+  it("resets the backoff after a connection stays stable", async () => {
+    const rnd = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const client = makeClient({ reconnect: true });
+
+      // Two quick drops escalate the backoff (attempts → 2).
+      for (const delay of [500, 1000]) {
+        const sock = MockSocket.last();
+        sock.emitOpen();
+        await vi.advanceTimersByTimeAsync(500);
+        sock.close(1006, "lost");
+        await vi.advanceTimersByTimeAsync(delay);
+      }
+
+      // Let the next connection prove stable (> RECONNECT_STABLE_MS = 30s).
+      const stable = MockSocket.last();
+      stable.emitOpen();
+      await vi.advanceTimersByTimeAsync(500); // connected
+      await vi.advanceTimersByTimeAsync(30000); // stability window → reset
+
+      const before = MockSocket.instances.length;
+      stable.close(1006, "lost");
+      // Backoff is back at base (500ms), not the escalated 2000ms it would be
+      // if the brief connects hadn't been gated behind the stability window.
+      await vi.advanceTimersByTimeAsync(499);
+      expect(MockSocket.instances).toHaveLength(before);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockSocket.instances).toHaveLength(before + 1);
+
+      await client.close("done");
+    } finally {
+      rnd.mockRestore();
+    }
+  });
+
   it("tears down the socket when a resubscribe fails", async () => {
     // `blockchain.scripthash.subscribe` lives in the slow-method set so it
     // resolves to `slowMethodTimeoutMs`, not `requestTimeoutMs`. Set both so

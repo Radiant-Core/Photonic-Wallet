@@ -33,6 +33,8 @@ import {
 } from "react-icons/md";
 import { QRCodeSVG } from "qrcode.react";
 import { deriveEncryptionKeypair } from "@app/keys";
+import { withWif } from "@app/wallet";
+import { publicKeyHexFromWif } from "@lib/wallet";
 import { bytesToHex } from "@noble/hashes/utils";
 import PasswordModal from "@app/components/PasswordModal";
 import RecoveryPhrase from "@app/components/RecoveryPhrase";
@@ -63,9 +65,104 @@ const normalizeFeeRate = (value: string | number) => {
   return Math.max(MIN_FEE_RATE, parsed);
 };
 
+/** A copyable / QR-shareable public-key card. Renders an "unlock to view" hint
+ *  when `value` is empty (the wallet is locked, so the key can't be derived). */
+function PublicKeyField({
+  heading,
+  description,
+  value,
+  lockedHint,
+  shareTitle,
+}: {
+  heading: string;
+  description: string;
+  value: string;
+  lockedHint: string;
+  shareTitle: string;
+}) {
+  const qr = useDisclosure();
+  const { onCopy, hasCopied } = useClipboard(value);
+  return (
+    <FormSection>
+      <Heading size="md">{heading}</Heading>
+      <Text pt={2} fontSize="sm" color="gray.400">
+        {description}
+      </Text>
+      {value ? (
+        <VStack align="stretch" spacing={3} mt={3}>
+          <Code
+            p={2}
+            borderRadius="md"
+            fontSize="xs"
+            fontFamily="mono"
+            whiteSpace="pre-wrap"
+            wordBreak="break-all"
+            display="block"
+            bg="bg.200"
+          >
+            {value}
+          </Code>
+          <HStack spacing={2}>
+            <Button
+              size="xs"
+              variant="outline"
+              leftIcon={<Icon as={hasCopied ? MdCheck : MdContentCopy} />}
+              onClick={onCopy}
+            >
+              {hasCopied ? "Copied!" : "Copy"}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              leftIcon={<Icon as={MdQrCode} />}
+              onClick={qr.onToggle}
+            >
+              {qr.isOpen ? "Hide QR" : "Show QR"}
+            </Button>
+            {typeof navigator.share === "function" && (
+              <Button
+                size="xs"
+                variant="outline"
+                leftIcon={<Icon as={MdShare} />}
+                onClick={() => navigator.share({ title: shareTitle, text: value })}
+              >
+                Share
+              </Button>
+            )}
+          </HStack>
+          <Collapse in={qr.isOpen} animateOpacity>
+            <Box
+              display="inline-flex"
+              p={3}
+              bg="white"
+              borderRadius="md"
+              borderWidth={1}
+              borderColor="whiteAlpha.300"
+            >
+              <QRCodeSVG
+                value={value}
+                size={160}
+                level="M"
+                includeMargin={false}
+              />
+            </Box>
+            <Text fontSize="xs" color="gray.400" mt={2}>
+              Recipient can scan this to add your key without typing
+            </Text>
+          </Collapse>
+        </VStack>
+      ) : (
+        <Alert status="info" mt={3} borderRadius="md" fontSize="sm">
+          <AlertIcon as={MdKey} />
+          <AlertDescription>{lockedHint}</AlertDescription>
+        </Alert>
+      )}
+    </FormSection>
+  );
+}
+
 export default function WalletSettings() {
   const disclosure = useDisclosure();
-  const qrDisclosure = useDisclosure();
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [mnemonic, setMnemonic] = useState("");
   const passwordSuccess = (walletMnemonic: string) => {
@@ -88,8 +185,17 @@ export default function WalletSettings() {
     }
   })();
 
-  const { onCopy: onCopyEncKey, hasCopied: hasCopiedEncKey } =
-    useClipboard(encPubkeyHex);
+  // Compressed secp256k1 spending pubkey — what a prediction-market oracle
+  // committee (and any pubkey-based covenant) needs. Only derivable when
+  // unlocked (the WIF is wiped on lock); empty string => "unlock to view".
+  const signPubkeyHex = (() => {
+    try {
+      return withWif(publicKeyHexFromWif) ?? "";
+    } catch {
+      return "";
+    }
+  })();
+
   const languageRef = useRef<HTMLSelectElement>(null);
   const feeRateRef = useRef<HTMLInputElement>(null);
   const autoLockRef = useRef<HTMLInputElement>(null);
@@ -150,92 +256,21 @@ export default function WalletSettings() {
         </Text>
       </FormSection>
 
-      <FormSection>
-        <Heading size="md">Encryption Public Key</Heading>
-        <Text pt={2} fontSize="sm" color="gray.400">
-          Share this key with anyone who wants to mint an encrypted NFT for you
-          (recipient mode). It is safe to share — it cannot be used to decrypt
-          your content.
-        </Text>
-        {encPubkeyHex ? (
-          <VStack align="stretch" spacing={3} mt={3}>
-            <Code
-              p={2}
-              borderRadius="md"
-              fontSize="xs"
-              fontFamily="mono"
-              whiteSpace="pre-wrap"
-              wordBreak="break-all"
-              display="block"
-              bg="bg.200"
-            >
-              {encPubkeyHex}
-            </Code>
-            <HStack spacing={2}>
-              <Button
-                size="xs"
-                variant="outline"
-                leftIcon={
-                  <Icon as={hasCopiedEncKey ? MdCheck : MdContentCopy} />
-                }
-                onClick={onCopyEncKey}
-              >
-                {hasCopiedEncKey ? "Copied!" : "Copy"}
-              </Button>
-              <Button
-                size="xs"
-                variant="outline"
-                leftIcon={<Icon as={MdQrCode} />}
-                onClick={qrDisclosure.onToggle}
-              >
-                {qrDisclosure.isOpen ? "Hide QR" : "Show QR"}
-              </Button>
-              {typeof navigator.share === "function" && (
-                <Button
-                  size="xs"
-                  variant="outline"
-                  leftIcon={<Icon as={MdShare} />}
-                  onClick={() =>
-                    navigator.share({
-                      title: "My Encryption Public Key",
-                      text: encPubkeyHex,
-                    })
-                  }
-                >
-                  Share
-                </Button>
-              )}
-            </HStack>
-            <Collapse in={qrDisclosure.isOpen} animateOpacity>
-              <Box
-                display="inline-flex"
-                p={3}
-                bg="white"
-                borderRadius="md"
-                borderWidth={1}
-                borderColor="whiteAlpha.300"
-              >
-                <QRCodeSVG
-                  value={encPubkeyHex}
-                  size={160}
-                  level="M"
-                  includeMargin={false}
-                />
-              </Box>
-              <Text fontSize="xs" color="gray.400" mt={2}>
-                Recipient can scan this to add your key without typing
-              </Text>
-            </Collapse>
-          </VStack>
-        ) : (
-          <Alert status="info" mt={3} borderRadius="md" fontSize="sm">
-            <AlertIcon as={MdKey} />
-            <AlertDescription>
-              Unlock your wallet to view your encryption public key.
-            </AlertDescription>
-          </Alert>
-        )}
-      </FormSection>
+      <PublicKeyField
+        heading="Signing Public Key"
+        description="Your compressed secp256k1 public key. Share it to be added to a prediction-market oracle committee, or for any pubkey-based covenant."
+        value={signPubkeyHex}
+        lockedHint="Unlock your wallet to view your signing public key."
+        shareTitle="My Signing Public Key"
+      />
+
+      <PublicKeyField
+        heading="Encryption Public Key"
+        description="Share this key with anyone who wants to mint an encrypted NFT for you (recipient mode). It is safe to share — it cannot be used to decrypt your content."
+        value={encPubkeyHex}
+        lockedHint="Unlock your wallet to view your encryption public key."
+        shareTitle="My Encryption Public Key"
+      />
 
       <FormSection>
         <Heading size="md" mb={8}>

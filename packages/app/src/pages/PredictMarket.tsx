@@ -37,6 +37,10 @@ import {
   askProbability,
   cancelOrderAction,
   challengeBlocksRemaining,
+  disputeAction,
+  disputeTimeoutAction,
+  isDisputed,
+  proposeBondFloor,
   fetchLiveMarket,
   fillBidAction,
   fillOrderAction,
@@ -506,6 +510,7 @@ export default function PredictMarket() {
   const [splitRxd, setSplitRxd] = useState("1");
   const [ckeys, setCkeys] = useState("");
   const [cwifs, setCwifs] = useState("");
+  const [counterBond, setCounterBond] = useState(""); // photons; defaults to the proposer bond
   const [book, setBook] = useState<{
     available: boolean;
     asks: IndexedAsk[];
@@ -698,31 +703,50 @@ export default function PredictMarket() {
     });
   };
 
-  // Optimistic-oracle (MarketOpt) lifecycle flags (Item 4).
+  // Optimistic-oracle (MarketOpt) lifecycle flags.
   const optimistic = isOptimistic(tracked);
   const proposed = st === Status.PROPOSED_YES || st === Status.PROPOSED_NO;
   const proposedSide = st === Status.PROPOSED_YES ? "YES" : "NO";
+  const disputed = optimistic && live ? isDisputed(live) : false;
+  // HONESTY #4: the bond is fixed at creation, so a market grown past 8×bond can no longer be
+  // proposed (the covenant rejects it) — disable propose + explain rather than build a doomed tx.
+  const bondFloor = optimistic && live ? proposeBondFloor(live) : 0;
+  const belowFloor =
+    optimistic && live ? (tracked.optimistic?.bond ?? 0) < bondFloor : false;
   const canPropose =
-    optimistic && open && live !== null && live.height >= tracked.expiry;
+    optimistic &&
+    open &&
+    live !== null &&
+    live.height >= tracked.expiry &&
+    !belowFloor;
   const challengeLeft =
     optimistic && proposed && live
       ? challengeBlocksRemaining(tracked, live)
       : 0;
   const canFinalize = proposed && challengeLeft === 0;
+  // HONESTY #1: anyone may dispute a live proposal; after `liveness` blocks of an unresolved dispute,
+  // anyone may time it out (refund both bonds, revert) so the bonds can't strand on a dead committee.
+  const canDispute = optimistic && proposed && live !== null;
+  const timeoutLeft =
+    optimistic && disputed && live ? challengeBlocksRemaining(tracked, live) : 0;
+  const canTimeout = disputed && timeoutLeft === 0;
 
   // Proposer identity for a live optimistic proposal (trust transparency): who put the outcome
   // up, and whether it's this wallet. walletPkh() throws on a locked/empty wallet → guard it.
   const proposerPkh = live?.state.optimistic?.proposerPkh ?? null;
-  const proposerIsYou = (() => {
-    if (!proposerPkh) return false;
+  const disputerPkh = live?.state.optimistic?.disputerPkh ?? null;
+  const pkhIsYou = (pkh: Uint8Array | Buffer | null): boolean => {
+    if (!pkh) return false;
     try {
       return (
-        Buffer.from(proposerPkh).toString("hex") === walletPkh().toString("hex")
+        Buffer.from(pkh).toString("hex") === walletPkh().toString("hex")
       );
     } catch {
       return false;
     }
-  })();
+  };
+  const proposerIsYou = pkhIsYou(proposerPkh);
+  const disputerIsYou = pkhIsYou(disputerPkh);
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
@@ -868,6 +892,8 @@ export default function PredictMarket() {
                       ? "blue"
                       : proposed
                       ? "purple"
+                      : disputed
+                      ? "orange"
                       : st === Status.REVERTED
                       ? "orange"
                       : "green"
@@ -1041,7 +1067,7 @@ export default function PredictMarket() {
 
           {/* Committee/oracle key inputs — needed to resolve a classic market, or to OVERRIDE a
               proposal on an optimistic one. Shown while the market is open or has a live proposal. */}
-          {!soloOracle && (open || proposed) && (
+          {!soloOracle && (open || proposed || disputed) && (
             <Box mb={2} maxW="2xl">
               <Text fontSize="sm" color="gray.400" mb={1}>
                 Committee market ({threshold}-of-N). Member pubkeys in slot
@@ -1098,7 +1124,47 @@ export default function PredictMarket() {
                   <Text color="gray.400" mt={1}>
                     Proposer bond <Photons value={tracked.optimistic.bond} /> is
                     repaid on finalize, or slashed if the committee overrides the
-                    proposal.
+                    proposal. Anyone may <b>dispute</b> it by locking a counter-bond.
+                  </Text>
+                </Box>
+              </Alert>
+            </Box>
+          )}
+
+          {/* Optimistic DISPUTED: escalation pending + dead-committee timeout countdown. */}
+          {optimistic && disputed && live && tracked.optimistic && (
+            <Box maxW="2xl" mb={3}>
+              <ResolutionTimeline t={tracked} live={live} />
+              <Alert
+                status="warning"
+                mt={2}
+                borderRadius="md"
+                alignItems="flex-start"
+              >
+                <AlertIcon />
+                <Box fontSize="sm">
+                  <Text>
+                    <b>Disputed</b> — both bonds (proposer{" "}
+                    <Photons value={tracked.optimistic.bond} /> + counter-bond{" "}
+                    <Photons value={live.state.optimistic?.counterBond ?? 0} />)
+                    are escrowed. The committee escalates to the true outcome and
+                    the winner takes the whole pot; the loser forfeits their bond.
+                  </Text>
+                  {live.state.optimistic?.disputerPkh && (
+                    <Text color="gray.400" mt={1}>
+                      Disputed by{" "}
+                      <ProposerTag
+                        pkh={live.state.optimistic.disputerPkh}
+                        isYou={disputerIsYou}
+                      />
+                    </Text>
+                  )}
+                  <Text color="gray.400" mt={1}>
+                    {timeoutLeft > 0
+                      ? `If the committee never acts, anyone may refund both bonds and revert in ${timeoutLeft} block(s) (≈${blocksToDuration(
+                          timeoutLeft
+                        )}).`
+                      : "The committee did not escalate within the window — anyone may now time the dispute out (refund both bonds, revert)."}
                   </Text>
                 </Box>
               </Alert>
@@ -1190,6 +1256,93 @@ export default function PredictMarket() {
                 >
                   Override → NO
                 </Button>
+                {/* HONESTY #1: anyone may dispute a wrong proposal by locking a counter-bond
+                    (≥ the proposer bond), forcing committee escalation. Wins both bonds if upheld. */}
+                <Input
+                  size="sm"
+                  maxW="44"
+                  fontFamily="mono"
+                  placeholder={`counter-bond ≥ ${tracked.optimistic?.bond ?? 0}`}
+                  value={counterBond}
+                  onChange={(e) => setCounterBond(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  colorScheme="orange"
+                  isLoading={busy === "Dispute"}
+                  isDisabled={!canDispute}
+                  onClick={() =>
+                    run("Dispute", () =>
+                      disputeAction(
+                        tracked,
+                        live,
+                        parseInt(
+                          counterBond ||
+                            String(tracked.optimistic?.bond ?? 0),
+                          10
+                        )
+                      )
+                    )
+                  }
+                >
+                  Dispute → {proposedSide === "YES" ? "NO" : "YES"}
+                </Button>
+              </>
+            )}
+
+            {/* Optimistic DISPUTED: the committee escalates via resolve (winner takes both bonds); if
+                the committee never acts, anyone times the dispute out after liveness (refund + revert). */}
+            {optimistic && disputed && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorScheme="green"
+                  isLoading={busy === "Escalate YES"}
+                  onClick={() =>
+                    run("Escalate YES", () =>
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_YES,
+                        committeeInput()
+                      )
+                    )
+                  }
+                >
+                  Escalate → YES
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  colorScheme="red"
+                  isLoading={busy === "Escalate NO"}
+                  onClick={() =>
+                    run("Escalate NO", () =>
+                      resolveAction(
+                        tracked,
+                        live,
+                        Status.RESOLVED_NO,
+                        committeeInput()
+                      )
+                    )
+                  }
+                >
+                  Escalate → NO
+                </Button>
+                <Button
+                  size="sm"
+                  colorScheme="orange"
+                  isLoading={busy === "Timeout"}
+                  isDisabled={!canTimeout}
+                  onClick={() =>
+                    run("Timeout", () => disputeTimeoutAction(tracked, live))
+                  }
+                >
+                  {canTimeout
+                    ? "Time out (refund both bonds)"
+                    : `Time out (≈${blocksToDuration(timeoutLeft)})`}
+                </Button>
               </>
             )}
 
@@ -1251,7 +1404,7 @@ export default function PredictMarket() {
                 </Button>
               </>
             )}
-            {!open && !proposed && (
+            {!open && !proposed && !disputed && (
               <Text fontSize="sm" color="gray.400">
                 Final.
               </Text>
@@ -1265,9 +1418,17 @@ export default function PredictMarket() {
               ).
             </Text>
           )}
+          {optimistic && open && live && live.height >= tracked.expiry && belowFloor && (
+            <Text fontSize="xs" color="orange.300" maxW="2xl" mb={1}>
+              This market grew past its proposer bond (
+              <Photons value={tracked.optimistic?.bond ?? 0} /> &lt; required{" "}
+              <Photons value={bondFloor} /> = pool/8), so the optimistic fast-path is closed — it can
+              only be resolved by the committee or reverted after expiry + grace.
+            </Text>
+          )}
           <Text fontSize="xs" color="gray.500" maxW="2xl">
             {optimistic
-              ? "Optimistic market: after expiry anyone may propose the outcome by locking a bond; the committee can override within the challenge window (slashing the bond), after which anyone may finalize and the bond returns to the proposer. "
+              ? "Optimistic market: after expiry anyone proposes the outcome by locking a bond (≥ pool/8); if unchallenged, anyone finalizes after the window and the bond returns. ANYONE may dispute a wrong proposal by locking a counter-bond — that escalates to the committee, and the winner takes both bonds. If the committee never escalates, anyone times the dispute out after the window (both bonds refunded, market reverts). "
               : soloOracle
               ? "This wallet holds the market's operator oracle key. "
               : "Resolution needs the committee threshold; the chain stores only the keyset hash, so the member pubkeys must be supplied in their original slot order. "}

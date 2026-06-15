@@ -150,25 +150,30 @@ export function ResolutionTimeline({
 }) {
   const s = live.state.status;
   const proposed = s === Status.PROPOSED_YES || s === Status.PROPOSED_NO;
+  const disputed = s === Status.DISPUTED_YES || s === Status.DISPUTED_NO;
   const resolved =
     s === Status.RESOLVED_YES ||
     s === Status.RESOLVED_NO ||
     s === Status.REVERTED;
-  const current = resolved ? 2 : proposed ? 1 : 0;
+  // Open → Challenge/Dispute (proposed or disputed) → Resolved.
+  const current = resolved ? 2 : proposed || disputed ? 1 : 0;
   const liveness = t.optimistic?.liveness ?? 0;
   const conf = proposalConfirmations(live);
   const left = challengeBlocksRemaining(t, live);
 
+  const challengeSub = disputed
+    ? left > 0
+      ? `disputed · ≈${blocksToDuration(left)} to timeout`
+      : "disputed · timeoutable"
+    : proposed
+    ? left > 0
+      ? `${conf}/${liveness} · ≈${blocksToDuration(left)} left`
+      : "finalizable now"
+    : `${liveness} blk window`;
+
   const stages = [
     { label: "Open", sub: "bets" },
-    {
-      label: "Challenge",
-      sub: proposed
-        ? left > 0
-          ? `${conf}/${liveness} · ≈${blocksToDuration(left)} left`
-          : "finalizable now"
-        : `${liveness} blk window`,
-    },
+    { label: disputed ? "Disputed" : "Challenge", sub: challengeSub },
     { label: "Resolved", sub: resolved ? "final" : "payout" },
   ];
 

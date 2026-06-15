@@ -121,7 +121,19 @@ export enum ElectrumWSEvent {
   MESSAGE = "message",
 }
 
-const RECONNECT_TIMEOUT = 1000;
+// Reconnect backoff. A dropped socket used to reconnect on a fixed 1s timer
+// with no jitter, so every wallet whose connection dropped at the same moment
+// (e.g. the indexer briefly slowed and a `scripthash.subscribe` timed out)
+// reconnected in lockstep and re-subscribed every scripthash at once — a
+// synchronised thundering herd that kept the indexer saturated, which caused
+// more timeouts: a self-sustaining storm. Exponential backoff caps each
+// client's retry rate; jitter de-correlates the herd. The backoff only resets
+// once a connection has stayed up for RECONNECT_STABLE_MS, so a socket that
+// flaps connect→fail→connect keeps escalating instead of resetting to base on
+// every brief connect.
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+const RECONNECT_STABLE_MS = 30000;
 const CONNECTED_TIMEOUT = 500;
 const DEFAULT_REQUEST_TIMEOUT = 1000 * 10;
 const DEFAULT_SLOW_METHOD_TIMEOUT = 1000 * 30;
@@ -257,6 +269,12 @@ export class ElectrumWS extends Observable {
   private connected = false;
   private connectedTimeout?: ReturnType<typeof setTimeout>;
   private reconnectionTimeout?: ReturnType<typeof setTimeout>;
+  // Consecutive reconnect attempts since the last stable connection — drives
+  // the exponential backoff in nextReconnectDelay().
+  private reconnectAttempts = 0;
+  // Armed on a successful connect; if it fires (the socket stayed up for
+  // RECONNECT_STABLE_MS) the backoff resets. Cleared if the socket drops first.
+  private stabilityTimeout?: ReturnType<typeof setTimeout>;
   private incompleteMessage = "";
   private WebSocketCtor: WebSocketCtor;
   // Public so legacy code that pokes `client.ws` (the upstream lib exposed it)
@@ -449,6 +467,7 @@ export class ElectrumWS extends Observable {
     this.drainSlotWaiters(reason);
     if (this.reconnectionTimeout) clearTimeout(this.reconnectionTimeout);
     if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
+    if (this.stabilityTimeout) clearTimeout(this.stabilityTimeout);
     if (
       this.ws.readyState === WS_CONNECTING ||
       this.ws.readyState === WS_OPEN
@@ -460,6 +479,23 @@ export class ElectrumWS extends Observable {
       return closingPromise;
     }
     return true;
+  }
+
+  /**
+   * Delay before the next reconnect, with exponential backoff + jitter.
+   * `reconnectAttempts` grows on each drop and only resets after a stable
+   * connection (see onOpen), so a flapping socket backs off progressively
+   * rather than hammering the server on a fixed timer. Equal jitter spreads the
+   * delay across [d/2, d) — a floor so a single client doesn't busy-reconnect,
+   * while still decorrelating many clients that dropped at the same instant.
+   */
+  private nextReconnectDelay(): number {
+    const capped = Math.min(
+      RECONNECT_MAX_MS,
+      RECONNECT_BASE_MS * 2 ** this.reconnectAttempts
+    );
+    this.reconnectAttempts++;
+    return capped / 2 + Math.random() * (capped / 2);
   }
 
   private connect(): void {
@@ -477,6 +513,13 @@ export class ElectrumWS extends Observable {
     this.fire(ElectrumWSEvent.OPEN);
     this.connectedTimeout = setTimeout(() => {
       this.connected = true;
+      // A connection that survives RECONNECT_STABLE_MS is healthy → reset the
+      // reconnect backoff. Cleared in onClose/close so a socket that drops
+      // before proving stable keeps (and keeps escalating) its backoff.
+      if (this.stabilityTimeout) clearTimeout(this.stabilityTimeout);
+      this.stabilityTimeout = setTimeout(() => {
+        this.reconnectAttempts = 0;
+      }, RECONNECT_STABLE_MS);
       // Snapshot subscriptions before firing CONNECTED so handlers that
       // subscribe during the CONNECTED callback aren't fired twice.
       const existing = new Map(this.subscriptions);
@@ -590,6 +633,12 @@ export class ElectrumWS extends Observable {
 
   private onClose(event: unknown): void {
     this.fire(ElectrumWSEvent.CLOSE, event);
+    // Socket dropped before (or after) proving stable — cancel the pending
+    // backoff reset so reconnectAttempts keeps climbing across a flap.
+    if (this.stabilityTimeout) {
+      clearTimeout(this.stabilityTimeout);
+      this.stabilityTimeout = undefined;
+    }
     if (!this.connected) {
       if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
     } else {
@@ -606,7 +655,7 @@ export class ElectrumWS extends Observable {
       this.fire(ElectrumWSEvent.RECONNECTING);
       this.reconnectionTimeout = setTimeout(
         () => this.connect(),
-        RECONNECT_TIMEOUT
+        this.nextReconnectDelay()
       );
     }
     this.connected = false;

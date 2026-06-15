@@ -10,6 +10,7 @@ import {
   deriveEncryptionPrivateKeyBytes,
   walletFromMnemonic,
   getAddress,
+  publicKeyHexFromWif,
 } from "../wallet";
 
 // BIP-39 test vector mnemonic — public, never used for real funds.
@@ -144,6 +145,41 @@ describe("walletFromMnemonic (legacy / CLI entry point)", () => {
       const addr = await getAddress(w.wif, "mainnet");
       expect(addr).toBe(w.address);
     });
+  });
+});
+
+describe("publicKeyHexFromWif", () => {
+  it("returns the 33-byte compressed secp256k1 pubkey (66 hex, 02/03 prefix)", () => {
+    const acct = deriveAccount(TEST_MNEMONIC, "mainnet");
+    const pk = publicKeyHexFromWif(acct.privKey.toString());
+    expect(pk).toMatch(/^0[23][0-9a-f]{64}$/);
+    expect(pk.length).toBe(66);
+  });
+
+  it("matches the pubkey the private key derives directly (covenant parity)", () => {
+    // The committee/oracle covenant is built from privKey.toPublicKey(); the
+    // value shown to the user MUST be byte-identical or they'd configure a
+    // committee with a key that can never sign a resolution.
+    const acct = deriveAccount(TEST_MNEMONIC, "mainnet");
+    const direct = Buffer.from(acct.privKey.toPublicKey().toBuffer()).toString(
+      "hex"
+    );
+    expect(publicKeyHexFromWif(acct.privKey.toString())).toBe(direct);
+  });
+
+  it("is deterministic and differs across distinct keys", () => {
+    const a = deriveAccount(TEST_MNEMONIC, "mainnet");
+    const b = deriveAccount(TEST_MNEMONIC_2, "mainnet");
+    expect(publicKeyHexFromWif(a.privKey.toString())).toBe(
+      publicKeyHexFromWif(a.privKey.toString())
+    );
+    expect(publicKeyHexFromWif(a.privKey.toString())).not.toBe(
+      publicKeyHexFromWif(b.privKey.toString())
+    );
+    // The main and swap keys of one wallet are distinct pubkeys.
+    expect(publicKeyHexFromWif(a.privKey.toString())).not.toBe(
+      publicKeyHexFromWif(a.swapPrivKey.toString())
+    );
   });
 });
 

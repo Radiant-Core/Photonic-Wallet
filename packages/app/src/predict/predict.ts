@@ -22,6 +22,9 @@ import {
   buildRevert,
   buildPropose,
   buildFinalize,
+  buildDispute,
+  buildDisputeTimeout,
+  minBondFor,
   marketStateFromScript,
   NO_PROPOSER,
   buildSellOrder,
@@ -165,6 +168,8 @@ export const statusLabel: Record<Status, string> = {
   // optimistic-oracle (MarketOpt) statuses — present in the SDK Status enum
   [Status.PROPOSED_YES]: "Proposed YES (challenge window)",
   [Status.PROPOSED_NO]: "Proposed NO (challenge window)",
+  [Status.DISPUTED_YES]: "Disputed (proposed YES, escalated)",
+  [Status.DISPUTED_NO]: "Disputed (proposed NO, escalated)",
 };
 
 /* ------------------------------- registry (kvp) ------------------------------- */
@@ -622,13 +627,17 @@ async function locateOptimisticSingleton(
         satoshis: values[i],
         script: outScripts[i].toString("hex"),
       };
-      const proposed =
+      // PROPOSED drives the finalize countdown; DISPUTED drives the dispute-timeout countdown — both
+      // count `liveness` blocks from the singleton's current tx, so record its height for either.
+      const live =
         decoded.status === Status.PROPOSED_YES ||
-        decoded.status === Status.PROPOSED_NO;
+        decoded.status === Status.PROPOSED_NO ||
+        decoded.status === Status.DISPUTED_YES ||
+        decoded.status === Status.DISPUTED_NO;
       return {
         market,
         state: decoded,
-        proposalHeight: proposed ? latest.height || null : null,
+        proposalHeight: live ? latest.height || null : null,
       };
     }
   }
@@ -660,7 +669,11 @@ export async function fetchMarketStatus(
         ? await locateOptimisticSingleton(t, scripts, refs)
         : await locateBinarySingleton(t, scripts, refs);
       const s = located.state.status;
-      const pending = s === Status.PROPOSED_YES || s === Status.PROPOSED_NO;
+      const pending =
+        s === Status.PROPOSED_YES ||
+        s === Status.PROPOSED_NO ||
+        s === Status.DISPUTED_YES ||
+        s === Status.DISPUTED_NO;
       return {
         status: s,
         resolved: s !== Status.OPEN && !pending,
@@ -1061,6 +1074,14 @@ export async function proposeAction(
       `Proposals open at block ${t.expiry.toLocaleString()} (current ${live.height.toLocaleString()})`
     );
   }
+  // HONESTY #4: the covenant requires bond >= vault/8 at propose time. The bond is fixed at creation,
+  // so a market grown past 8*bond can no longer be proposed — it must go to the committee or revert.
+  const floor = proposeBondFloor(live);
+  if (t.optimistic.bond < floor) {
+    throw new Error(
+      `This market grew past its proposer bond (bond ${t.optimistic.bond} < required ${floor} = pool/8). It can only be resolved by the committee or reverted after expiry + grace.`
+    );
+  }
   const { address } = requireWallet();
   const funding = await selectFunding(t.optimistic.bond + feeHeadroom());
   const built = sized((feeSats) =>
@@ -1101,6 +1122,89 @@ export async function finalizeAction(
   const funding = await selectFunding(feeHeadroom());
   const built = sized((feeSats) =>
     buildFinalize({
+      scripts: scriptsOf(t),
+      market: live.market,
+      state: live.state,
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** The minimum proposer bond the covenant will accept right now (pool/8, HONESTY #4). The bond is
+ *  fixed at creation, so once the pool grows past 8×bond no one can propose — surface this in the UI. */
+export function proposeBondFloor(live: LiveMarket): number {
+  return minBondFor(live.market.satoshis);
+}
+
+/** True while a live proposal/dispute is in its window and the wallet can still act on it. */
+export function isDisputed(live: LiveMarket): boolean {
+  return (
+    live.state.status === Status.DISPUTED_YES ||
+    live.state.status === Status.DISPUTED_NO
+  );
+}
+
+/** Dispute a live proposal (HONESTY #1, permissionless): lock a counter-bond (≥ the proposer bond)
+ *  into the singleton, flipping PROPOSED_x → DISPUTED_x and forcing committee escalation. THIS wallet
+ *  wins the whole pot (bond + counter-bond) if the committee sides with the disputer, else loses the
+ *  counter-bond. The disputer implicitly asserts the OPPOSITE of the proposal. */
+export async function disputeAction(
+  t: TrackedMarket,
+  live: LiveMarket,
+  counterBond: number
+): Promise<string> {
+  if (!t.optimistic) throw new Error("Not an optimistic market");
+  if (
+    live.state.status !== Status.PROPOSED_YES &&
+    live.state.status !== Status.PROPOSED_NO
+  ) {
+    throw new Error("Can only dispute a live proposal");
+  }
+  if (!Number.isInteger(counterBond) || counterBond < t.optimistic.bond) {
+    throw new Error(
+      `Counter-bond must be at least the proposer bond (${t.optimistic.bond} photons)`
+    );
+  }
+  const { address } = requireWallet();
+  const funding = await selectFunding(counterBond + feeHeadroom());
+  const built = sized((feeSats) =>
+    buildDispute({
+      scripts: scriptsOf(t),
+      market: live.market,
+      state: live.state,
+      disputerPkh: walletPkh(),
+      counterBond,
+      funding,
+      changeAddress: address,
+      feeSats,
+    })
+  );
+  return await broadcast(built.hex);
+}
+
+/** Time out a disputed market (HONESTY #1 backstop, permissionless): after the committee has had
+ *  `liveness` blocks to escalate and not acted, refund BOTH bonds to their owners and flip
+ *  DISPUTED_x → REVERTED, so the bonds can never strand on a dead committee. Complete sets then
+ *  reclaim collateral via merge. Reuses the same `liveness` window as finalize. */
+export async function disputeTimeoutAction(
+  t: TrackedMarket,
+  live: LiveMarket
+): Promise<string> {
+  if (!t.optimistic) throw new Error("Not an optimistic market");
+  if (!isDisputed(live)) throw new Error("No disputed market to time out");
+  const remaining = challengeBlocksRemaining(t, live);
+  if (remaining > 0) {
+    throw new Error(
+      `The committee still has ${remaining} block(s) to escalate before the dispute can be timed out`
+    );
+  }
+  const { address } = requireWallet();
+  const funding = await selectFunding(feeHeadroom());
+  const built = sized((feeSats) =>
+    buildDisputeTimeout({
       scripts: scriptsOf(t),
       market: live.market,
       state: live.state,

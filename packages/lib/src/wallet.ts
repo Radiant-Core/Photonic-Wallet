@@ -202,6 +202,18 @@ export async function walletFromMnemonic(
   return { privKey, wif: privKey.toString(), address };
 }
 
+/**
+ * Compressed secp256k1 public key (33-byte hex) for a spending WIF — the form
+ * a prediction-market oracle committee and any pubkey-based covenant expect.
+ * These are exactly the bytes radiantjs `PrivateKey.toPublicKey()` produces, so
+ * the value surfaced to the user matches what the covenant is built with.
+ */
+export function publicKeyHexFromWif(wif: string): string {
+  return bytesToHex(
+    Uint8Array.from(PrivateKey.fromWIF(wif).toPublicKey().toBuffer())
+  );
+}
+
 export async function getAddress(key: string, net: NetworkKey) {
   const privKey = new PrivateKey(key, Networks[net]);
   return privKey.toAddress().toString();
