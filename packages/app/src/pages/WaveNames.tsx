@@ -55,6 +55,7 @@ import {
   MdStarBorder,
   MdSell,
   MdStorefront,
+  MdAccountBalanceWallet,
 } from "react-icons/md";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
@@ -1410,7 +1411,22 @@ function WaveNameCard({
                 <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
               </FormControl>
               <FormControl>
-                <FormLabel>{"New Target Address"}</FormLabel>
+                <Flex justify="space-between" align="center" mb={2}>
+                  <FormLabel mb={0}>{"New Target Address"}</FormLabel>
+                  <Button
+                    size="xs"
+                    variant="link"
+                    colorScheme="brand"
+                    leftIcon={<Icon as={MdAccountBalanceWallet} />}
+                    onClick={() => setNewTarget(wallet.value.address)}
+                    isDisabled={
+                      !wallet.value.address ||
+                      newTarget === wallet.value.address
+                    }
+                  >
+                    {"Use my address"}
+                  </Button>
+                </Flex>
                 <Input
                   value={newTarget}
                   onChange={(e) => setNewTarget(e.target.value)}
