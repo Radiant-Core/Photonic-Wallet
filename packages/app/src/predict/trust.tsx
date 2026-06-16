@@ -252,6 +252,19 @@ export function TrustPanel({
     status === Status.RESOLVED_NO ||
     status === Status.REVERTED;
   const isTerminal = terminalProp != null || binaryTerminal;
+  // Optimistic lifecycle phase (binary detail page only — `live` carries the status). revert() is
+  // OPEN-only on-chain, so the Revert recourse below is shown ONLY for OPEN markets; PROPOSED/DISPUTED
+  // exit via finalize / committee / dispute-timeout, never revert.
+  const isProposed =
+    status === Status.PROPOSED_YES || status === Status.PROPOSED_NO;
+  const isDisputed =
+    status === Status.DISPUTED_YES || status === Status.DISPUTED_NO;
+  const guardWord =
+    tr.kind === "optimistic"
+      ? tr.soloWatchdog
+        ? "the operator key"
+        : "the committee"
+      : "the resolver";
 
   let body: ReactNode;
   if (isTerminal) {
@@ -274,23 +287,60 @@ export function TrustPanel({
   } else if (tr.kind === "optimistic" && t.optimistic) {
     const livenessTime = blocksToDuration(t.optimistic.liveness);
     const guard = tr.soloWatchdog ? "a single operator key" : "the committee";
-    body = (
-      <>
-        <Text>
-          After expiry (block {t.expiry.toLocaleString()}
-          {expiryEta}) <b>anyone</b> may propose the outcome by locking a bond of{" "}
-          <Photons value={t.optimistic.bond} />. There is then a{" "}
-          <b>{t.optimistic.liveness}-block (≈{livenessTime})</b> challenge window before it can be
-          finalized; until then {guard} can override a wrong proposal and slash the bond. If no one
-          disputes, it finalizes as proposed and the bond is returned.
-        </Text>
-        {pool != null && (
-          <Box mt={2}>
-            <BondAdequacyNote bond={t.optimistic.bond} pool={pool} />
-          </Box>
-        )}
-      </>
-    );
+    if (isDisputed) {
+      body = (
+        <>
+          <Text>
+            A proposed outcome here has been <b>disputed</b>: a challenger locked a counter-bond and{" "}
+            {guard} now adjudicates. The side {guard} attests wins and recovers <b>their own bond</b>;
+            the losing side's bond is <b>burned</b>. If {guard} never acts, <b>anyone</b> may time the
+            dispute out after the window — reverting the market and refunding both bonds.
+          </Text>
+          <Text mt={2} color="whiteAlpha.600">
+            Note: {guard} decides who wins the dispute. A{" "}
+            {tr.soloWatchdog ? "compromised operator key" : "colluding committee"} could rule against
+            an honest challenger, whose counter-bond would then be burned — but it can never touch
+            collateral, mint shares, or double-resolve.
+          </Text>
+        </>
+      );
+    } else if (isProposed) {
+      body = (
+        <>
+          <Text>
+            An outcome has been <b>proposed</b> (bond <Photons value={t.optimistic.bond} />). During
+            the <b>{t.optimistic.liveness}-block (≈{livenessTime})</b> challenge window <b>anyone</b>{" "}
+            may dispute it by locking a counter-bond (escalating to {guard}), or {guard} may override
+            it — either way a wrong proposal <b>forfeits its bond</b>. If it is neither disputed nor
+            overridden, anyone can finalize it as proposed after the window and the bond is returned.
+          </Text>
+          {pool != null && (
+            <Box mt={2}>
+              <BondAdequacyNote bond={t.optimistic.bond} pool={pool} />
+            </Box>
+          )}
+        </>
+      );
+    } else {
+      body = (
+        <>
+          <Text>
+            After expiry (block {t.expiry.toLocaleString()}
+            {expiryEta}) <b>anyone</b> may propose the outcome by locking a bond of{" "}
+            <Photons value={t.optimistic.bond} />. There is then a{" "}
+            <b>{t.optimistic.liveness}-block (≈{livenessTime})</b> challenge window during which
+            anyone can dispute it (escalating to {guard}) or {guard} can override a wrong proposal —
+            a wrong proposal <b>forfeits its bond</b>. If unchallenged, it finalizes as proposed and
+            the bond is returned.
+          </Text>
+          {pool != null && (
+            <Box mt={2}>
+              <BondAdequacyNote bond={t.optimistic.bond} pool={pool} />
+            </Box>
+          )}
+        </>
+      );
+    }
   } else if (tr.kind === "committee") {
     body = (
       <Text>
@@ -330,9 +380,25 @@ export function TrustPanel({
       {body}
       {!isTerminal && (
         <Text mt={3} color="whiteAlpha.600">
-          Recourse: if the resolver never acts, <b>Revert</b> is permissionless once the chain passes
-          expiry + grace (block {revertibleAt.toLocaleString()}
-          {revertEta}); every complete set then stays reclaimable via <b>Merge</b>.
+          {isDisputed ? (
+            <>
+              Recourse: a disputed market resolves when {guardWord} adjudicates; if it never does,{" "}
+              <b>anyone</b> may time the dispute out after the challenge window — reverting it and
+              refunding both bonds. Complete sets stay reclaimable via <b>Merge</b> throughout.
+            </>
+          ) : isProposed ? (
+            <>
+              Recourse: an unchallenged proposal can be <b>finalized by anyone</b> after the challenge
+              window; until then anyone may dispute it or {guardWord} may override. Complete sets stay
+              reclaimable via <b>Merge</b> throughout. (Revert is unavailable once a proposal exists.)
+            </>
+          ) : (
+            <>
+              Recourse: if the resolver never acts, <b>Revert</b> is permissionless once the chain
+              passes expiry + grace (block {revertibleAt.toLocaleString()}
+              {revertEta}); every complete set then stays reclaimable via <b>Merge</b>.
+            </>
+          )}
         </Text>
       )}
       <Flex align="center" gap={2} mt={3} color="whiteAlpha.500" fontSize="xs">
