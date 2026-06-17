@@ -1069,7 +1069,17 @@ function buildLinearDaaBytecode(): string {
     "5379", // OP_3 PICK targetTime
     "54", // OP_4
     "95", // OP_MUL → 4 × targetTime
-    "a3", // OP_MIN → timeDelta_capped
+    "a3", // OP_MIN → timeDelta_capped (upper)
+    // Floor timeDelta at 0. A block's nLockTime need only exceed the 11-block
+    // median-time-past, so it can be EARLIER than the previous mint's locktime,
+    // making `delta` negative. A negative delta passes the OP_MIN above, and then
+    // `(target / targetTime) × delta` produces a large-magnitude negative product
+    // that underflows int64 → OP_MUL aborts (script number range), bricking the
+    // mint at that block. max(0, …) is the correct retarget semantics (no time
+    // elapsed ⇒ no easing) and keeps the product in [0, MAX_TARGET]. The ≥1 clamp
+    // below maps a 0 result to target 1 (max difficulty for that single block).
+    "00", // OP_0
+    "a4", // OP_MAX → timeDelta_capped = max(0, min(4×targetTime, delta))
     // Pre-cap target to MAX_TARGET/4 before the divide. See header comment.
     "7c", // SWAP → [target, timeDelta_capped, lastTime, targetTime, ...]
     PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
@@ -1159,6 +1169,10 @@ function buildEpochDaaBytecode(
   // far below 2^59 ≈ 5.76e17 even with N=4).
   const lshiftN = "8d".repeat(maxAdjustmentLog2); // N × OP_2MUL
   const rshiftN = "8e".repeat(maxAdjustmentLog2); // N × OP_2DIV
+  // Minimal push of EPOCH_MAX_SAFE_TARGET (2^48). Used to clamp the target on
+  // BOTH sides of the retarget multiply so it can never overflow int64 — see
+  // the newTarget section below.
+  const epochMaxSafeTargetPush = pushMinimal(EPOCH_MAX_SAFE_TARGET);
   return [
     // ── Boundary check: (height > 0) AND (height % epochLength == 0) ──
     "5979", // OP_9 OP_PICK       — copy height (state pos 9)
@@ -1181,16 +1195,28 @@ function buildEpochDaaBytecode(
     "5379", //   OP_3 OP_PICK     — copy targetTime
     rshiftN, //   N × OP_2DIV      — lowerBound = targetTime / 2^N
     "a4", //   OP_MAX           — delta = max(delta, lowerBound)
-    // ── newTarget = target * clampedDelta / targetTime ──
-    "7c", //   OP_SWAP          — [target, clampedDelta, ...]
-    "95", //   OP_MUL           — target * clampedDelta
-    "5279", //   OP_2 OP_PICK     — copy targetTime
-    "96", //   OP_DIV           — newTarget
-    // Defensive MAX_TARGET cap so NUM2BIN(8) in V3 PartC never trips
-    // IMPOSSIBLE_ENCODING. EPOCH_MAX_SAFE_TARGET (2^48) already bounds
-    // target, so this is belt-and-braces.
-    PUSH_MAX_TARGET, //   push MAX_TARGET
-    "a3", //   OP_MIN
+    // ── newTarget = (min(target, 2^48) / targetTime) × clampedDelta, capped at 2^48 ──
+    // The naive `target × clampedDelta / targetTime` multiplies FIRST, so the
+    // intermediate `target × clampedDelta` (clampedDelta ≤ targetTime × 2^N,
+    // N ≤ 4) overflows int64 once `target` drifts up — and the old code capped
+    // the *output* at MAX_TARGET (2^63), not 2^48, so target DID drift up over a
+    // few slow epochs until every boundary mint aborted (OP_MUL range error).
+    // The off-chain wallet computes this with BigInt and never sees the abort,
+    // so the covenant must bound it itself; an off-chain deploy check is not
+    // enough. Fix (mirrors the LWMA divide-first + MAX_TARGET/4 pre-cap):
+    //   1. Clamp target to 2^48 BEFORE the multiply, and
+    //   2. divide-first: (target_capped / targetTime) × clampedDelta, and
+    //   3. cap the result at 2^48 so target stays ≤ 2^48 for the next epoch.
+    // Then the multiply is (≤ 2^48 / targetTime) × (≤ targetTime × 16) ≤ 2^52,
+    // safely inside int64 for every reachable state and any targetTime.
+    "7c", //   OP_SWAP          — [target, clampedDelta, lastTime, targetTime, ...]
+    epochMaxSafeTargetPush, //   push 2^48
+    "a3", //   OP_MIN           — target_capped = min(target, 2^48)
+    "5379", //   OP_3 OP_PICK     — copy targetTime
+    "96", //   OP_DIV           — target_capped / targetTime
+    "95", //   OP_MUL           — × clampedDelta = newTarget (≤ 2^52)
+    epochMaxSafeTargetPush, //   push 2^48
+    "a3", //   OP_MIN           — cap newTarget at EPOCH_MAX_SAFE_TARGET
     // ── clamp newTarget to ≥1 ──
     "76519f", //   OP_DUP OP_1 OP_LESSTHAN
     "63", //   OP_IF
@@ -1438,6 +1464,19 @@ export function dMintScript(
   const algoId = algorithmIds[algorithm] ?? 0;
   const daaId = daaModeIds[daaMode] ?? 0;
   const targetTime = daaParams?.targetBlockTime || daaParams?.targetTime || 60;
+
+  // EPOCH retarget keeps `target ≤ 2^48` (the bytecode clamps both sides of the
+  // multiply), so a deploy whose initial target exceeds that would have its
+  // difficulty silently raised on the first epoch boundary. Reject it at build
+  // time instead — this is the validation EPOCH_MAX_SAFE_TARGET was defined for
+  // (difficulty must be ≥ MAX_TARGET / 2^48 = 32768). The on-chain clamp is the
+  // safety net; this is the friendly early error.
+  if (daaMode === "epoch" && target > EPOCH_MAX_SAFE_TARGET) {
+    throw new DaaParamsValidationError(
+      `EPOCH: initial target ${target} exceeds EPOCH_MAX_SAFE_TARGET (2^48 = ` +
+        `${EPOCH_MAX_SAFE_TARGET}); use difficulty ≥ 32768`
+    );
+  }
 
   // PoW hash opcode: aa=OP_HASH256(SHA256d), ee=OP_BLAKE3, ef=OP_K12
   const powHashOpcodes: Record<string, string> = {

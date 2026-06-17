@@ -442,7 +442,9 @@ describe("dMint Token Creation (Glyph v2)", () => {
             tokenRef,
             100,
             10,
-            target,
+            // EPOCH rejects an initial target above 2^48 (difficulty < 32768);
+            // use its minimum valid difficulty so the loop still covers EPOCH.
+            daaMode === "epoch" ? dMintDiffToTarget(32768) : target,
             algo,
             daaMode,
             daaParams,
@@ -562,7 +564,9 @@ describe("dMint Token Creation (Glyph v2)", () => {
             tokenRef,
             100,
             10,
-            target,
+            // EPOCH rejects an initial target above 2^48 (difficulty < 32768);
+            // use its minimum valid difficulty so the per-mode loop still covers it.
+            daa === "epoch" ? dMintDiffToTarget(32768) : target,
             algo,
             daa,
             daaParamsByMode[daa] as never
@@ -716,7 +720,9 @@ describe("dMint Token Creation (Glyph v2)", () => {
             tokenRef,
             100,
             10,
-            target,
+            // EPOCH rejects an initial target above 2^48 (difficulty < 32768);
+            // use its minimum valid difficulty so the per-mode loop still covers it.
+            daa === "epoch" ? dMintDiffToTarget(32768) : target,
             algo,
             daa,
             daaParamsByMode[daa] as never
@@ -853,7 +859,9 @@ describe("dMint Token Creation (Glyph v2)", () => {
               tokenRef,
               100,
               1,
-              maxTarget,
+              // EPOCH caps its target at 2^48; use that boundary for EPOCH
+              // (MAX_TARGET is rejected for EPOCH deploys).
+              daa === "epoch" ? dMintDiffToTarget(32768) : maxTarget,
               algo,
               daa,
               daaParamsByMode[daa] as never,
