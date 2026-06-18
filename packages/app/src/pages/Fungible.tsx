@@ -10,6 +10,7 @@ import {
   InputGroup,
   InputLeftElement,
   Select,
+  useToast,
 } from "@chakra-ui/react";
 import PageHeader from "@app/components/PageHeader";
 import { SmartTokenType } from "@app/types";
@@ -23,6 +24,7 @@ import NoContent from "@app/components/NoContent";
 import MintMenu from "@app/components/MintMenu";
 import { Search2Icon } from "@chakra-ui/icons";
 import { BsList, BsListUl } from "react-icons/bs";
+import { reverifySpecificTokens } from "@app/utils/reverifyStuckTokens";
 
 export default function Fungible() {
   const { sref } = useParams();
@@ -44,6 +46,63 @@ function TokenGrid() {
   const [viewMode, setViewMode] = useState<"compact" | "comfortable">(
     "compact"
   );
+  const toast = useToast();
+
+  const handleFixPending = async () => {
+    try {
+      toast({
+        title: "Re-verifying pending tokens...",
+        description: "Attempting to fix ASERT, BLAKE3, and K12 tokens",
+        status: "info",
+        duration: 3000,
+        isClosable: true,
+      });
+
+      const result = await reverifySpecificTokens(["ASERT", "BLAKE3", "K12"]);
+      
+      if (result.success) {
+        const totalReverified = Object.values(result.results).reduce((sum, r) => sum + r.reverified, 0);
+        const totalStuck = Object.values(result.results).reduce((sum, r) => sum + r.total, 0);
+        
+        if (totalReverified > 0) {
+          toast({
+            title: "Success!",
+            description: `Re-verified ${totalReverified}/${totalStuck} stuck tokens. Refresh the page to see updated status.`,
+            status: "success",
+            duration: 5000,
+            isClosable: true,
+          });
+        } else {
+          toast({
+            title: "No tokens fixed",
+            description: totalStuck > 0 
+              ? `${totalStuck} stuck tokens found but verification still failed. Try again later.`
+              : "No stuck tokens found for ASERT, BLAKE3, K12",
+            status: "warning",
+            duration: 5000,
+            isClosable: true,
+          });
+        }
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to re-verify tokens. Please try again.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+    } catch (error) {
+      console.error("Error fixing pending tokens:", error);
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred. Please try again.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  };
 
   const [tokens, balances] = useLiveQuery(
     async () => {
@@ -170,6 +229,15 @@ function TokenGrid() {
           onClick={() => setTickerOnly((v) => !v)}
         >
           Ticker
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          colorScheme="orange"
+          onClick={handleFixPending}
+        >
+          Fix Pending
         </Button>
 
         <Select
