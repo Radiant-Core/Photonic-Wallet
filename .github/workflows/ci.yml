@@ -36,7 +36,7 @@ jobs:
 
       - name: Build RadiantSwap dependency
         run: |
-          cd ../RadiantSwap && npm install && npm run build
+          cd .. && git clone https://github.com/Radiant-Core/RadiantSwap.git && cd RadiantSwap && npm install && npm run build
 
       - name: Build packages
         run: pnpm build
