@@ -85,7 +85,12 @@ declare module "radiantswap" {
   export enum Status {
     OPEN = 'open',
     CLOSED = 'closed',
-    RESOLVED = 'resolved'
+    RESOLVED = 'resolved',
+    REVERTED = 'reverted',
+    PROPOSED_YES = 'proposed_yes',
+    PROPOSED_NO = 'proposed_no',
+    RESOLVED_YES = 'resolved_yes',
+    RESOLVED_NO = 'resolved_no'
   }
   
   export const MAX_QUESTION_BYTES = 255;
