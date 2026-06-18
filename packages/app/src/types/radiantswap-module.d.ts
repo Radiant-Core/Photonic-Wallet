@@ -133,6 +133,58 @@ declare module "radiantswap" {
     marker: Buffer;
   }
   
+  // Additional interfaces
+  export interface CatState {
+    status: Status;
+    oracle: Buffer;
+    optimistic?: any;
+  }
+  
+  export interface CatScripts {
+    outcomeCodes: Buffer[];
+    marker: Buffer;
+  }
+  
+  export interface CatRefs {
+    marketRef: Buffer;
+    yesRef: Buffer;
+    noRef: Buffer;
+    outcomeRefs: Buffer[];
+  }
+  
+  export interface BuyOrder {
+    txid: string;
+    vout: number;
+    script: string;
+    value: number;
+    satoshis: number;
+  }
+  
+  export interface SellOrder {
+    txid: string;
+    vout: number;
+    script: string;
+    value: number;
+    satoshis: number;
+  }
+  
+  export interface Proposal {
+    txid: string;
+    outcome: number;
+    proposer: Buffer;
+    bond: number;
+  }
+  
+  export interface Outcome {
+    index: number;
+    label: string;
+    payout: number;
+  }
+  
+  export interface KeyedUtxo extends Utxo {
+    key: string;
+  }
+  
   // Constants
   export const SUPPORTED_K: number;
   export const binLabel: (index: number) => string;
