@@ -874,7 +874,7 @@ export async function createMarketAction(p: {
     expiry: p.expiry,
     grace: p.grace,
     oracle: created.state.oracle.toString("hex"),
-    committeeKeys: committee.keys.map((k) => k.toString("hex")),
+    committeeKeys: committee.keys.map((k: Buffer) => k.toString("hex")),
     threshold: committee.threshold,
     optimistic: created.state.optimistic
       ? {
@@ -1300,7 +1300,7 @@ export async function fetchLiveCatMarket(
 
   const pkh = walletPkh();
   const perOutcome = await Promise.all(
-    refs.outcomeRefs.flatMap((ref, i) => [
+    refs.outcomeRefs.flatMap((ref: Buffer, i: number) => [
       unspentByScript(
         buildStatefulOutput(MARKER, scripts.outcomeCodes[i]),
         ref
@@ -1432,11 +1432,11 @@ export async function createCategoricalAction(
     expiry: p.expiry,
     grace: p.grace,
     oracle: created.state.oracle.toString("hex"),
-    committeeKeys: committee.keys.map((k) => k.toString("hex")),
+    committeeKeys: committee.keys.map((k: Buffer) => k.toString("hex")),
     threshold: committee.threshold,
     addedAt: Date.now(),
     kind: p.kind || "categorical",
-    outcomeRefs: created.refs.outcomeRefs.map((r) => r.toString("hex")),
+    outcomeRefs: created.refs.outcomeRefs.map((r: Buffer) => r.toString("hex")),
     outcomeLabels: p.labels,
     scalar: p.scalar,
   };
