@@ -2437,11 +2437,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         <FormLabel>{"Initial Difficulty"}</FormLabel>
                         <Input
                           defaultValue={formData.difficulty}
-                          placeholder="10"
+                          placeholder={formData.daaMode === "lwma" ? "4" : "10"}
                           name="difficulty"
                           type="number"
                           onChange={onFormChange}
-                          min={1}
+                          min={formData.daaMode === "lwma" ? 4 : 1}
                           max={1000000}
                         />
                         {timeToMine && (
@@ -2453,6 +2453,11 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               ? "K12"
                               : "SHA256d"}
                             )
+                            {formData.daaMode === "lwma" && (
+                              <>
+                                {" "}• LWMA requires difficulty ≥ 4
+                              </>
+                            )}
                           </FormHelperText>
                         )}
                         {formData.daaMode === "fixed" &&
