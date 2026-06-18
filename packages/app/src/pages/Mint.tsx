@@ -2323,7 +2323,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <option value="fixed">Fixed Difficulty</option>
                           <option value="asert">ASERT (Recommended)</option>
                           <option value="lwma">LWMA</option>
-                          <option value="epoch">Epoch-Based</option>
                           <option value="schedule">Schedule</option>
                         </Select>
                         <FormHelperText>
@@ -2333,8 +2332,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             ? "Exponential moving average, smooth adjustments"
                             : formData.daaMode === "lwma"
                             ? "Linear weighted moving average"
-                            : formData.daaMode === "epoch"
-                            ? "Bitcoin-style periodic adjustment (only at epoch boundaries)"
                             : "Pre-determined difficulty curve at fixed heights"}
                         </FormHelperText>
                       </FormControl>
@@ -2413,47 +2410,6 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                             calculation.
                           </FormHelperText>
                         </FormControl>
-                      )}
-
-                      {formData.daaMode === "epoch" && (
-                        <>
-                          <FormControl>
-                            <FormLabel>{"Epoch Length (blocks)"}</FormLabel>
-                            <Input
-                              defaultValue={formData.epochLength || "2016"}
-                              placeholder="2016"
-                              name="epochLength"
-                              type="number"
-                              onChange={onFormChange}
-                              min={100}
-                              max={10000}
-                            />
-                            <FormHelperText>
-                              Number of blocks between difficulty adjustments.
-                              Adjustment fires when `height % epochLength == 0`
-                              (skipping height 0).
-                            </FormHelperText>
-                          </FormControl>
-                          <FormControl>
-                            <FormLabel>{"Max Adjustment Factor"}</FormLabel>
-                            <Select
-                              name="maxAdjustment"
-                              defaultValue={formData.maxAdjustment || "4"}
-                              onChange={onFormChange}
-                            >
-                              <option value="2">2x (gentle)</option>
-                              <option value="4">4x (default)</option>
-                              <option value="8">8x</option>
-                              <option value="16">16x (aggressive)</option>
-                            </Select>
-                            <FormHelperText>
-                              Maximum factor difficulty can change per
-                              adjustment. Restricted to powers of 2 so on-chain
-                              clamping uses OP_LSHIFT/OP_RSHIFT (cheaper
-                              bytecode).
-                            </FormHelperText>
-                          </FormControl>
-                        </>
                       )}
 
                       {formData.daaMode === "schedule" && (
