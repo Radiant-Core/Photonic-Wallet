@@ -92,9 +92,115 @@ export async function reverifyStuckTokens() {
 }
 
 /**
- * Force re-verification for specific token references (ASERT, BLAKE3, K12)
+ * Re-verify all pending tokens in the wallet
  */
-export async function reverifySpecificTokens(tokenRefs: string[]) {
+async function reverifyAllPendingTokens() {
+  console.log(`[Reverify] Finding all pending tokens...`);
+  
+  // Find all FT UTXOs that are stuck (not verified)
+  const allTokenTxos = await db.txo
+    .where("contractType")
+    .equals(ContractType.FT)
+    .toArray();
+  
+  const stuckTxos = allTokenTxos.filter((txo): txo is VerifiableTxO => {
+    return txo.height !== undefined && 
+           txo.height !== Infinity && 
+           txo.height > 0 && 
+           txo.spent === 0 && 
+           ((txo as any).verified === 0 || (txo as any).verified === undefined);
+  });
+  
+  if (stuckTxos.length === 0) {
+    console.log(`[Reverify] No pending tokens found`);
+    return {
+      success: true,
+      results: {},
+      reverified: 0,
+      total: 0
+    };
+  }
+  
+  console.log(`[Reverify] Found ${stuckTxos.length} pending token UTXOs`);
+  
+  const electrum = await electrumWorker.value;
+  let reverifiedCount = 0;
+  const touchedScripts = new Set<string>();
+  const affectedTokens: string[] = [];
+  const results: { [tokenRef: string]: { reverified: number; total: number } } = {};
+  
+  // Group by token reference for reporting
+  const tokenGroups = new Map<string, typeof stuckTxos>();
+  
+  for (const txo of stuckTxos) {
+    const { ref } = parseFtScript(txo.script);
+    if (ref) {
+      const tokenRef = reverseRef(ref);
+      if (!tokenGroups.has(tokenRef)) {
+        tokenGroups.set(tokenRef, []);
+      }
+      tokenGroups.get(tokenRef)!.push(txo);
+    }
+  }
+  
+  // Process each token group
+  for (const [tokenRef, txos] of tokenGroups) {
+    console.log(`[Reverify] Processing ${txos.length} stuck UTXOs for token ${tokenRef}`);
+    
+    let tokenReverified = 0;
+    for (const txo of txos) {
+      try {
+        const verificationResult = await electrum.verifyTransaction(txo.txid, txo.height!);
+        const verified = verificationResult.status === "verified";
+
+        if (verified) {
+          await db.txo.update(txo.id as number, { verified: 1 });
+          reverifiedCount++;
+          tokenReverified++;
+          touchedScripts.add(txo.script);
+          affectedTokens.push(tokenRef);
+          
+          console.log(`[Reverify] Successfully re-verified UTXO ${txo.txid}:${txo.vout}`);
+        } else {
+          console.log(`[Reverify] Verification still failed for UTXO ${txo.txid}:${txo.vout}: ${verificationResult.status}`);
+        }
+      } catch (error) {
+        console.error(`[Reverify] Error re-verifying UTXO ${txo.txid}:${txo.vout}:`, error);
+      }
+    }
+    
+    results[tokenRef] = { reverified: tokenReverified, total: txos.length };
+  }
+  
+  // Update FT balances for any affected scripts
+  if (touchedScripts.size > 0) {
+    console.log(`[Reverify] Updating balances for ${touchedScripts.size} affected scripts...`);
+    updateFtBalances(touchedScripts);
+  }
+
+  const uniqueTokens = [...new Set(affectedTokens)];
+  
+  console.log(`[Reverify] Re-verification complete. ${reverifiedCount}/${stuckTxos.length} UTXOs verified. Affected tokens: ${uniqueTokens.join(", ")}`);
+  
+  return {
+    success: true,
+    results,
+    reverified: reverifiedCount,
+    total: stuckTxos.length
+  };
+}
+
+/**
+ * Force re-verification for specific token references (ASERT, BLAKE3, K12)
+ * If no tokenRefs provided, will attempt to fix all pending tokens
+ */
+export async function reverifySpecificTokens(tokenRefs?: string[]) {
+  // If no specific tokens provided, find all pending tokens
+  if (!tokenRefs || tokenRefs.length === 0) {
+    console.log(`[Reverify] Starting re-verification for all pending tokens`);
+    return await reverifyAllPendingTokens();
+  }
+  
   console.log(`[Reverify] Starting targeted re-verification for tokens: ${tokenRefs.join(", ")}`);
   
   let totalReverified = 0;

@@ -52,13 +52,13 @@ function TokenGrid() {
     try {
       toast({
         title: "Re-verifying pending tokens...",
-        description: "Attempting to fix ASERT, BLAKE3, and K12 tokens",
+        description: "Attempting to fix pending tokens",
         status: "info",
         duration: 3000,
         isClosable: true,
       });
 
-      const result = await reverifySpecificTokens(["ASERT", "BLAKE3", "K12"]);
+      const result = await reverifySpecificTokens();
       
       if (result.success) {
         const totalReverified = Object.values(result.results).reduce((sum, r) => sum + r.reverified, 0);
@@ -77,7 +77,7 @@ function TokenGrid() {
             title: "No tokens fixed",
             description: totalStuck > 0 
               ? `${totalStuck} stuck tokens found but verification still failed. Try again later.`
-              : "No stuck tokens found for ASERT, BLAKE3, K12",
+              : "No stuck tokens found",
             status: "warning",
             duration: 5000,
             isClosable: true,

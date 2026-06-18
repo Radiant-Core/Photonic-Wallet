@@ -103,6 +103,45 @@ function lwma(
   return max(1n, min(MAX_TARGET, safeMul(tc / targetTime, td)));
 }
 
+// ASERT model: drift-based exponential retargeting
+// Entry stack: [target, lastTime, targetTime, ...]
+// Formula: drift = (currentTime - lastTime - targetTime) / halfLife
+//          drift clamped to [-4, +4]
+//          target = target << drift (positive drift = easier, negative = harder)
+function asert(
+  target: bigint,
+  currentTime: bigint,
+  lastTime: bigint,
+  targetTime: bigint,
+  halfLife: bigint
+) {
+  const timeDelta = currentTime - lastTime;
+  const excess = timeDelta - targetTime;
+  let drift = excess / halfLife;
+  // Clamp drift to [-4, +4]
+  drift = max(-4n, min(4n, drift));
+  // Apply shift: positive drift = multiply (easier), negative = divide (harder)
+  let result = target;
+  if (drift > 0n) {
+    // Make easier: target *= 2^drift (but cap at MAX_TARGET)
+    for (let i = 0n; i < drift; i++) {
+      if (result > MAX_TARGET / 2n) {
+        result = MAX_TARGET;
+        break;
+      }
+      result = result * 2n;
+    }
+  } else if (drift < 0n) {
+    // Make harder: target /= 2^|drift|
+    const halvings = -drift;
+    for (let i = 0n; i < halvings; i++) {
+      result = result / 2n;
+    }
+  }
+  // Clamp to minimum 1
+  return max(1n, result);
+}
+
 describe("dMint DAA int64-overflow fix", () => {
   describe("EPOCH — target × clampedDelta overflow", () => {
     it("OLD bytecode overflows int64 at deploy when targetTime ≥ 2048 (target = 2^48, N=4)", () => {
@@ -206,6 +245,145 @@ describe("dMint DAA int64-overflow fix", () => {
     it("LWMA bytecode floors timeDelta at 0 after the upper cap (… a3 00 a4 …)", () => {
       const hex = buildLinearDaaBytecode();
       expect(hex).toContain("a300a4"); // OP_MIN, OP_0, OP_MAX
+    });
+  });
+
+  describe("ASERT — fast blocks should increase difficulty", () => {
+    it("ASERT model: fast blocks (10s vs 60s target) should decrease target/increase difficulty", () => {
+      // Simulate the ASERT token scenario:
+      // - Deploy target: MAX_TARGET/2 (difficulty 2)
+      // - Target block time: 60s
+      // - Half life: 1000
+      // - Actual block time: 10s (much faster)
+      
+      const deployTarget = MAX_TARGET / 2n; // difficulty 2
+      const targetTime = 60n;
+      const halfLife = 1000n;
+      
+      // Simulate 10 blocks coming at 10s intervals (60s apart in absolute time)
+      let currentTarget = deployTarget;
+      let lastTime = 0n;
+      
+      for (let i = 0; i < 10; i++) {
+        const currentTime = lastTime + 10n; // 10s block time
+        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, halfLife);
+        lastTime = currentTime;
+      }
+      
+      // After 10 fast blocks, difficulty should have increased significantly
+      // Starting difficulty: 2
+      // Each block: drift = (10-60)/1000 = -0.05, so |drift| ≈ 0 (clamped), no change
+      // Wait - with 10s blocks and 60s target, drift = -0.05 which rounds to 0
+      // So no retargeting happens immediately...
+      
+      // Actually let me check - does drift accumulate?
+      // No, each mint is independent based on lastTime
+      
+      // The issue is: with consistent 10s blocks and halfLife=1000,
+      // drift = -0.05 which is between 0 and -1, so it rounds to 0
+      // ASERT requires drift magnitude >= 1 to trigger any shift
+      
+      // For significant retargeting, we need more extreme conditions
+      // Let's test with 5s block time
+      let fastTarget = MAX_TARGET / 2n;
+      lastTime = 0n;
+      for (let i = 0; i < 10; i++) {
+        const currentTime = lastTime + 5n; // 5s block time
+        fastTarget = asert(fastTarget, currentTime, lastTime, targetTime, halfLife);
+        lastTime = currentTime;
+      }
+      
+      // After 10 blocks at 5s each:
+      // drift = (5-60)/1000 = -0.055 → still rounds to 0
+      // No retargeting!
+      
+      // This suggests the halfLife might be too high for the actual block rate
+      // Or we need sustained fast blocks over many more iterations
+      
+      // Let's try with 0.5s block time (extreme)
+      let extremeTarget = MAX_TARGET / 2n;
+      lastTime = 0n;
+      for (let i = 0; i < 10; i++) {
+        const currentTime = lastTime + 1n; // 1s block time
+        extremeTarget = asert(extremeTarget, currentTime, lastTime, targetTime, halfLife);
+        lastTime = currentTime;
+      }
+      
+      // drift = (1-60)/1000 = -0.059 → still rounds to 0!
+      // This is a problem - with halfLife=1000 and 60s target,
+      // you need (blockTime - 60) / 1000 to be <= -1
+      // So blockTime needs to be <= -940, which is impossible
+      
+      // Actually wait - I think I misread. The formula is:
+      // drift = (timeDelta - targetTime) / halfLife
+      // timeDelta = currentTime - lastTime (time between blocks)
+      // For 10s blocks: timeDelta = 10, excess = 10-60 = -50, drift = -0.05
+      
+      // But the CLAMP is to [-4, +4], so -0.05 stays as -0.05
+      // Then the bytecode does: drift = int(drift) ? Or does it use the value?
+      
+      // Let me re-read the bytecode...
+      // The bytecode checks "DUP 0 GT" and "DUP 0 LT", so it's checking if drift > 0 or < 0
+      // With drift = -0.05, 0 LT is TRUE, so it goes into the negative branch
+      // But then it does NEGATE and 2DIV loop
+      
+      // Wait, -0.05 is between 0 and -1. When we NEGATE: 0.05
+      // Then "DUP 0 GT" → TRUE, so we do the halving
+      // But with drift = -0.05, we'd do... less than 1 halving?
+      
+      // I think the issue is drift needs to be INTEGER for the loop
+      // Let me check if the bytecode does int conversion...
+      
+      // Actually looking at the bytecode, it does integer comparisons
+      // But script numbers are integers, so -0.05 becomes 0?
+      
+      // If drift = 0 (truncated), then:
+      // - DUP 0 GT → FALSE (0 is not > 0)
+      // - DUP 0 LT → FALSE (0 is not < 0)
+      // - Falls through to DROP drift (no change)
+      
+      // THIS IS THE BUG!
+      // With halfLife=1000 and targetTime=60, you need:
+      // (blockTime - 60) / 1000 <= -1 for retargeting
+      // blockTime <= -940 (impossible)
+      
+      // OR the bytecode needs to handle fractional drift differently
+      
+      expect(extremeTarget).toBeLessThan(MAX_TARGET / 2n); // Should have decreased
+    });
+    
+    it("ASERT with halfLife=100 requires much faster retargeting", () => {
+      const deployTarget = MAX_TARGET / 2n;
+      const targetTime = 60n;
+      const halfLife = 100n; // Much shorter
+      
+      let currentTarget = deployTarget;
+      let lastTime = 0n;
+      
+      // Simulate 10s block times
+      for (let i = 0; i < 100; i++) {
+        const currentTime = lastTime + 10n;
+        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, halfLife);
+        lastTime = currentTime;
+      }
+      
+      // drift = (10-60)/100 = -0.5 → still 0 in integer math
+      // Need more extreme or shorter halfLife
+      
+      // Try with 1s blocks and halfLife=10
+      const shortHalfLife = 10n;
+      currentTarget = deployTarget;
+      lastTime = 0n;
+      
+      for (let i = 0; i < 50; i++) {
+        const currentTime = lastTime + 1n; // 1s blocks
+        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, shortHalfLife);
+        lastTime = currentTime;
+      }
+      
+      // drift = (1-60)/10 = -5.9 → clamped to -4
+      // 4 halvings: MAX_TARGET/2 → MAX_TARGET/32 (difficulty 32)
+      expect(currentTarget).toBeLessThanOrEqual(MAX_TARGET / 16n);
     });
   });
 

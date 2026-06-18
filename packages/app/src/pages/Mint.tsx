@@ -409,7 +409,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       daaMode: "asert", // Default to ASERT for dynamic difficulty
       targetBlockTime: "60", // Default 60 seconds
       // DAA-specific parameters
-      asertHalfLife: "1000",
+      asertHalfLife: "60",
       asertAsymptote: "0",
       lwmaWindowSize: "144",
       epochLength: "2016",
@@ -913,7 +913,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         };
 
         if (daaMode === "asert") {
-          daaConfig.halfLife = parseInt(asertHalfLife, 10) || 1000;
+          daaConfig.halfLife = parseInt(asertHalfLife, 10) || 60;
           if (asertAsymptote)
             daaConfig.asymptote = parseInt(asertAsymptote, 10);
         } else if (daaMode === "lwma") {
@@ -2360,17 +2360,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <FormControl>
                             <FormLabel>{"ASERT Half Life (blocks)"}</FormLabel>
                             <Input
-                              defaultValue={formData.asertHalfLife || "1000"}
-                              placeholder="1000"
+                              defaultValue={formData.asertHalfLife || "60"}
+                              placeholder="60"
                               name="asertHalfLife"
                               type="number"
                               onChange={onFormChange}
-                              min={100}
-                              max={10000}
+                              min={1}
+                              max={600}
                             />
                             <FormHelperText>
-                              Controls how quickly difficulty adjusts. Higher
-                              values = slower adjustment.
+                              Blocks for difficulty to halve/double. Should be ≤
+                              target block time (in seconds) for responsive
+                              retargeting. Example: 60 for 60s blocks. Higher
+                              values make ASERT unresponsive to normal variance.
                             </FormHelperText>
                           </FormControl>
                           <FormControl>

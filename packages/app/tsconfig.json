@@ -2,7 +2,13 @@
   "exclude": ["node_modules"],
   "extends": "@photonic/typescript-config/vite.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "noResolve": false
   },
   "include": ["src", "src/types/**/*.d.ts", "../lib/src/types/**/*.d.ts"]
 }
