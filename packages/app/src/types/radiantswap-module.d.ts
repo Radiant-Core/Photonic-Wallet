@@ -80,6 +80,17 @@ declare module "radiantswap" {
   export function buildRedeem(params1: any, params2: any): any;
   export function buildMerge(params1: any, params2: any): any;
   export function buildSplit(params1: any, params2: any): any;
+  export function buildDisputeTimeout(params1: any, params2: any, params3: any): any;
+  
+  // Order functions
+  export function buildBuyOrder(params1: any, params2: any): any;
+  export function buildSellOrder(params1: any, params2: any): any;
+  export function fillBuyOrder(params1: any, params2: any): any;
+  export function fillSellOrder(params1: any, params2: any): any;
+  
+  // Utility functions
+  export function marketStateFromScript(script: any): any;
+  export function minBondFor(amount: any): any;
   
   // Types and constants
   export interface Utxo {
@@ -107,6 +118,7 @@ declare module "radiantswap" {
   export const CAT_REVERTED = 'reverted';
   export const CAT_OPEN = 'open';
   export const MARKER = Buffer.from('predict', 'hex');
+  export const NO_PROPOSER = Buffer.alloc(33, 0);
   
   // Additional functions
   export function trackMarket(market: Market): Promise<void>;
