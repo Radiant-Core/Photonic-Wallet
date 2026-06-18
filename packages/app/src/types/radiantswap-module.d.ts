@@ -77,6 +77,7 @@ declare module "radiantswap" {
     vout: number;
     script: string;
     value: number;
+    satoshis: number;
     height?: number;
     spent?: number;
   }
