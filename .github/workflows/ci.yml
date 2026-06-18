@@ -34,10 +34,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build RadiantSwap dependency
-        run: |
-          cd .. && git clone https://github.com/Radiant-Core/RadiantSwap.git && cd RadiantSwap && npm install && npm run build
-
       - name: Build packages
         run: pnpm build
 
