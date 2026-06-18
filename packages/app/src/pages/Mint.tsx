@@ -409,7 +409,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       daaMode: "asert", // Default to ASERT for dynamic difficulty
       targetBlockTime: "60", // Default 60 seconds
       // DAA-specific parameters
-      asertHalfLife: "60",
+      asertHalfLife: "30",
       asertAsymptote: "0",
       lwmaWindowSize: "144",
       epochLength: "2016",
