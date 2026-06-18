@@ -2365,14 +2365,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               name="asertHalfLife"
                               type="number"
                               onChange={onFormChange}
-                              min={1}
-                              max={600}
+                              min={10}
+                              max={100}
                             />
                             <FormHelperText>
-                              Blocks for difficulty to halve/double. Should be ≤
-                              target block time (in seconds) for responsive
-                              retargeting. Example: 60 for 60s blocks. Higher
-                              values make ASERT unresponsive to normal variance.
+                              Blocks for difficulty to halve/double. Match your
+                              target block time (in seconds). Range 10-100 covers
+                              10s to 100s block targets. Example: 60 for 60s blocks.
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
