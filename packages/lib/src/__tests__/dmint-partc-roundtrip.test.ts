@@ -544,6 +544,8 @@ describe("V2-launch PartC ELSE_BRANCH end-to-end (mainnet rejection regression)"
   for (const c of combos) {
     for (const h of heightCases) {
       for (const t of targetCases) {
+        // LWMA caps target at MAX_TARGET/4 at deploy time; skip the MAX_TARGET case for LWMA.
+        if (c.daaMode === "lwma" && t === 0x7fffffffffffffffn) continue;
         const label = `${c.algorithm}/${c.daaMode} h=${h.prevHeight}→${h.prevHeight + 1} (mh=${h.maxHeight}) target=0x${t.toString(16)}`;
         it(`simulated PartC reconstruction byte-matches wallet next-state: ${label}`, () => {
           const deployScript = dMintScript(

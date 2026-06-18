@@ -246,4 +246,42 @@ describe("dMint DAA int64-overflow fix", () => {
       ).not.toThrow();
     });
   });
+
+  describe("LWMA deploy validation (wires up MAX_TARGET/4 cap)", () => {
+    const cref = "11".repeat(36);
+    const tref = "22".repeat(36);
+    it("rejects a LWMA deploy whose initial target exceeds MAX_TARGET/4 (difficulty < 4)", () => {
+      expect(() =>
+        dMintScript(
+          0,
+          cref,
+          tref,
+          100,
+          10,
+          dMintDiffToTarget(2), // target = MAX_TARGET/2 > MAX_TARGET/4
+          "sha256d",
+          "lwma",
+          {} as never,
+          1700000000
+        )
+      ).toThrow(/MAX_TARGET\/4|difficulty ≥ 4/);
+    });
+
+    it("accepts a LWMA deploy at difficulty 4 (target = MAX_TARGET/4)", () => {
+      expect(() =>
+        dMintScript(
+          0,
+          cref,
+          tref,
+          100,
+          10,
+          dMintDiffToTarget(4),
+          "sha256d",
+          "lwma",
+          {} as never,
+          1700000000
+        )
+      ).not.toThrow();
+    });
+  });
 });

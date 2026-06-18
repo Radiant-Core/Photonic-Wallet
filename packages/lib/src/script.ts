@@ -1478,6 +1478,17 @@ export function dMintScript(
     );
   }
 
+  // LWMA retarget pre-caps target to MAX_TARGET/4 so the multiply
+  // `(target/4 / targetTime) × (4×targetTime)` stays ≤ MAX_TARGET. A deploy with
+  // target above that cap would have its difficulty silently raised on the first
+  // retarget. Reject at build time (difficulty must be ≥ 4).
+  const LWMA_MAX_SAFE_TARGET = MAX_TARGET / 4n;
+  if (daaMode === "lwma" && target > LWMA_MAX_SAFE_TARGET) {
+    throw new DaaParamsValidationError(
+      `LWMA: initial target ${target} exceeds MAX_TARGET/4; use difficulty ≥ 4`
+    );
+  }
+
   // PoW hash opcode: aa=OP_HASH256(SHA256d), ee=OP_BLAKE3, ef=OP_K12
   const powHashOpcodes: Record<string, string> = {
     sha256d: "aa",

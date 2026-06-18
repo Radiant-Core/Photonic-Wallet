@@ -859,9 +859,13 @@ describe("dMint Token Creation (Glyph v2)", () => {
               tokenRef,
               100,
               1,
-              // EPOCH caps its target at 2^48; use that boundary for EPOCH
-              // (MAX_TARGET is rejected for EPOCH deploys).
-              daa === "epoch" ? dMintDiffToTarget(32768) : maxTarget,
+              // EPOCH caps its target at 2^48; LWMA caps at MAX_TARGET/4.
+              // Use those boundaries for the respective modes.
+              daa === "epoch"
+                ? dMintDiffToTarget(32768)
+                : daa === "lwma"
+                  ? maxTarget / 4n
+                  : maxTarget,
               algo,
               daa,
               daaParamsByMode[daa] as never,
