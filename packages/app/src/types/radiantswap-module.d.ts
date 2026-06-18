@@ -71,6 +71,16 @@ declare module "radiantswap" {
   export function unspentByScript(script: any, ref: any): any;
   export function walletPkh(): string;
   
+  // Build functions
+  export function buildDispute(params1: any, params2: any, params3: any): any;
+  export function buildFinalize(params1: any, params2: any): any;
+  export function buildPropose(params1: any, params2: any): any;
+  export function buildRevert(params1: any, params2: any): any;
+  export function buildResolve(params1: any, params2: any): any;
+  export function buildRedeem(params1: any, params2: any): any;
+  export function buildMerge(params1: any, params2: any): any;
+  export function buildSplit(params1: any, params2: any): any;
+  
   // Types and constants
   export interface Utxo {
     txid: string;
