@@ -157,7 +157,7 @@ declare module "radiantswap" {
     vout: number;
     script: string;
     value: number;
-    satoshis: number;
+    satoshis: number | { satoshis: number };
     shareOut?: number;
     rxd?: number;
   }
@@ -167,7 +167,7 @@ declare module "radiantswap" {
     vout: number;
     script: string;
     value: number;
-    satoshis: number;
+    satoshis: number | { satoshis: number };
     payment?: number;
     share?: number;
   }
