@@ -93,6 +93,7 @@ declare module "radiantswap" {
   export function minBondFor(amount: any): any;
   export function encodeState(state: any): any;
   export function encodeRef(ref: any): any;
+  export function encodeCatState(state: any): any;
   export function findMarketBeacon(params1: any, params2: any): any;
   export function verifyMarketBeacon(params1: any, params2: any): any;
   export function buildShareTransfer(params1: any, params2: any): any;
@@ -120,6 +121,23 @@ declare module "radiantswap" {
     height?: number;
     spent?: number;
   }
+  
+  export interface MarketState {
+    status: Status;
+    oracle: Buffer;
+    optimistic?: any;
+  }
+  
+  export interface MarketScripts {
+    outcomeCodes: Buffer[];
+    marker: Buffer;
+  }
+  
+  // Constants
+  export const SUPPORTED_K: number;
+  export const binLabel: (index: number) => string;
+  export const binIndexForValue: (value: number, min: number, max: number, bins: number) => number;
+  export const uniformRange: (min: number, max: number, bins: number) => number[];
   
   export enum Status {
     OPEN = 'open',
