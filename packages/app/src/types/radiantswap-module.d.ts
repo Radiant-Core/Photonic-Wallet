@@ -101,6 +101,15 @@ declare module "radiantswap" {
   export const oracle: any;
   export const rswp: any;
   
+  // Categorical-specific functions
+  export function buildCreateCategorical(params: any): any;
+  export function buildCategoricalSplit(params: any): any;
+  export function buildCategoricalMerge(params: any): any;
+  export function buildCategoricalRedeem(params: any): any;
+  export function buildCategoricalResolve(params: any): any;
+  export function buildCategoricalRevert(params: any): any;
+  export function buildCategoricalScripts(params: any): any;
+  
   // Types and constants
   export interface Utxo {
     txid: string;
