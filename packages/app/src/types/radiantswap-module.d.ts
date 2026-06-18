@@ -63,6 +63,37 @@ declare module "radiantswap" {
   export function getOdds(market: Market): Promise<number[]>;
   export function calculatePayouts(market: Market, outcomes: boolean[]): Promise<number[]>;
   
-  // Export any other exports that might be used
-  export * from "./radiantswap";
+  // Additional exports used in the codebase
+  export function buildCreateMarket(params: any): any;
+  export function buildStatefulOutput(marker: any, script: any): any;
+  export function buildMarketScripts(params: any): any;
+  export function impliedProbability(odds: number[]): number;
+  export function unspentByScript(script: any, ref: any): any;
+  export function walletPkh(): string;
+  
+  // Types and constants
+  export interface Utxo {
+    txid: string;
+    vout: number;
+    script: string;
+    value: number;
+    height?: number;
+    spent?: number;
+  }
+  
+  export enum Status {
+    OPEN = 'open',
+    CLOSED = 'closed',
+    RESOLVED = 'resolved'
+  }
+  
+  export const MAX_QUESTION_BYTES = 255;
+  export const CAT_REVERTED = 'reverted';
+  export const CAT_OPEN = 'open';
+  export const MARKER = Buffer.from('predict', 'hex');
+  
+  // Additional functions
+  export function trackMarket(market: Market): Promise<void>;
+  export function getTrackedMarkets(): Promise<Market[]>;
+  export function updateMarketStatus(market: Market, status: Status): Promise<void>;
 }
