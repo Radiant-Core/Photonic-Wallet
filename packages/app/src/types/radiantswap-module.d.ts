@@ -196,14 +196,14 @@ declare module "radiantswap" {
   export const uniformRange: (min: number, max: number, bins: number) => number[];
   
   export enum Status {
-    OPEN = 0,
-    CLOSED = 1,
-    RESOLVED = 2,
-    REVERTED = 3,
-    PROPOSED_YES = 4,
-    PROPOSED_NO = 5,
-    RESOLVED_YES = 6,
-    RESOLVED_NO = 7
+    OPEN = 'open',
+    CLOSED = 'closed',
+    RESOLVED = 'resolved',
+    REVERTED = 'reverted',
+    PROPOSED_YES = 'proposed_yes',
+    PROPOSED_NO = 'proposed_no',
+    RESOLVED_YES = 'resolved_yes',
+    RESOLVED_NO = 'resolved_no'
   }
   
   export const MAX_QUESTION_BYTES = 255;
