@@ -91,6 +91,15 @@ declare module "radiantswap" {
   // Utility functions
   export function marketStateFromScript(script: any): any;
   export function minBondFor(amount: any): any;
+  export function encodeState(state: any): any;
+  export function encodeRef(ref: any): any;
+  export function findMarketBeacon(params1: any, params2: any): any;
+  export function verifyMarketBeacon(params1: any, params2: any): any;
+  export function buildShareTransfer(params1: any, params2: any): any;
+  
+  // Oracle and other exports
+  export const oracle: any;
+  export const rswp: any;
   
   // Types and constants
   export interface Utxo {
