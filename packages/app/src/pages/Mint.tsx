@@ -1132,7 +1132,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         targetBlockTime: parseInt(targetBlockTime, 10),
                         // Add DAA-specific parameters
                         ...(daaMode === "asert" && {
-                          halfLife: parseInt(asertHalfLife, 10),
+                          halfLife: parseInt(asertHalfLife, 10) || 30,
                           asymptote: parseInt(asertAsymptote, 10) || undefined,
                         }),
                         ...(daaMode === "lwma" && {
@@ -2360,18 +2360,19 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                           <FormControl>
                             <FormLabel>{"ASERT Half Life (blocks)"}</FormLabel>
                             <Input
-                              defaultValue={formData.asertHalfLife || "60"}
-                              placeholder="60"
+                              defaultValue={formData.asertHalfLife || "30"}
+                              placeholder="30"
                               name="asertHalfLife"
                               type="number"
                               onChange={onFormChange}
-                              min={10}
-                              max={100}
+                              min={1}
+                              max={50}
                             />
                             <FormHelperText>
-                              Blocks for difficulty to halve/double. Match your
-                              target block time (in seconds). Range 10-100 covers
-                              10s to 100s block targets. Example: 60 for 60s blocks.
+                              Blocks for difficulty to halve/double. Lower = more
+                              responsive. Must be ≤ half your target block time
+                              (in seconds) for retargeting to work. Example:
+                              30 for 60s blocks. Range 1-50.
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
