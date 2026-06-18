@@ -159,6 +159,7 @@ declare module "radiantswap" {
     value: number;
     satoshis: number;
     shareOut?: number;
+    rxd?: number;
   }
   
   export interface SellOrder {
@@ -167,6 +168,8 @@ declare module "radiantswap" {
     script: string;
     value: number;
     satoshis: number;
+    payment?: number;
+    share?: number;
   }
   
   export interface Proposal {
