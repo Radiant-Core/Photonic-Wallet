@@ -3,9 +3,6 @@
   "extends": "@photonic/typescript-config/vite.json",
   "compilerOptions": {
     "outDir": "dist",
-    "strict": false,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
     "noEmitOnError": false,
     "skipLibCheck": true,
     "noResolve": false
