@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildAsertDaaBytecode,
   buildEpochDaaBytecode,
   buildLinearDaaBytecode,
   dMintScript,
@@ -103,44 +104,6 @@ function lwma(
   return max(1n, min(MAX_TARGET, safeMul(tc / targetTime, td)));
 }
 
-// ASERT model: drift-based exponential retargeting
-// Entry stack: [target, lastTime, targetTime, ...]
-// Formula: drift = (currentTime - lastTime - targetTime) / halfLife
-//          drift clamped to [-4, +4]
-//          target = target << drift (positive drift = easier, negative = harder)
-function asert(
-  target: bigint,
-  currentTime: bigint,
-  lastTime: bigint,
-  targetTime: bigint,
-  halfLife: bigint
-) {
-  const timeDelta = currentTime - lastTime;
-  const excess = timeDelta - targetTime;
-  let drift = excess / halfLife;
-  // Clamp drift to [-4, +4]
-  drift = max(-4n, min(4n, drift));
-  // Apply shift: positive drift = multiply (easier), negative = divide (harder)
-  let result = target;
-  if (drift > 0n) {
-    // Make easier: target *= 2^drift (but cap at MAX_TARGET)
-    for (let i = 0n; i < drift; i++) {
-      if (result > MAX_TARGET / 2n) {
-        result = MAX_TARGET;
-        break;
-      }
-      result = result * 2n;
-    }
-  } else if (drift < 0n) {
-    // Make harder: target /= 2^|drift|
-    const halvings = -drift;
-    for (let i = 0n; i < halvings; i++) {
-      result = result / 2n;
-    }
-  }
-  // Clamp to minimum 1
-  return max(1n, result);
-}
 
 describe("dMint DAA int64-overflow fix", () => {
   describe("EPOCH — target × clampedDelta overflow", () => {
@@ -248,186 +211,21 @@ describe("dMint DAA int64-overflow fix", () => {
     });
   });
 
-  describe("ASERT — fast blocks should increase difficulty", () => {
-    it("ASERT with halfLife=60: fast blocks trigger retargeting (THE FIX)", () => {
-      // This test verifies the fix for the ASERT unresponsive bug.
-      // The bug: halfLife=1000 made drift always round to 0 in integer math.
-      // The fix: halfLife=60 makes ASERT responsive to realistic block times.
-      //
-      // With halfLife=60 and targetTime=60:
-      // - 10s blocks: drift = (10-60)/60 = -0.83 → truncates to 0 in integer division
-      // - Wait, even -0.83 rounds to 0! Need more extreme.
-      //
-      // Actually with integer division in script:
-      // excess = -50, halfLife = 60 → drift = 0 (truncated toward zero)
-      //
-      // The bytecode uses proper division (truncates toward zero).
-      // So we need |excess| >= halfLife for non-zero drift.
-      // With halfLife=60, we need block times < 0s or > 120s for drift != 0.
-      //
-      // Hmm, this is still problematic. Let me check the actual bytecode...
-      // The drift clamp uses DUP 4 GT and DUP 4 NEGATE LT, so it checks magnitude.
-      //
-      // The real issue might be that ASERT requires sustained drift over time,
-      // not single-block variance. The "half life" concept means it takes
-      // that many blocks at the new rate to fully adjust.
-      //
-      // Let me re-read the ASERT paper semantics...
-      // Actually, the formula is: target = target * 2^drift
-      // where drift = (timeDelta - targetTime) / halfLife
-      //
-      // With integer math, small drifts accumulate slowly.
-      // With 10s vs 60s target, each block contributes -0.83 to drift.
-      // After ~60 such blocks, accumulated drift = -50.
-      // But ASERT doesn't accumulate - it recalculates each block.
-      //
-      // The real issue is the bytecode does drift = excess / halfLife as integer.
-      // With excess = -50 and halfLife = 60, drift = 0 (truncated toward zero).
-      //
-      // For drift = -1, we need excess <= -60, meaning blockTime <= 0. Impossible.
-      //
-      // So the fix needs to be more fundamental - perhaps using a different
-      // formula that works with realistic block times.
-      //
-      // Actually wait - let me check the bytecode again. It might be using
-      // the sign of excess directly, not the magnitude.
-      //
-      // Looking at buildAsertDaaBytecode:
-      // - "7654a0" = DUP 4 GT → if drift > 4, clamp to 4
-      // - "76548f 9f" = DUP 4 NEGATE LT → if drift < -4, clamp to -4
-      // - Then checks DUP 0 GT (positive) or DUP 0 LT (negative)
-      //
-      // So the bytecode checks if drift > 0 or < 0, not magnitude.
-      // With drift = -0.83 (truncated to 0), neither branch fires.
-      //
-      // CONCLUSION: The fix of changing halfLife to 60 is INSUFFICIENT.
-      // Even with halfLife=60, 10s blocks give drift = (10-60)/60 = -0.83 → 0.
-      //
-      // We need a different approach:
-      // Option 1: Scale the formula differently (multiply before divide)
-      // Option 2: Use a scaled integer representation
-      // Option 3: Accept that ASERT needs halfLife << targetTime
-      //
-      // For halfLife to work with 10s blocks vs 60s target:
-      // We need |10-60| / halfLife >= 1 for observable drift.
-      // 50 / halfLife >= 1 → halfLife <= 50.
-      //
-      // So the UI limit of 10-100 is correct. halfLife=50 would work.
-      // halfLife=60 is borderline (50/60 = 0.83 → 0).
-      //
-      // The test below uses halfLife=30 to ensure we see retargeting.
-
-      const deployTarget = MAX_TARGET / 2n; // difficulty 2
-      const targetTime = 60n;
-      const halfLife = 30n; // Aggressive for testing
-
-      let currentTarget = deployTarget;
-      let lastTime = 0n;
-      const actualBlockTime = 10n; // 10s blocks
-
-      // Simulate 100 blocks at 10s each
-      for (let i = 0; i < 100; i++) {
-        const currentTime = lastTime + actualBlockTime;
-        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, halfLife);
-        lastTime = currentTime;
-      }
-
-      // With halfLife=30:
-      // drift = (10-60)/30 = -1.66 → truncates to -1
-      // Each block: 2DIV (target /= 2)
-      // After 100 blocks with drift=-1 each: many halvings
-      // But clamped to [-4, 4], so max 4 halvings per block
-
-      // Target should have decreased significantly (difficulty increased)
-      // Starting: MAX_TARGET/2
-      // After ~4 halvings: MAX_TARGET/32
-      expect(currentTarget).toBeLessThan(deployTarget);
-      console.log("Final target:", currentTarget.toString());
-      console.log("Final difficulty:", Number(MAX_TARGET / currentTarget));
-    });
-
-    it("ASERT model: slow blocks decrease difficulty", () => {
-      const deployTarget = MAX_TARGET / 64n; // difficulty 64
-      const targetTime = 60n;
-      const halfLife = 30n;
-
-      let currentTarget = deployTarget;
-      let lastTime = 0n;
-      const slowBlockTime = 120n; // 2x target
-
-      // Simulate 10 slow blocks
-      for (let i = 0; i < 10; i++) {
-        const currentTime = lastTime + slowBlockTime;
-        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, halfLife);
-        lastTime = currentTime;
-      }
-
-      // Target should have increased (difficulty decreased)
-      expect(currentTarget).toBeGreaterThan(deployTarget);
-    });
-
-    it("ASERT model: on-target blocks keep difficulty stable", () => {
-      const deployTarget = MAX_TARGET / 8n; // difficulty 8
-      const targetTime = 60n;
-      const halfLife = 30n;
-
-      let currentTarget = deployTarget;
-      let lastTime = 0n;
-
-      // Simulate 50 blocks exactly on target
-      for (let i = 0; i < 50; i++) {
-        const currentTime = lastTime + targetTime;
-        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, halfLife);
-        lastTime = currentTime;
-      }
-
-      // Target should be unchanged (drift = 0)
-      expect(currentTarget).toBe(deployTarget);
-    });
-
-    it("ASERT model: old halfLife=1000 does NOT retarget with 10s blocks (BUG DEMONSTRATION)", () => {
-      const deployTarget = MAX_TARGET / 2n;
-      const targetTime = 60n;
-      const buggyHalfLife = 1000n; // The old buggy default
-
-      let currentTarget = deployTarget;
-      let lastTime = 0n;
-
-      // Simulate 1000 blocks at 10s each
-      for (let i = 0; i < 1000; i++) {
-        const currentTime = lastTime + 10n;
-        currentTarget = asert(currentTarget, currentTime, lastTime, targetTime, buggyHalfLife);
-        lastTime = currentTime;
-      }
-
-      // With halfLife=1000, drift = (10-60)/1000 = 0 in integer math
-      // NO retargeting happens - target stays the same (BUG!)
-      expect(currentTarget).toBe(deployTarget);
-      console.log("With halfLife=1000, target unchanged:", currentTarget.toString());
-      console.log("This demonstrates why the old default was broken.");
-    });
-
-    it("ASERT bytecode validation: drift direction and clamping", () => {
-      // Verify the bytecode has the correct drift logic:
-      // - drift > 0: target *= 2 (easier mining)
-      // - drift < 0: target /= 2 (harder mining)
-      // - drift clamped to [-4, 4]
-
+  describe("ASERT-v2 — fractional fixed-point retarget", () => {
+    // Behavioural + full bytecode↔reference parity coverage live in
+    // dmint-asert-v2.test.ts and dmint-asert-v2-bytecode.test.ts. Here we pin the
+    // on-chain bytecode SHAPE the miner's old-vs-new ASERT detection relies on.
+    it("emits the v2 signature (<RADIX push> OP_MUL … OP_DIV), not the legacy stepper", () => {
       const hex = buildAsertDaaBytecode(60);
+      // common prefix, then RADIX push (65536 = "03000001") + OP_MUL ("95")
+      expect(hex).toContain("c5527994537994" + "03000001" + "95");
+      // legacy power-of-2 markers must be gone
+      expect(hex).not.toContain("7654a0"); // old DUP 4 GT drift clamp
+      expect(hex).not.toContain("76548f"); // old DUP 4 NEGATE
+    });
 
-      // Check drift clamp to +4 exists
-      expect(hex).toContain("7654a0"); // DUP 4 GT
-      expect(hex).toContain("7554"); // DROP 4
-
-      // Check drift clamp to -4 exists
-      expect(hex).toContain("76548f"); // DUP 4 NEGATE
-      expect(hex).toContain("9f"); // LT
-
-      // Check positive drift branch (2MUL)
-      expect(hex).toContain("7600a0"); // DUP 0 GT
-
-      // Check negative drift branch (2DIV after NEGATE)
-      expect(hex).toContain("76009f"); // DUP 0 LT
-      expect(hex).toContain("8f"); // NEGATE
+    it("rejects halfLife < 1 at build time (would divide by zero on-chain)", () => {
+      expect(() => buildAsertDaaBytecode(0)).toThrow();
     });
   });
+});

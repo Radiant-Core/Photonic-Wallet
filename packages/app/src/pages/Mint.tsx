@@ -409,7 +409,9 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
       daaMode: "asert", // Default to ASERT for dynamic difficulty
       targetBlockTime: "60", // Default 60 seconds
       // DAA-specific parameters
-      asertHalfLife: "30",
+      // ASERT-v2: halfLife is a seconds-based gain divisor (≈ a few × target
+      // block time). Default 240 ≈ 4 × the 60s default targetBlockTime.
+      asertHalfLife: "240",
       asertAsymptote: "0",
       lwmaWindowSize: "144",
       epochLength: "2016",
@@ -913,7 +915,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         };
 
         if (daaMode === "asert") {
-          daaConfig.halfLife = parseInt(asertHalfLife, 10) || 60;
+          daaConfig.halfLife = parseInt(asertHalfLife, 10) || 240;
           if (asertAsymptote)
             daaConfig.asymptote = parseInt(asertAsymptote, 10);
         } else if (daaMode === "lwma") {
@@ -1132,7 +1134,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         targetBlockTime: parseInt(targetBlockTime, 10),
                         // Add DAA-specific parameters
                         ...(daaMode === "asert" && {
-                          halfLife: parseInt(asertHalfLife, 10) || 30,
+                          halfLife: parseInt(asertHalfLife, 10) || 240,
                           asymptote: parseInt(asertAsymptote, 10) || undefined,
                         }),
                         ...(daaMode === "lwma" && {
@@ -2358,21 +2360,22 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                       {formData.daaMode === "asert" && (
                         <>
                           <FormControl>
-                            <FormLabel>{"ASERT Half Life (blocks)"}</FormLabel>
+                            <FormLabel>{"ASERT Half Life (seconds)"}</FormLabel>
                             <Input
-                              defaultValue={formData.asertHalfLife || "30"}
-                              placeholder="30"
+                              defaultValue={formData.asertHalfLife || "240"}
+                              placeholder="240"
                               name="asertHalfLife"
                               type="number"
                               onChange={onFormChange}
                               min={1}
-                              max={50}
+                              max={1000000}
                             />
                             <FormHelperText>
-                              Blocks for difficulty to halve/double. Lower = more
-                              responsive. Must be ≤ half your target block time
-                              (in seconds) for retargeting to work. Example:
-                              30 for 60s blocks. Range 1-50.
+                              Responsiveness gain (seconds). Lower = faster
+                              difficulty adjustment, higher = smoother. A good
+                              starting point is ~4× your target block time (e.g.
+                              240 for 60s blocks, 40 for 10s blocks). Each block
+                              moves difficulty at most ±25%.
                             </FormHelperText>
                           </FormControl>
                           <FormControl>
@@ -2437,11 +2440,21 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         <FormLabel>{"Initial Difficulty"}</FormLabel>
                         <Input
                           defaultValue={formData.difficulty}
-                          placeholder={formData.daaMode === "lwma" ? "4" : "10"}
+                          placeholder={
+                            formData.daaMode === "lwma" ||
+                            formData.daaMode === "asert"
+                              ? "4"
+                              : "10"
+                          }
                           name="difficulty"
                           type="number"
                           onChange={onFormChange}
-                          min={formData.daaMode === "lwma" ? 4 : 1}
+                          min={
+                            formData.daaMode === "lwma" ||
+                            formData.daaMode === "asert"
+                              ? 4
+                              : 1
+                          }
                           max={1000000}
                         />
                         {timeToMine && (
@@ -2453,9 +2466,12 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               ? "K12"
                               : "SHA256d"}
                             )
-                            {formData.daaMode === "lwma" && (
+                            {(formData.daaMode === "lwma" ||
+                              formData.daaMode === "asert") && (
                               <>
-                                {" "}• LWMA requires difficulty ≥ 4
+                                {" "}
+                                • {formData.daaMode === "lwma" ? "LWMA" : "ASERT"}{" "}
+                                requires difficulty ≥ 4
                               </>
                             )}
                           </FormHelperText>

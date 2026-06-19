@@ -919,111 +919,79 @@ void _V1_BYTECODE_PART_B;
 // Encoded as `08 [8 bytes]`. Used to cap newTarget so OP_NUM2BIN(8) in V3 PartC
 // never returns IMPOSSIBLE_ENCODING.
 const PUSH_MAX_TARGET = "08ffffffffffffff7f";
-// Push of MAX_TARGET/2 = 0x3FFF_FFFF_FFFF_FFFF, also as `08 [8 bytes]`. Used as
-// the pre-OP_2MUL ceiling: if target > MAX_TARGET/2 then OP_2MUL would overflow
-// int64 and abort the script with INVALID_NUMBER_RANGE_64_BIT.
-const PUSH_HALF_MAX_TARGET = "08ffffffffffffff3f";
+// ASERT-v2 fixed-point constants. RADIX = 2^16 is the fractional scale; the
+// per-block drift clamp is ±RADIX/4 (target moves at most ±25% per mint).
+const ASERT_V2_RADIX = 65536n; // 2^16
+const ASERT_V2_DRIFT_CLAMP = ASERT_V2_RADIX >> 2n; // 16384
 
-// One unrolled step of the positive-drift loop. Entry stack: [drift_rem, target, ...].
-// If drift_rem > 0:
-//   if target > MAX_TARGET/2: target = MAX_TARGET   (would overflow OP_2MUL)
-//   else:                     target = target * 2
-//   drift_rem -= 1
-// Mirrors miner: `newTarget = oldTarget << drift; if (newTarget > MAX) newTarget = MAX`.
-// Naive pre-MIN-then-2MUL gives `MAX - 1` for input `MAX_TARGET/2 < t ≤ MAX`,
-// which disagrees with the miner's clamp-at-MAX semantics — hence the explicit
-// conditional cap.
-const ASERT_2MUL_STEP = [
-  "7600a0", // DUP 0 GT  — drift_rem > 0?
-  "63", // IF
-  "8c", //   OP_1SUB drift_rem
-  "7c", //   SWAP → [target, drift_rem-1, ...]
-  "76", //   DUP target
-  PUSH_HALF_MAX_TARGET, //   push MAX_TARGET/2
-  "a0", //   OP_GREATERTHAN → [would_overflow, target, drift_rem-1, ...]
-  "63", //   IF (target > MAX_TARGET/2)
-  "75", //     DROP target
-  PUSH_MAX_TARGET, //     push MAX_TARGET
-  "67", //   ELSE
-  "8d", //     OP_2MUL → target * 2  (safe, target ≤ MAX_TARGET/2)
-  "68", //   ENDIF
-  "7c", //   SWAP back → [drift_rem-1, target_new, ...]
-  "68", // ENDIF
-].join("");
-
-// One unrolled step of the negative-drift loop. Entry stack: [|drift|_rem, target, ...].
-// If |drift|_rem > 0: target = target / 2; |drift|_rem -= 1.
-// OP_2DIV uses C++ int64 division (truncates toward zero); for target ≥ 1 this
-// matches bigint right-shift on positive values.
-const ASERT_2DIV_STEP = [
-  "7600a0", // DUP 0 GT  — |drift|_rem > 0?
-  "63", // IF
-  "8c", //   OP_1SUB
-  "7c", //   SWAP
-  "8e", //   OP_2DIV
-  "7c", //   SWAP back
-  "68", // ENDIF
-].join("");
+/**
+ * Canonical default ASERT halfLife (seconds) used when a deploy omits it.
+ * ≈ 4× the default 60s targetBlockTime. The Mint UI default and the Glyph-miner
+ * mirror (blockchain.ts buildNextContractState fallback) MUST equal this — keep
+ * the three in sync so an omitted-halfLife deploy and the miner agree.
+ */
+export const DEFAULT_ASERT_HALFLIFE = 240;
 
 function buildAsertDaaBytecode(halfLife: number): string {
-  // ASERT-lite DAA (Design Spec §4.5)
-  // Entry stack: [target, lastTime, targetTime, daaMode, ...]
+  // ASERT-v2 DAA — fractional, symmetric, damped (replaces the integer
+  // power-of-2 stepper as of 2026-06-19; see dmintDaaV2.ts for the rationale and
+  // the int64 overflow proof, and the 2026-06-19 DAA review for the bug it fixes).
   //
-  // History:
-  // - Prior to 2026-05-19, three NEGATE sites emitted 0x81 (BIN2NUM) instead of
-  //   0x8f (NEGATE) — see task #10. Fixed; new deployments use 0x8f.
-  // - Prior to 2026-05-25, the shift step used OP_LSHIFT/OP_RSHIFT (0x98/0x99).
-  //   Radiant Core's LShift/RShift treat the buffer as a big-endian bit string,
-  //   so on the 8-byte LE target encoding cross-byte carries flow the wrong
-  //   direction — every nonzero drift produced a result that disagreed with
-  //   the miner's bigint shift. Now uses an unrolled OP_2MUL/OP_2DIV loop
-  //   (option (a) from V2_CONTRACT_AUDIT_REPORT.md §S-CRIT-2) which operates
-  //   correctly on multi-byte LE script numbers. Per-step OP_MIN against
-  //   MAX_TARGET/2 caps the result at MAX_TARGET instead of aborting via
-  //   INVALID_NUMBER_RANGE_64_BIT on OP_2MUL overflow.
+  // Entry stack: [target, lastTime, targetTime, daaMode, ...]   (target on top)
+  // Mirrors computeAsertV2Target() exactly:
+  //   excess    = (currentTime - lastTime) - targetTime
+  //   driftFp   = (excess * RADIX) / halfLife            // signed, trunc toward 0
+  //   driftFp   = clamp(driftFp, -RADIX/4, +RADIX/4)
+  //   t         = min(target, MAX_TARGET/4)              // diff floor 4 (as LWMA)
+  //   newTarget = clamp(t + (t / RADIX) * driftFp, 1, MAX_TARGET/4)
+  //
+  // Every intermediate stays inside int64 by construction (proof in dmintDaaV2.ts),
+  // so unlike the old power-of-2 stepper there is no INVALID_NUMBER_RANGE_64_BIT
+  // risk and no dead zone / one-sided / 2x-lurch behaviour. Uses only opcodes
+  // already present in deployed dMint contracts (OP_MUL/DIV/MIN/MAX/ROT).
+  //
+  // IN-PLACE UPGRADE: tokens deployed BEFORE this change carry the old bytecode
+  // and must keep mining under the old formula. The miner distinguishes the two
+  // by the post-prefix signature `<RADIX push> OP_MUL` (this builder) vs
+  // `<halfLife push> OP_DIV` (legacy) — see Glyph-miner extractDaaParamsFromCodeScript.
+  if (!Number.isInteger(halfLife) || halfLife < 1) {
+    throw new DaaParamsValidationError(
+      `ASERT: halfLife must be an integer >= 1 (got ${halfLife})`
+    );
+  }
   const halfLifePush = pushMinimal(halfLife);
+  const radixPush = pushMinimal(ASERT_V2_RADIX); // 65536 → "03000001"
+  const clampPush = pushMinimal(ASERT_V2_DRIFT_CLAMP); // 16384
+  const negClampPush = pushMinimal(-ASERT_V2_DRIFT_CLAMP); // -16384
   return [
     "c5", // OP_TXLOCKTIME → currentTime
     "5279", // OP_2 PICK lastTime
-    "94", // OP_SUB → time_delta
+    "94", // OP_SUB → timeDelta = currentTime - lastTime
     "5379", // OP_3 PICK targetTime
-    "94", // OP_SUB → excess
-    halfLifePush, // push halfLife constant
-    "96", // OP_DIV → drift
-    // Clamp drift to [-4, +4]
-    "7654a0", // DUP OP_4 GT
-    "63", // IF
-    "7554", //   DROP, push 4
-    "68", // ENDIF
-    "76548f",
-    "9f", // DUP OP_4 NEGATE LT
-    "63", // IF
-    "75548f", //   DROP, push -4
-    "68", // ENDIF
-    // Apply shift: drift>0 → 4×conditional 2MUL with cap,
-    //              drift<0 → NEGATE then 4×conditional 2DIV,
-    //              drift==0 → DROP drift (target unchanged).
-    "7600a0", // DUP 0 GT
-    "63", // IF (positive direction)
-    ASERT_2MUL_STEP,
-    ASERT_2MUL_STEP,
-    ASERT_2MUL_STEP,
-    ASERT_2MUL_STEP,
-    "75", //   DROP drift_remaining (= 0)
-    "67", // ELSE
-    "76009f", //   DUP 0 LT
-    "63", //   IF (negative direction)
-    "8f", //     NEGATE → |drift|
-    ASERT_2DIV_STEP,
-    ASERT_2DIV_STEP,
-    ASERT_2DIV_STEP,
-    ASERT_2DIV_STEP,
-    "75", //     DROP |drift|_remaining
-    "67", //   ELSE (zero)
-    "75", //     DROP drift (= 0)
-    "68", //   ENDIF
-    "68", // ENDIF
-    // Clamp target to minimum 1
+    "94", // OP_SUB → excess = timeDelta - targetTime
+    radixPush, // push RADIX
+    "95", // OP_MUL → excess * RADIX
+    halfLifePush, // push halfLife
+    "96", // OP_DIV → driftFp  (truncates toward zero)
+    // Clamp driftFp to [-RADIX/4, +RADIX/4] via OP_MIN / OP_MAX.
+    clampPush, // push +16384
+    "a3", // OP_MIN → min(driftFp, +16384)
+    negClampPush, // push -16384
+    "a4", // OP_MAX → driftFp clamped
+    // t = min(target, MAX_TARGET/4). Bring target to top first.
+    "7c", // OP_SWAP → [target, driftFp, ...]
+    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
+    "a3", // OP_MIN → t
+    // newTarget = t + (t / RADIX) * driftFp   (divide-first ⇒ overflow-safe)
+    "76", // OP_DUP t → [t, t, driftFp, ...]
+    radixPush, // push RADIX
+    "96", // OP_DIV → t / RADIX
+    "7b", // OP_ROT → bring driftFp to top: [driftFp, tdiv, t, ...]
+    "95", // OP_MUL → delta = (t/RADIX) * driftFp
+    "93", // OP_ADD → newTarget = t + delta
+    // Clamp newTarget to [1, MAX_TARGET/4].
+    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
+    "a3", // OP_MIN
     "76519f", // DUP OP_1 LT
     "63", // IF
     "7551", //   DROP, push 1
@@ -1401,7 +1369,11 @@ function buildBytecodePartB(
   let daaBytecode = "";
   switch (daaMode) {
     case "asert":
-      daaBytecode = buildAsertDaaBytecode(daaParams?.halfLife || 3600);
+      // Default halfLife when a deploy omits it. Canonical ASERT-v2 default =
+      // DEFAULT_ASERT_HALFLIFE (≈4× the default 60s targetBlockTime); the Mint UI
+      // and the Glyph-miner mirror (blockchain.ts buildNextContractState) use the
+      // SAME value — keep all three in sync.
+      daaBytecode = buildAsertDaaBytecode(daaParams?.halfLife || DEFAULT_ASERT_HALFLIFE);
       break;
     case "lwma":
       daaBytecode = buildLinearDaaBytecode();

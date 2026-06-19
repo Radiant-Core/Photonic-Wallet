@@ -1082,49 +1082,50 @@ describe("dMint Token Creation (Glyph v2)", () => {
     });
   });
 
-  describe("ASERT DAA bytecode", () => {
-    // Regression for the 2026-05-19 opcode bug: prior implementations of
-    // buildAsertDaaBytecode emitted hex 0x81 (OP_BIN2NUM) in three places
-    // where 0x8f (OP_NEGATE) was intended. The bug rendered the negative-
-    // drift clamp identical to a second positive check and made the RSHIFT
-    // path receive a negative shift count.
-    it("emits OP_NEGATE three times and no OP_BIN2NUM in the DAA section", () => {
-      const hex = buildAsertDaaBytecode(1000);
+  describe("ASERT DAA bytecode (v2 fractional)", () => {
+    // As of 2026-06-19 buildAsertDaaBytecode emits the ASERT-v2 fractional
+    // fixed-point retarget (no dead zone, symmetric, ±25%/block damped) instead
+    // of the integer power-of-2 stepper. Full behaviour + bytecode↔reference
+    // parity coverage lives in dmint-asert-v2.test.ts / dmint-asert-v2-bytecode.test.ts.
+    it("emits the v2 fractional skeleton, not the legacy power-of-2 stepper", () => {
+      const hex = buildAsertDaaBytecode(40);
       const asm = Script.fromHex(hex).toASM();
       const tokens = asm.split(" ");
 
-      const bin2numCount = tokens.filter((t) => t === "OP_BIN2NUM").length;
-      const negateCount = tokens.filter((t) => t === "OP_NEGATE").length;
+      // driftFp = excess * RADIX / halfLife — fractional, so OP_MUL + OP_DIV.
+      expect(tokens).toContain("OP_MUL");
+      expect(tokens).toContain("OP_DIV");
+      // clamp + apply uses OP_MIN/OP_MAX and OP_ROT (no unrolled 2MUL/2DIV loop).
+      expect(tokens).toContain("OP_MIN");
+      expect(tokens).toContain("OP_MAX");
+      expect(tokens).toContain("OP_ROT");
 
-      expect(bin2numCount).toBe(0);
-      expect(negateCount).toBe(3);
-    });
-
-    it("emits the documented clamp-and-shift opcode skeleton", () => {
-      const hex = buildAsertDaaBytecode(1000);
-      const asm = Script.fromHex(hex).toASM();
-      const tokens = asm.split(" ");
-
-      // Negative clamp must compare against -4 (not 4):
-      // OP_DUP OP_4 OP_NEGATE OP_LESSTHAN
-      expect(asm).toContain("OP_DUP OP_4 OP_NEGATE OP_LESSTHAN");
-
-      // Post-2026-05-25: the shift uses OP_2MUL / OP_2DIV unrolled instead of
-      // OP_LSHIFT / OP_RSHIFT, because the latter operate byte-buffer-wise
-      // (BE bit order) and don't match bigint shift on multi-byte LE script
-      // numbers. See V2_CONTRACT_AUDIT_REPORT.md §2.1.
-      expect(tokens).not.toContain("OP_LSHIFT");
-      expect(tokens).not.toContain("OP_RSHIFT");
-
-      // Each direction is unrolled 4 times (drift clamp is ±4).
+      // Legacy power-of-2 stepper markers must be GONE.
       const mulCount = tokens.filter((t) => t === "OP_2MUL").length;
       const divCount = tokens.filter((t) => t === "OP_2DIV").length;
-      expect(mulCount).toBe(4);
-      expect(divCount).toBe(4);
+      expect(mulCount).toBe(0);
+      expect(divCount).toBe(0);
+      expect(tokens).not.toContain("OP_LSHIFT");
+      expect(tokens).not.toContain("OP_RSHIFT");
+    });
 
-      // The negative branch must NEGATE the drift before the 2DIV unroll:
-      // ... OP_IF OP_NEGATE OP_DUP 0 OP_GREATERTHAN ...
-      expect(asm).toContain("OP_NEGATE OP_DUP 0 OP_GREATERTHAN");
+    it("starts with the documented prefix + RADIX*OP_MUL detection signature", () => {
+      const hex = buildAsertDaaBytecode(40);
+      // currentTime/lastTime/targetTime subtraction prefix, then RADIX push
+      // (65536 = "03000001") + OP_MUL ("95"). The miner keys on this to tell v2
+      // contracts apart from legacy ones (which had <halfLife push> OP_DIV here).
+      expect(hex).toContain("c5527994537994" + "03000001" + "95");
+    });
+
+    it("emits canonical-minimal pushes and round-trips through the parser", () => {
+      const hex = buildAsertDaaBytecode(40);
+      const asm = Script.fromHex(hex).toASM();
+      expect(asm.length).toBeGreaterThan(0);
+      expect(hasNonMinimalDataPush(hex)).toBe(false);
+    });
+
+    it("rejects halfLife < 1 (would divide by zero on-chain)", () => {
+      expect(() => buildAsertDaaBytecode(0)).toThrow();
     });
   });
 
