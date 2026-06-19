@@ -99,7 +99,7 @@ export default function Predict() {
   }, [loadDiscovered]);
 
   const entries: ListEntry[] = useMemo(() => {
-    const localByTxid = new Map(local.map((m) => [m.createTxid, m]));
+    const localByTxid = new Map(local.map((m) => [m.createTxid, m] as const));
     const seen = new Set<string>();
     const out: ListEntry[] = [];
     for (const m of discovered) {
