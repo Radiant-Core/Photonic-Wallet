@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import {
   Alert,
@@ -74,6 +74,7 @@ import {
 } from "@app/predict/predict";
 import { bestDirectAsk, deriveMarketOdds } from "@app/predict/odds";
 import {
+  HeroCard,
   MarketHeroFrame,
   NeonBuyButton,
   NeonSplitBar,
@@ -500,6 +501,174 @@ function OrdersPanel({
   );
 }
 
+/** Kalshi-style buy panel: pick a side, see the best fillable order's cost, implied odds and BOTH
+ *  outcomes, then one-click market-buy it. Shares are downside-protected — per the carrier model
+ *  (math.js splitCost) a share of N carries N (its floor, always recoverable) and the winner
+ *  additionally redeems N collateral → 2N, while the loser keeps N (NOT a total loss). Orders fill
+ *  whole (atomic SINGLE|ACP), so this buys the single best order on that side; for a custom size,
+ *  post a bid in the order book below. */
+function BuyPanel({
+  yesAsk,
+  noAsk,
+  busy,
+  live,
+  onBuy,
+}: {
+  yesAsk: IndexedAsk | null;
+  noAsk: IndexedAsk | null;
+  busy: string;
+  live: LiveMarket | null;
+  onBuy: (side: "yes" | "no", ask: IndexedAsk | null) => void;
+}) {
+  const [side, setSide] = useState<"yes" | "no">("yes");
+  const ask = side === "yes" ? yesAsk : noAsk;
+  const N = ask?.amount ?? 0;
+  const P = ask?.priceSats ?? 0;
+  const oddsLabel = ask ? pct(askProbability(P, N)) : "—";
+  const SIDE = side.toUpperCase();
+
+  const priceTab = (s: "yes" | "no", available: boolean) => {
+    const active = side === s;
+    const c = s === "yes" ? NEON.yes : NEON.no;
+    const a = s === "yes" ? yesAsk : noAsk;
+    const label = a ? pct(askProbability(a.priceSats, a.amount)) : "—";
+    return (
+      <Button
+        flex="1"
+        h="60px"
+        variant="unstyled"
+        onClick={() => setSide(s)}
+        borderRadius="lg"
+        border="1.5px solid"
+        borderColor={active ? c : "whiteAlpha.200"}
+        bg={
+          active
+            ? s === "yes"
+              ? "rgba(43, 213, 138, 0.12)"
+              : "rgba(242, 84, 122, 0.12)"
+            : "transparent"
+        }
+        boxShadow={
+          active
+            ? `0 0 18px ${
+                s === "yes" ? "rgba(70, 230, 160, 0.25)" : "rgba(255, 90, 120, 0.25)"
+              }`
+            : "none"
+        }
+        opacity={available ? 1 : 0.55}
+        transition="all 0.15s ease"
+        _hover={{ borderColor: c }}
+      >
+        <Flex direction="column" align="center" justify="center" h="full">
+          <Text
+            fontFamily="mono"
+            fontWeight="bold"
+            letterSpacing="0.1em"
+            color={active ? c : "whiteAlpha.800"}
+          >
+            {s.toUpperCase()}
+          </Text>
+          <Text
+            fontFamily="mono"
+            fontSize="sm"
+            color={active ? c : "whiteAlpha.500"}
+          >
+            {label}
+          </Text>
+        </Flex>
+      </Button>
+    );
+  };
+
+  const row = (label: string, value: ReactNode, sub?: ReactNode) => (
+    <Flex justify="space-between" align="baseline" py={1.5}>
+      <Text fontSize="sm" color="whiteAlpha.600">
+        {label}
+      </Text>
+      <Flex align="baseline" gap={2} fontFamily="mono">
+        {sub}
+        <Text fontWeight="semibold" color="whiteAlpha.900">
+          {value}
+        </Text>
+      </Flex>
+    </Flex>
+  );
+
+  return (
+    <HeroCard maxW="3xl" mb={6} px={{ base: 5, md: 6 }} py={{ base: 5, md: 6 }}>
+      <Flex justify="space-between" align="center" mb={4}>
+        <Heading size="sm" color="whiteAlpha.900">
+          Buy shares
+        </Heading>
+        <Badge
+          colorScheme="green"
+          variant="subtle"
+          borderRadius="full"
+          px={2.5}
+          fontFamily="mono"
+        >
+          No fees
+        </Badge>
+      </Flex>
+
+      <Flex gap={3} mb={5}>
+        {priceTab("yes", !!yesAsk)}
+        {priceTab("no", !!noAsk)}
+      </Flex>
+
+      {ask ? (
+        <>
+          <Box borderTop="1px solid" borderColor="whiteAlpha.100" pt={2} mb={4}>
+            {row("Implied odds", `${oddsLabel} chance`)}
+            {row("You pay", <Photons value={P} />)}
+            {row(
+              `If ${SIDE} wins`,
+              <Photons value={2 * N} />,
+              <Text fontSize="sm" color={NEON.yes}>
+                +<Photons value={2 * N - P} />
+              </Text>
+            )}
+            {row(
+              `If ${SIDE} loses`,
+              <Photons value={N} />,
+              <Text fontSize="sm" color={NEON.no}>
+                −<Photons value={P - N} />
+              </Text>
+            )}
+          </Box>
+
+          <NeonBuyButton
+            side={side}
+            w="full"
+            isLoading={busy === `Buy ${SIDE}`}
+            isDisabled={!live}
+            onClick={() => onBuy(side, ask)}
+          >
+            BUY {SIDE} · {oddsLabel}
+          </NeonBuyButton>
+
+          <Text fontSize="xs" color="whiteAlpha.400" mt={3} textAlign="center">
+            Fills the best order (<Photons value={N} /> shares). A losing share
+            keeps its <Photons value={N} /> floor — not a total loss. For a custom
+            size, post a buy order below.
+          </Text>
+        </>
+      ) : (
+        <Text
+          fontSize="sm"
+          color="whiteAlpha.500"
+          fontFamily="mono"
+          py={5}
+          textAlign="center"
+        >
+          No {SIDE} sell orders to fill yet — post a buy order below to bid at
+          your price.
+        </Text>
+      )}
+    </HeroCard>
+  );
+}
+
 export default function PredictMarket() {
   const { createTxid } = useParams<{ createTxid: string }>();
   const toast = useToast();
@@ -810,31 +979,7 @@ export default function PredictMarket() {
                 </Text>
               </Box>
             </Flex>
-            <NeonSplitBar yesPct={odds.yesProb * 100} mb={6} />
-            <Flex gap={4} wrap="wrap">
-              <NeonBuyButton
-                side="yes"
-                isLoading={busy === "Buy YES"}
-                isDisabled={!yesAsk || !live}
-                onClick={() => buyBest("yes", yesAsk)}
-              >
-                BUY YES
-                {yesAsk
-                  ? ` · ${pct(askProbability(yesAsk.priceSats, yesAsk.amount))}`
-                  : ""}
-              </NeonBuyButton>
-              <NeonBuyButton
-                side="no"
-                isLoading={busy === "Buy NO"}
-                isDisabled={!noAsk || !live}
-                onClick={() => buyBest("no", noAsk)}
-              >
-                BUY NO
-                {noAsk
-                  ? ` · ${pct(askProbability(noAsk.priceSats, noAsk.amount))}`
-                  : ""}
-              </NeonBuyButton>
-            </Flex>
+            <NeonSplitBar yesPct={odds.yesProb * 100} />
           </>
         ) : (
           <Text fontSize="sm" color="whiteAlpha.500" fontFamily="mono">
@@ -844,6 +989,16 @@ export default function PredictMarket() {
           </Text>
         )}
       </MarketHeroFrame>
+
+      {open && (
+        <BuyPanel
+          yesAsk={yesAsk}
+          noAsk={noAsk}
+          busy={busy}
+          live={live}
+          onBuy={buyBest}
+        />
+      )}
 
       <Flex align="center" gap={3} mb={5} flexWrap="wrap">
         <OracleTrustBadge t={tracked} pool={live?.market.satoshis} />
