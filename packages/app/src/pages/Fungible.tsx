@@ -43,7 +43,7 @@ function TokenGrid() {
   const [includePending, setIncludePending] = useState(true);
   const [mediaOnly, setMediaOnly] = useState(false);
   const [tickerOnly, setTickerOnly] = useState(false);
-  const [sortBy, setSortBy] = useState("balance_desc");
+  const [sortBy, setSortBy] = useState("newest");
   const [viewMode, setViewMode] = useState<"compact" | "comfortable">(
     "compact"
   );
