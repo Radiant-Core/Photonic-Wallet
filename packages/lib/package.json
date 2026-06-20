@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./crypto": "./src/crypto.ts",
     "./script": "./src/script.ts",
     "./wallet": "./src/wallet.ts",
     "./ipfs": "./src/ipfs.ts",

@@ -36,6 +36,7 @@ import {
   createDelegateTokens,
 } from "@photonic/lib/mint";
 import { Outpoint, photonsToRXD } from "@photonic/lib";
+import { verifyTransactionHash } from "@photonic/lib/crypto";
 import { p2pkhScriptHash, parseNftScript } from "@photonic/lib/script";
 import { confirm, password } from "@inquirer/prompts";
 import {
@@ -446,6 +447,22 @@ async function createRelatedDelegateTokens(
       }
       const txid = result[result.length - 1].tx_hash;
       const hex = await client.request("blockchain.transaction.get", txid);
+
+      // SECURITY (C5): verify the server returned the tx we asked for.
+      // dsha256(rawTx) reversed must equal the requested txid, otherwise a
+      // poisoning server could substitute a different transaction.
+      if (!verifyTransactionHash(hexToBytes(hex as string), txid)) {
+        cmd.error(
+          errorMessage(
+            chalk(
+              "Transaction hash mismatch for ref:",
+              highlight(ref),
+              "txid:",
+              highlight(txid)
+            )
+          )
+        );
+      }
 
       const tx = new Transaction(hex);
       const hexAddress = Address.fromString(wallet.address).toObject().hash;
