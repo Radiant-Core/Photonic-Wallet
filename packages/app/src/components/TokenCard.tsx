@@ -78,7 +78,7 @@ export default function TokenCard({
               colorScheme="yellow"
               variant="solid"
             >
-              {"Pending"}
+              {"Unconfirmed"}
             </Badge>
           </Tooltip>
         )}

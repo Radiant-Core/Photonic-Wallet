@@ -10,10 +10,9 @@ import {
   InputGroup,
   InputLeftElement,
   Select,
-  useToast,
 } from "@chakra-ui/react";
 import PageHeader from "@app/components/PageHeader";
-import { SmartTokenType } from "@app/types";
+import { ContractType, SmartTokenType } from "@app/types";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import TokenRow from "@app/components/TokenRow";
@@ -24,7 +23,8 @@ import NoContent from "@app/components/NoContent";
 import MintMenu from "@app/components/MintMenu";
 import { Search2Icon } from "@chakra-ui/icons";
 import { BsList, BsListUl } from "react-icons/bs";
-import { reverifySpecificTokens } from "@app/utils/reverifyStuckTokens";
+import { parseFtScript } from "@lib/script";
+import { reverseRef } from "@lib/Outpoint";
 
 export default function Fungible() {
   const { sref } = useParams();
@@ -46,65 +46,8 @@ function TokenGrid() {
   const [viewMode, setViewMode] = useState<"compact" | "comfortable">(
     "compact"
   );
-  const toast = useToast();
 
-  const handleFixPending = async () => {
-    try {
-      toast({
-        title: "Re-verifying pending tokens...",
-        description: "Attempting to fix pending tokens",
-        status: "info",
-        duration: 3000,
-        isClosable: true,
-      });
-
-      const result = await reverifySpecificTokens();
-      
-      if (result.success) {
-        const totalReverified = Object.values(result.results).reduce((sum, r) => sum + r.reverified, 0);
-        const totalStuck = Object.values(result.results).reduce((sum, r) => sum + r.total, 0);
-        
-        if (totalReverified > 0) {
-          toast({
-            title: "Success!",
-            description: `Re-verified ${totalReverified}/${totalStuck} stuck tokens. Refresh the page to see updated status.`,
-            status: "success",
-            duration: 5000,
-            isClosable: true,
-          });
-        } else {
-          toast({
-            title: "No tokens fixed",
-            description: totalStuck > 0 
-              ? `${totalStuck} stuck tokens found but verification still failed. Try again later.`
-              : "No stuck tokens found",
-            status: "warning",
-            duration: 5000,
-            isClosable: true,
-          });
-        }
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to re-verify tokens. Please try again.",
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        });
-      }
-    } catch (error) {
-      console.error("Error fixing pending tokens:", error);
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred. Please try again.",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      });
-    }
-  };
-
-  const [tokens, balances] = useLiveQuery(
+  const [tokens, balances, mempoolRefs] = useLiveQuery(
     async () => {
       // Get all FTs
       const tokens = await db.glyph
@@ -119,10 +62,27 @@ function TokenGrid() {
           b,
         ])
       );
-      return [tokens, balances];
+
+      // Refs that hold a genuinely-unconfirmed (in-mempool) coin — i.e. a UTXO
+      // with no block height yet (height === Infinity). This is deliberately NOT
+      // the `unconfirmed` balance bucket: that bucket also counts confirmed-but-
+      // SPV-unverified coins (R14), which are real, deeply-buried, fully-spendable
+      // tokens that must NOT be flagged. Keying the badge on height alone is what
+      // stops old tokens from showing "Unconfirmed" forever.
+      const mempoolRefs = new Set<string>();
+      await db.txo
+        .where({ contractType: ContractType.FT, spent: 0 })
+        .each((txo) => {
+          if (txo.height === Infinity || txo.height === undefined) {
+            const { ref } = parseFtScript(txo.script);
+            if (ref) mempoolRefs.add(reverseRef(ref));
+          }
+        });
+
+      return [tokens, balances, mempoolRefs];
     },
     [],
-    [null, null]
+    [null, null, null]
   );
 
   const listed = useMemo(() => {
@@ -132,11 +92,14 @@ function TokenGrid() {
         const confirmed = balances?.[token.ref]?.confirmed || 0;
         const unconfirmed = balances?.[token.ref]?.unconfirmed || 0;
         const value = includePending ? confirmed + unconfirmed : confirmed;
+        // Badge only on a genuinely-unconfirmed (mempool) coin, not on the
+        // unconfirmed balance bucket (which folds in SPV-unverified confirmed
+        // coins — see mempoolRefs above).
+        const pending = mempoolRefs?.has(token.ref) ?? false;
         return {
           token,
           value,
-          confirmed,
-          unconfirmed,
+          pending,
         };
       })
       .filter(({ token, value }) => {
@@ -178,7 +141,16 @@ function TokenGrid() {
     });
 
     return rows;
-  }, [balances, includePending, mediaOnly, query, sortBy, tickerOnly, tokens]);
+  }, [
+    balances,
+    mempoolRefs,
+    includePending,
+    mediaOnly,
+    query,
+    sortBy,
+    tickerOnly,
+    tokens,
+  ]);
 
   if (!tokens) {
     return null;
@@ -212,7 +184,7 @@ function TokenGrid() {
           variant={includePending ? "solid" : "outline"}
           onClick={() => setIncludePending((v) => !v)}
         >
-          Pending
+          Unconfirmed
         </Button>
 
         <Button
@@ -229,15 +201,6 @@ function TokenGrid() {
           onClick={() => setTickerOnly((v) => !v)}
         >
           Ticker
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          colorScheme="orange"
-          onClick={handleFixPending}
-        >
-          Fix Pending
         </Button>
 
         <Select
@@ -283,7 +246,7 @@ function TokenGrid() {
           <NoContent>{"No assets"}</NoContent>
         ) : (
           listed.map(
-            ({ token, value, unconfirmed }) =>
+            ({ token, value, pending }) =>
               value > 0 && (
                 <TokenRow
                   glyph={token}
@@ -292,7 +255,7 @@ function TokenGrid() {
                   to={`/fungible/token/${token.ref}`}
                   size={viewMode === "compact" ? "sm" : "md"}
                   defaultIcon={RiQuestionFill}
-                  pending={unconfirmed > 0}
+                  pending={pending}
                 />
               )
           )

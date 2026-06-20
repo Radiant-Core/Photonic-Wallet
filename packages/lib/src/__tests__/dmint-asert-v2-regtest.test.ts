@@ -24,8 +24,12 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "child_process";
 import rjs from "@radiant-core/radiantjs";
-import { buildAsertDaaBytecode, pushMinimal } from "../script";
-import { computeAsertV2Target, ASERT_V2_MAX_TARGET_DIV4 } from "../dmintDaaV2";
+import { buildAsertDaaBytecode, buildLinearDaaBytecode, pushMinimal } from "../script";
+import {
+  computeAsertV2Target,
+  computeLwmaV2Target,
+  ASERT_V2_MAX_TARGET_DIV4,
+} from "../dmintDaaV2";
 
 const RUN = process.env.RUN_REGTEST === "1";
 const d = RUN ? describe : describe.skip;
@@ -58,19 +62,15 @@ type Case = {
   halfLife: bigint;
 };
 
-function buildCheckScript(c: Case): string {
-  const expected = computeAsertV2Target(
-    c.oldTarget,
-    c.lastTime,
-    c.currentTime,
-    c.targetTime,
-    c.halfLife
-  );
+// Wrap a DAA body in a self-contained check script: seed [targetTime,lastTime,
+// target], run the body (c5 reads the spend nLockTime), then OP_EQUALVERIFY the
+// computed newTarget AND the preserved lastTime/targetTime slots against `expected`.
+function buildCheckScript(c: Case, daaBodyHex: string, expected: bigint): string {
   return (
     pushMinimal(c.targetTime) +
     pushMinimal(c.lastTime) +
     pushMinimal(c.oldTarget) +
-    buildAsertDaaBytecode(Number(c.halfLife)) +
+    daaBodyHex +
     pushMinimal(expected) +
     "88" + // OP_EQUALVERIFY  (newTarget)
     pushMinimal(c.lastTime) +
@@ -79,6 +79,58 @@ function buildCheckScript(c: Case): string {
     "88" + // OP_EQUALVERIFY  (targetTime preserved)
     "51" // OP_TRUE
   );
+}
+
+// Shared fund→spend→testmempoolaccept driver. Returns the per-case results.
+function runGate(checkScripts: string[], currentTimes: bigint[]): boolean[] {
+  const utxos = JSON.parse(rcli("listunspent", "1", "9999999"));
+  const u = utxos.find(
+    (x: any) => x.amount > 1 && x.spendable && x.scriptPubKey.startsWith("76a914")
+  );
+  if (!u) throw new Error("need a spendable P2PKH utxo");
+  const wif = rcli("dumpprivkey", u.address);
+  const changeAddr = rcli("getnewaddress");
+  const destAddr = rcli("getnewaddress");
+
+  const fund = new Transaction();
+  fund.from({
+    txId: u.txid,
+    outputIndex: u.vout,
+    script: u.scriptPubKey,
+    satoshis: Number(BigInt(Math.round(u.amount * 1e8))),
+  });
+  for (const hex of checkScripts) {
+    fund.addOutput(
+      new Transaction.Output({ script: Script.fromHex(hex), satoshis: Number(SATS) })
+    );
+  }
+  fund.change(changeAddr);
+  fund.sign(PrivateKey.fromWIF(wif));
+  const fundTxid = rcli("sendrawtransaction", fund.uncheckedSerialize());
+  if (fundTxid.length !== 64) throw new Error("funding broadcast failed: " + fundTxid);
+  rcli("generatetoaddress", "1", changeAddr);
+
+  const ok: boolean[] = [];
+  for (let i = 0; i < checkScripts.length; i++) {
+    const spend = new Transaction();
+    spend.from({ txId: fundTxid, outputIndex: i, script: checkScripts[i], satoshis: Number(SATS) });
+    spend.to(destAddr, Number(SATS - 5_000_000n)); // generous fee (min relay 10k photons/byte)
+    spend.inputs[0].setScript(Script.empty());
+    spend.inputs[0].sequenceNumber = 0xffffffff;
+    spend.nLockTime = Number(currentTimes[i]);
+    try {
+      const res = JSON.parse(
+        rcli("testmempoolaccept", JSON.stringify([spend.uncheckedSerialize()]), "true")
+      );
+      ok.push(!!(res[0] || {}).allowed);
+      if (!ok[i]) console.log(`  reject[${i}]:`, (res[0] || {})["reject-reason"]);
+    } catch (e: any) {
+      ok.push(false);
+      console.log(`  error[${i}]:`, (e.stderr || e.message || "").toString().replace(/\s+/g, " ").slice(0, 200));
+    }
+  }
+  rcli("generatetoaddress", "1", changeAddr);
+  return ok;
 }
 
 d("ASERT-v2 regtest consensus gate", () => {
@@ -96,84 +148,44 @@ d("ASERT-v2 regtest consensus gate", () => {
     { name: "backward clock (harden, floor)", oldTarget: 1000n, lastTime: 1_500_000n, currentTime: 1_400_000n, targetTime: 10n, halfLife: 1n },
   ];
 
-  it("radiantd accepts every v2 retarget spend (bytecode == reference, no overflow)", () => {
-    // 1) one funding tx with a check-script output per case.
-    const utxos = JSON.parse(rcli("listunspent", "1", "9999999"));
-    const u = utxos.find(
-      (x: any) => x.amount > 1 && x.spendable && x.scriptPubKey.startsWith("76a914")
+  it("radiantd accepts every ASERT-v2 retarget spend (bytecode == reference, no overflow)", () => {
+    const checkScripts = cases.map((c) =>
+      buildCheckScript(
+        c,
+        buildAsertDaaBytecode(Number(c.halfLife)),
+        computeAsertV2Target(c.oldTarget, c.lastTime, c.currentTime, c.targetTime, c.halfLife)
+      )
     );
-    expect(u, "need a spendable P2PKH utxo").toBeTruthy();
-    const wif = rcli("dumpprivkey", u.address);
-    const changeAddr = rcli("getnewaddress");
-    const destAddr = rcli("getnewaddress");
+    const ok = runGate(checkScripts, cases.map((c) => c.currentTime));
+    const failed = cases.filter((_, i) => !ok[i]).map((c) => c.name);
+    console.log("ASERT-v2 regtest:", ok.map((v, i) => `${v ? "PASS" : "FAIL"} ${cases[i].name}`).join(" | "));
+    expect(failed, failed.join(", ")).toEqual([]);
+  });
+});
 
-    const checkScripts = cases.map(buildCheckScript);
+d("LWMA-v2 regtest consensus gate", () => {
+  // LWMA-v2 = damped fractional, gain auto = targetTime. Same int64-overflow-stress
+  // mix. halfLife is ignored by LWMA (kept on Case for shape reuse).
+  const DIV4 = ASERT_V2_MAX_TARGET_DIV4;
+  const cases: Case[] = [
+    { name: "on-target", oldTarget: DIV4 / 1000n, lastTime: 1_600_000n, currentTime: 1_600_010n, targetTime: 10n, halfLife: 0n },
+    { name: "slow (ease)", oldTarget: DIV4 / 1000n, lastTime: 1_600_000n, currentTime: 1_600_025n, targetTime: 10n, halfLife: 0n },
+    { name: "fast (harden)", oldTarget: DIV4 / 1000n, lastTime: 1_600_000n, currentTime: 1_600_005n, targetTime: 10n, halfLife: 0n },
+    { name: "1s deviation (no dead zone)", oldTarget: DIV4 / 1000n, lastTime: 1_600_000n, currentTime: 1_600_011n, targetTime: 10n, halfLife: 0n },
+    { name: "max target, big gap, tt=1 (overflow stress)", oldTarget: DIV4, lastTime: 1_000_000n, currentTime: 1_400_000n, targetTime: 1n, halfLife: 0n },
+    { name: "tiny target, fast", oldTarget: 1n, lastTime: 1_600_000n, currentTime: 1_600_001n, targetTime: 60n, halfLife: 0n },
+    { name: "backward clock (harden, floor)", oldTarget: 1000n, lastTime: 1_600_000n, currentTime: 1_500_000n, targetTime: 10n, halfLife: 0n },
+    { name: "large targetTime, on-target", oldTarget: DIV4 / 500n, lastTime: 1_600_000n, currentTime: 1_600_600n, targetTime: 600n, halfLife: 0n },
+  ];
 
-    const fund = new Transaction();
-    fund.from({
-      txId: u.txid,
-      outputIndex: u.vout,
-      script: u.scriptPubKey,
-      satoshis: Number(BigInt(Math.round(u.amount * 1e8))),
-    });
-    for (const hex of checkScripts) {
-      fund.addOutput(
-        new Transaction.Output({
-          script: Script.fromHex(hex),
-          satoshis: Number(SATS),
-        })
-      );
-    }
-    fund.change(changeAddr);
-    fund.sign(PrivateKey.fromWIF(wif));
-    const fundHex = fund.uncheckedSerialize();
-    const fundTxid = rcli("sendrawtransaction", fundHex);
-    expect(fundTxid.length).toBe(64);
-    rcli("generatetoaddress", "1", changeAddr);
-
-    // 2) spend each check output; nLockTime carries currentTime to OP_TXLOCKTIME.
-    const results: { name: string; ok: boolean; err?: string }[] = [];
-    for (let i = 0; i < cases.length; i++) {
-      const c = cases[i];
-      const spend = new Transaction();
-      spend.from({
-        txId: fundTxid,
-        outputIndex: i,
-        script: checkScripts[i],
-        satoshis: Number(SATS),
-      });
-      // Radiant min relay floor is 10,000 photons/byte; leave a generous fee so
-      // the tx clears policy and proceeds to script verification (what we test).
-      spend.to(destAddr, Number(SATS - 5_000_000n)); // 0.05 RXD fee
-      spend.inputs[0].setScript(Script.empty()); // self-contained script, no sig
-      spend.inputs[0].sequenceNumber = 0xffffffff; // final ⇒ nLockTime free
-      spend.nLockTime = Number(c.currentTime);
-      const spendHex = spend.uncheckedSerialize();
-      try {
-        // 2nd arg = allowhighfees (Radiant's older signature) so our generous
-        // fee doesn't trip the high-fee guard.
-        const res = JSON.parse(
-          rcli("testmempoolaccept", JSON.stringify([spendHex]), "true")
-        );
-        const r0 = res[0] || {};
-        results.push({
-          name: c.name,
-          ok: !!r0.allowed,
-          err: r0.allowed ? undefined : `${r0["reject-reason"] || JSON.stringify(r0)}`,
-        });
-      } catch (e: any) {
-        results.push({
-          name: c.name,
-          ok: false,
-          err: (e.stderr || e.message || "").toString().replace(/\s+/g, " ").slice(0, 300),
-        });
-      }
-    }
-    rcli("generatetoaddress", "1", changeAddr);
-
-    const failed = results.filter((r) => !r.ok);
-    // eslint-disable-next-line no-console
-    console.log("regtest v2 results:\n" + results.map((r) => `  ${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.err ? " :: " + r.err : ""}`).join("\n"));
-    expect(failed, failed.map((f) => `${f.name}: ${f.err}`).join("\n")).toEqual([]);
+  it("radiantd accepts every LWMA-v2 retarget spend (bytecode == reference, no overflow)", () => {
+    const body = buildLinearDaaBytecode();
+    const checkScripts = cases.map((c) =>
+      buildCheckScript(c, body, computeLwmaV2Target(c.oldTarget, c.lastTime, c.currentTime, c.targetTime))
+    );
+    const ok = runGate(checkScripts, cases.map((c) => c.currentTime));
+    const failed = cases.filter((_, i) => !ok[i]).map((c) => c.name);
+    console.log("LWMA-v2 regtest:", ok.map((v, i) => `${v ? "PASS" : "FAIL"} ${cases[i].name}`).join(" | "));
+    expect(failed, failed.join(", ")).toEqual([]);
   });
 });

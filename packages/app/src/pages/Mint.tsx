@@ -2400,19 +2400,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
 
                       {formData.daaMode === "lwma" && (
                         <FormControl>
-                          <FormLabel>{"LWMA Window Size (blocks)"}</FormLabel>
-                          <Input
-                            defaultValue={formData.lwmaWindowSize || "144"}
-                            placeholder="144"
-                            name="lwmaWindowSize"
-                            type="number"
-                            onChange={onFormChange}
-                            min={10}
-                            max={1000}
-                          />
                           <FormHelperText>
-                            Number of recent blocks to consider for difficulty
-                            calculation.
+                            LWMA is a damped proportional adjustment with no tunable
+                            parameter — its responsiveness is set automatically by
+                            your target block time, and each block moves difficulty
+                            by at most ±25%. Choose ASERT instead if you want to
+                            tune responsiveness via a half-life. Requires difficulty
+                            ≥ 4.
                           </FormHelperText>
                         </FormControl>
                       )}

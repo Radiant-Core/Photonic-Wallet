@@ -103,3 +103,27 @@ export function computeAsertV2Target(
   if (newTarget < 1n) newTarget = 1n;
   return newTarget;
 }
+
+/**
+ * LWMA-v2 reference — the damped fractional single-sample retarget used by the
+ * on-chain `lwma` mode (buildLinearDaaBytecode). It is exactly computeAsertV2Target
+ * with the responsiveness gain auto-set to targetTime instead of a separate
+ * halfLife knob, so a 2×-target block hits the ±25%/block clamp. Mirrors the
+ * on-chain bytecode and the Glyph-miner computeLinearV2Target bit-for-bit.
+ *
+ *   driftFp = (excess * RADIX) / targetTime   // gain = 1/targetTime (vs 1/halfLife)
+ *
+ * Same int64 overflow proof as ASERT-v2 (targetTime ≥ 1 is deploy-enforced, so the
+ * OP_DIV is safe and never /0).
+ */
+export function computeLwmaV2Target(
+  oldTarget: bigint,
+  lastTime: bigint,
+  currentTime: bigint,
+  targetTime: bigint
+): bigint {
+  // targetTime is the divisor; deploy validation guarantees targetTime ≥ 1, but
+  // guard the reference so it never divides by zero.
+  const tt = targetTime < 1n ? 1n : targetTime;
+  return computeAsertV2Target(oldTarget, lastTime, currentTime, tt, tt);
+}

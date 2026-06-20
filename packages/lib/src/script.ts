@@ -915,10 +915,6 @@ const _V1_BYTECODE_PART_B =
   "bc01147f77587f040000000088817600a269a269577ae500a069567ae600a06901d053797e0cdec0e9aa76e378e4a269e69d7eaa76e47b9d547a818b76537a9c537ade789181547ae6939d635279cd01d853797e016a7e886778de519d547854807ec0eb557f777e5379ec78885379eac0e9885379cc519d75686d7551";
 void _V1_BYTECODE_PART_B;
 
-// Push of MAX_TARGET = 0x7FFF_FFFF_FFFF_FFFF as 8-byte LE script number.
-// Encoded as `08 [8 bytes]`. Used to cap newTarget so OP_NUM2BIN(8) in V3 PartC
-// never returns IMPOSSIBLE_ENCODING.
-const PUSH_MAX_TARGET = "08ffffffffffffff7f";
 // ASERT-v2 fixed-point constants. RADIX = 2^16 is the fractional scale; the
 // per-block drift clamp is ±RADIX/4 (target moves at most ±25% per mint).
 const ASERT_V2_RADIX = 65536n; // 2^16
@@ -1005,63 +1001,61 @@ function buildAsertDaaBytecode(halfLife: number): string {
 const PUSH_QUARTER_MAX_TARGET = "08ffffffffffffff1f";
 
 function buildLinearDaaBytecode(): string {
-  // LWMA / Linear DAA (Design Spec §4.6)
-  // Logical formula: new_target = old_target * time_delta / targetTime
+  // LWMA-v2 DAA — fractional, symmetric, damped (replaces the memoryless
+  // single-sample unity-gain `target × delta / targetTime` as of 2026-06-19;
+  // see dmintDaaV2.ts and the 2026-06-19 DAA review).
   //
-  // Naive bytecode `target * timeDelta / targetTime` overflows int64 at default
-  // difficulty (V2_CONTRACT_AUDIT_REPORT.md §2.2):
-  //   oldTarget ≈ MAX_TARGET/10 ≈ 9.22e17,  targetTime=60s
-  //   → 9.22e17 × 60 = 5.5e19 > 2^63-1 → OP_MUL aborts the script.
+  // This is the ASERT-v2 fractional retarget (dmintDaaV2.ts computeAsertV2Target)
+  // with the responsiveness gain auto-set to targetTime instead of a separate
+  // halfLife knob — i.e. LWMA = damped single-sample proportional control:
+  //   excess    = (currentTime - lastTime) - targetTime
+  //   driftFp   = (excess * RADIX) / targetTime          // gain = 1/targetTime
+  //   driftFp   = clamp(driftFp, -RADIX/4, +RADIX/4)      // ±25%/block damping
+  //   t         = min(target, MAX_TARGET/4)               // diff floor 4
+  //   newTarget = clamp(t + (t / RADIX) * driftFp, 1, MAX_TARGET/4)
   //
-  // Fix (audit §S-CRIT-3) has three parts:
-  //   1. Cap timeDelta to 4 × targetTime. Matches ASERT's ±4 drift clamp
-  //      semantics; LWMA cannot react to a single-block outlier beyond 4×
-  //      the target block time.
-  //   2. Cap target to MAX_TARGET/4 so the algebraic upper bound of
-  //      (target / targetTime) × (4 × targetTime) ≈ 4 × target stays ≤
-  //      MAX_TARGET regardless of targetTime. Practical impact:
-  //      LWMA-mode contracts cannot have a difficulty floor below 4
-  //      (dMintDiffToTarget(d) ≤ MAX_TARGET/4 ⇒ d ≥ 4).
-  //   3. Reorder to divide-first: (target_capped / targetTime) × cappedDelta.
-  //      Necessary even after caps to keep the intermediate inside int64.
+  // vs the old unity-gain LWMA (which could jump difficulty up to 4× in one block
+  // and slam target to 1 on a 0-delta block), this caps each step to ±25% and is
+  // stable on-target, so realized inter-mint time converges instead of oscillating.
+  // Every intermediate stays inside int64 by construction (proof in dmintDaaV2.ts).
   //
-  // After these caps the on-chain `OP_MUL` is overflow-free for every input
-  // tuple the wallet can build, and `OP_NUM2BIN(8)` in V3 PartC always
-  // succeeds.
+  // IN-PLACE UPGRADE: tokens deployed BEFORE this change carry the old single-
+  // sample bytecode and must keep mining under the old formula. The miner
+  // distinguishes them by the post-prefix signature `…537994 <RADIX> OP_MUL`
+  // (this builder) vs the old `…537954 OP_MUL` — see Glyph-miner
+  // extractDaaParamsFromCodeScript (lwma branch).
+  const radixPush = pushMinimal(ASERT_V2_RADIX); // 65536 → "03000001"
+  const clampPush = pushMinimal(ASERT_V2_DRIFT_CLAMP); // 16384
+  const negClampPush = pushMinimal(-ASERT_V2_DRIFT_CLAMP); // -16384
   return [
     "c5", // OP_TXLOCKTIME → currentTime
     "5279", // OP_2 PICK lastTime
-    "94", // OP_SUB → timeDelta
-    // Cap timeDelta to 4 × targetTime. targetTime is at depth 3 (timeDelta on
-    // top, then target, lastTime, targetTime).
+    "94", // OP_SUB → timeDelta = currentTime - lastTime
     "5379", // OP_3 PICK targetTime
-    "54", // OP_4
-    "95", // OP_MUL → 4 × targetTime
-    "a3", // OP_MIN → timeDelta_capped (upper)
-    // Floor timeDelta at 0. A block's nLockTime need only exceed the 11-block
-    // median-time-past, so it can be EARLIER than the previous mint's locktime,
-    // making `delta` negative. A negative delta passes the OP_MIN above, and then
-    // `(target / targetTime) × delta` produces a large-magnitude negative product
-    // that underflows int64 → OP_MUL aborts (script number range), bricking the
-    // mint at that block. max(0, …) is the correct retarget semantics (no time
-    // elapsed ⇒ no easing) and keeps the product in [0, MAX_TARGET]. The ≥1 clamp
-    // below maps a 0 result to target 1 (max difficulty for that single block).
-    "00", // OP_0
-    "a4", // OP_MAX → timeDelta_capped = max(0, min(4×targetTime, delta))
-    // Pre-cap target to MAX_TARGET/4 before the divide. See header comment.
-    "7c", // SWAP → [target, timeDelta_capped, lastTime, targetTime, ...]
-    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
-    "a3", // OP_MIN → target_capped
-    // Divide-first reorder.
-    "5379", // OP_3 PICK targetTime
-    "96", // OP_DIV → target_capped / targetTime
-    "95", // OP_MUL → (target_capped / targetTime) × timeDelta_capped = newTarget
-    // Defensive: cap newTarget at MAX_TARGET so NUM2BIN(8) in PartC succeeds.
-    // With caps above this is mathematically guaranteed but the OP_MIN costs
-    // 10 bytes and removes a class of future-bug-by-edit.
-    PUSH_MAX_TARGET, // push MAX_TARGET
+    "94", // OP_SUB → excess = timeDelta - targetTime
+    radixPush, // push RADIX
+    "95", // OP_MUL → excess * RADIX
+    "5379", // OP_3 PICK targetTime  (the gain divisor — distinguishes LWMA from ASERT)
+    "96", // OP_DIV → driftFp = (excess * RADIX) / targetTime
+    // Clamp driftFp to [-RADIX/4, +RADIX/4].
+    clampPush, // push +16384
     "a3", // OP_MIN
-    // Clamp newTarget to minimum 1.
+    negClampPush, // push -16384
+    "a4", // OP_MAX → driftFp clamped
+    // t = min(target, MAX_TARGET/4). Bring target to top first.
+    "7c", // OP_SWAP → [target, driftFp, ...]
+    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
+    "a3", // OP_MIN → t
+    // newTarget = t + (t / RADIX) * driftFp   (divide-first ⇒ overflow-safe)
+    "76", // OP_DUP t
+    radixPush, // push RADIX
+    "96", // OP_DIV → t / RADIX
+    "7b", // OP_ROT → bring driftFp to top
+    "95", // OP_MUL → delta = (t/RADIX) * driftFp
+    "93", // OP_ADD → newTarget = t + delta
+    // Clamp newTarget to [1, MAX_TARGET/4].
+    PUSH_QUARTER_MAX_TARGET, // push MAX_TARGET/4
+    "a3", // OP_MIN
     "76519f", // DUP 1 LT
     "63", // IF
     "7551", //   DROP 1

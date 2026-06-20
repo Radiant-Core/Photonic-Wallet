@@ -17,6 +17,7 @@ import {
   SmartTokenType,
 } from "@app/types";
 import { buildUpdateTXOs } from "./updateTxos";
+import { verifyTxoInclusion } from "./verifyTxo";
 import db from "@app/db";
 import Outpoint, { reverseRef } from "@lib/Outpoint";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
@@ -435,19 +436,36 @@ export class NFTWorker implements Subscription {
       }
       const found = foundOurs;
 
-      const height = current.height || Infinity;
-
       // Upsert the ref-tracked singleton txo. `byRef:1` keeps the scripthash
       // sweep (updateTxos) from re-marking it spent on the next sync.
       const existing = await db.txo
         .where({ txid: loc, vout: found.vout })
         .first();
+
+      // Resolve the confirmation height. blockchain.ref.get reports height 0 not
+      // only for genuinely-mempool singletons but ALSO for confirmed ones whose
+      // height the indexer hasn't resolved yet (RXinDexer ref.get cache lag). A
+      // raw 0 here stores the byRef txo at height:Infinity, and because byRef
+      // singletons never reappear in listunspent to be healed, the NFT/name then
+      // shows "Unconfirmed" forever. So when ref.get gives no height, try to
+      // recover the real one, and never regress a height we already recorded.
+      let height = current.height && current.height > 0 ? current.height : 0;
+      if (!height) {
+        height = await this.resolveSingletonHeight(loc);
+      }
+      const finalHeight =
+        height > 0
+          ? height
+          : existing?.height !== undefined
+            ? existing.height
+            : Infinity;
+
       let txoId: number;
       if (existing?.id !== undefined) {
         await db.txo.update(existing.id, {
           script: found.script,
           value: found.value,
-          height,
+          height: finalHeight,
           spent: 0,
           contractType: ContractType.NFT,
           byRef: 1,
@@ -459,20 +477,64 @@ export class NFTWorker implements Subscription {
           vout: found.vout,
           script: found.script,
           value: found.value,
-          height,
+          height: finalHeight,
           spent: 0,
           contractType: ContractType.NFT,
           byRef: 1,
         })) as number;
       }
 
-      if (g.lastTxoId !== txoId || g.spent !== 0 || g.height !== height) {
+      if (g.lastTxoId !== txoId || g.spent !== 0 || g.height !== finalHeight) {
         await db.glyph.update(g.id, {
           lastTxoId: txoId,
           spent: 0,
-          height,
+          height: finalHeight,
         });
       }
+    }
+  }
+
+  /**
+   * Recover the confirmed block height of a ref-tracked singleton location when
+   * `blockchain.ref.get` reports height 0.
+   *
+   * ref.get returns 0 both for genuinely-mempool singletons and for confirmed
+   * ones whose height the indexer hasn't caught up on yet — the two are
+   * indistinguishable from ref.get alone. So we ask the daemon (via the indexer)
+   * for the tx's confirmation count, derive the height against our locally-synced
+   * header tip, then PROVE that height with a Merkle proof. Requiring the proof
+   * means a transient client/daemon tip mismatch (an off-by-one while still
+   * catching up) can never persist a wrong height: an unprovable candidate
+   * returns 0 and the caller leaves the singleton unconfirmed, to be retried on
+   * the next sync. Genuinely-mempool txs (no confirmations) also return 0.
+   */
+  protected async resolveSingletonHeight(loc: string): Promise<number> {
+    try {
+      const verbose = (await this.electrum.client?.request(
+        "blockchain.transaction.get",
+        loc,
+        true
+      )) as { confirmations?: number } | undefined;
+      const confs = verbose?.confirmations;
+      if (typeof confs !== "number" || confs < 1) return 0; // mempool / unknown
+
+      const tip = await db.header.orderBy("height").last();
+      if (!tip || typeof tip.height !== "number") return 0;
+
+      const candidate = tip.height - confs + 1;
+      if (candidate <= 0) return 0;
+
+      // Only trust the candidate once its Merkle proof checks out against our
+      // own PoW-validated header — otherwise we were lagging the chain; stay
+      // unconfirmed and retry next sync rather than store a wrong height.
+      const proven = await verifyTxoInclusion(
+        this.electrum.client,
+        loc,
+        candidate
+      );
+      return proven ? candidate : 0;
+    } catch {
+      return 0;
     }
   }
 

@@ -104,7 +104,7 @@ export default function TokenRow({
                 flexShrink={0}
                 alignSelf="center"
               >
-                {"Pending"}
+                {"Unconfirmed"}
               </Badge>
             </Tooltip>
           )}
