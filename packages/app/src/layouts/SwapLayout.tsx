@@ -15,6 +15,7 @@ import {
 } from "react-icons/tb";
 import { LuFilePlus } from "react-icons/lu";
 import ActionIcon from "@app/components/ActionIcon";
+import Toolbar from "@app/components/Toolbar";
 import { loading, syncSwaps } from "@app/swap";
 
 export default function SwapLayout() {
@@ -35,15 +36,16 @@ export default function SwapLayout() {
     <ContentContainer>
       <PageHeader
         toolbar={
-          <Button
-            variant="primary"
-            as={Link}
-            to="/swap/load"
-            leftIcon={<Icon as={TbFileUpload} />}
-            shadow="dark-md"
-          >
-            {t`Load Swap`}
-          </Button>
+          <Toolbar>
+            <Button
+              variant="primary"
+              as={Link}
+              to="/swap/load"
+              leftIcon={<Icon as={TbFileUpload} />}
+            >
+              {t`Load Swap`}
+            </Button>
+          </Toolbar>
         }
       >
         {t`Swap`}

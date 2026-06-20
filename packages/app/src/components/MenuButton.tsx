@@ -36,7 +36,7 @@ export default function MenuButton({
       alignItems="center"
       as={as || Link}
       to={to}
-      py={6}
+      py={5}
       px={4}
       width="calc(100% - 16px)"
       overflow="hidden"
@@ -44,6 +44,8 @@ export default function MenuButton({
       textOverflow="ellipsis"
       color={active ? "white" : "whiteAlpha.700"}
       fontSize="sm"
+      fontWeight="medium"
+      boxShadow={active ? "sm" : undefined}
       bgImage={active ? `url(${gradient})` : undefined}
       bgPosition="center center"
       bgSize="cover"

@@ -10,13 +10,11 @@ import {
   ModalCloseButton,
   UseDisclosureProps,
   useToast,
-  Flex,
   Alert,
   AlertDescription,
   AlertIcon,
 } from "@chakra-ui/react";
 import { SmartToken, ContractType } from "@app/types";
-import { WarningIcon } from "@chakra-ui/icons";
 import coinSelect, { SelectableInput } from "@lib/coinSelect";
 import { ftScript, p2pkhScript } from "@lib/script";
 import { buildTx } from "@lib/tx";
@@ -165,22 +163,25 @@ export default function MeltFungible({ glyph, onSuccess, disclosure }: Props) {
                 <AlertDescription>{errorMessage}</AlertDescription>
               </Alert>
             )}
-            <Flex direction="row" gap={4}>
-              <WarningIcon fontSize="2xl" />
-              {"This will destroy your tokens! Are you sure?"}
-            </Flex>
+            <Alert status="warning" borderRadius="md">
+              <AlertIcon />
+              <AlertDescription>
+                {"This will destroy your tokens! Are you sure?"}
+              </AlertDescription>
+            </Alert>
           </ModalBody>
           <ModalFooter>
             <Button
               type="submit"
-              bgColor="red.600"
-              _hover={{ bg: "red.500" }}
+              colorScheme="red"
               isLoading={loading}
               mr={4}
             >
               {"Melt"}
             </Button>
-            <Button onClick={onClose}>{"Cancel"}</Button>
+            <Button variant="ghost" onClick={onClose}>
+              {"Cancel"}
+            </Button>
           </ModalFooter>
         </ModalContent>
       </form>

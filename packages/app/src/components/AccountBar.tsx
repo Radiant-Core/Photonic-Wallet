@@ -112,6 +112,7 @@ export default function AccountBar(props: FlexProps) {
           {"Receive"}
         </Button>
         <Button
+          variant="primary"
           size={{ base: "sm", "2xl": "md" }}
           leftIcon={<ActionIcon as={TbArrowUpRight} />}
           onClick={() => (openModal.value = { modal: "send" })}

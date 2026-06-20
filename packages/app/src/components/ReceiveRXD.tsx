@@ -34,10 +34,17 @@ export default function ReceiveRXD({ disclosure }: Props) {
         <ModalHeader>{"Receive"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody alignItems="center" pb={8}>
-          <Box mb={4}>
+          <Box mb={4} color="text.secondary">
             Send {network.value.name} coins and tokens to this address
           </Box>
-          <Box borderRadius="md" overflow="hidden" mb={4}>
+          <Box
+            borderRadius="lg"
+            overflow="hidden"
+            mb={4}
+            bg="white"
+            p={3}
+            display="inline-block"
+          >
             <QRCodeSVG size={256} value={address} includeMargin />
           </Box>
           <Identifier>{address}</Identifier>

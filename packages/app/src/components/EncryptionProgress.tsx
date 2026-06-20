@@ -78,7 +78,7 @@ export function EncryptionProgress({
         <style>{`
           .encryption-progress.error {
             padding: 16px;
-            background: rgba(220, 53, 69, 0.1);
+            background: rgba(220, 53, 69, 0.12);
             border-radius: 8px;
             border-left: 4px solid #dc3545;
           }
@@ -96,11 +96,11 @@ export function EncryptionProgress({
 
           .operation-title {
             font-weight: 600;
-            color: #dc3545;
+            color: #ff8a8a;
           }
 
           .error-message {
-            color: #666;
+            color: rgba(255, 255, 255, 0.7);
             font-size: 13px;
           }
         `}</style>
@@ -122,7 +122,7 @@ export function EncryptionProgress({
         <style>{`
           .encryption-progress.complete {
             padding: 16px;
-            background: rgba(40, 167, 69, 0.1);
+            background: rgba(40, 167, 69, 0.12);
             border-radius: 8px;
             border-left: 4px solid #28a745;
           }
@@ -140,11 +140,11 @@ export function EncryptionProgress({
 
           .operation-title {
             font-weight: 600;
-            color: #28a745;
+            color: #6ee7a8;
           }
 
           .success-message {
-            color: #666;
+            color: rgba(255, 255, 255, 0.7);
             font-size: 13px;
           }
         `}</style>
@@ -166,7 +166,7 @@ export function EncryptionProgress({
         <style>{`
           .encryption-progress.idle {
             padding: 16px;
-            background: rgba(0, 0, 0, 0.02);
+            background: #14141e;
             border-radius: 8px;
           }
 
@@ -183,11 +183,11 @@ export function EncryptionProgress({
 
           .operation-title {
             font-weight: 600;
-            color: #333;
+            color: rgba(255, 255, 255, 0.9);
           }
 
           .waiting-message {
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             font-size: 13px;
           }
         `}</style>
@@ -230,9 +230,9 @@ export function EncryptionProgress({
       <style>{`
         .encryption-progress.active {
           padding: 16px;
-          background: rgba(76, 175, 80, 0.05);
+          background: rgba(76, 175, 80, 0.08);
           border-radius: 8px;
-          border: 1px solid rgba(76, 175, 80, 0.2);
+          border: 1px solid rgba(76, 175, 80, 0.25);
         }
 
         .progress-header {
@@ -249,18 +249,18 @@ export function EncryptionProgress({
         .stage-label {
           flex: 1;
           font-weight: 500;
-          color: #333;
+          color: rgba(255, 255, 255, 0.9);
         }
 
         .percent-label {
           font-weight: 600;
-          color: #4caf50;
+          color: #6ee7a8;
           font-size: 14px;
         }
 
         .progress-bar-container {
           height: 8px;
-          background: rgba(0, 0, 0, 0.1);
+          background: rgba(255, 255, 255, 0.1);
           border-radius: 4px;
           overflow: hidden;
           margin-bottom: 8px;
@@ -278,7 +278,7 @@ export function EncryptionProgress({
           display: flex;
           justify-content: space-between;
           font-size: 12px;
-          color: #666;
+          color: rgba(255, 255, 255, 0.7);
         }
 
         .bytes-processed {
@@ -289,17 +289,17 @@ export function EncryptionProgress({
           text-transform: uppercase;
           font-size: 10px;
           padding: 2px 6px;
-          background: rgba(0, 0, 0, 0.05);
+          background: rgba(255, 255, 255, 0.08);
           border-radius: 3px;
         }
 
         .encryption-note {
           margin-top: 12px;
           padding: 8px 12px;
-          background: rgba(76, 175, 80, 0.1);
+          background: rgba(76, 175, 80, 0.12);
           border-radius: 6px;
           font-size: 12px;
-          color: #2e7d32;
+          color: #6ee7a8;
         }
       `}</style>
     </div>

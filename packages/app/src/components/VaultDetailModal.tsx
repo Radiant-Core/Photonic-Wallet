@@ -16,21 +16,20 @@ import {
   Collapse,
   Divider,
   Badge,
+  Icon,
   IconButton,
   Link,
-  Table,
-  Tbody,
   Tooltip,
-  Tr,
-  Td,
   useClipboard,
 } from "@chakra-ui/react";
 import { CopyIcon } from "@chakra-ui/icons";
+import { TbLock, TbLockOpen } from "react-icons/tb";
 import { t } from "@lingui/macro";
 import { VaultRecord } from "@app/types";
 import { wallet } from "@app/signals";
 import { serializeRecoveryInfo } from "@app/vaultRecovery";
 import createExplorerUrl from "@app/network/createExplorerUrl";
+import DataRow from "./DataRow";
 import Photons from "./Photons";
 import { formatLocktime, vaultTimeRemaining } from "@lib/vault";
 
@@ -88,7 +87,7 @@ export default function VaultDetailModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl">
       <ModalOverlay />
-      <ModalContent>
+      <ModalContent shadow="xl">
         <ModalHeader>
           <HStack>
             <Text>{t`Vault Details`}</Text>
@@ -96,7 +95,13 @@ export default function VaultDetailModal({
               colorScheme={
                 vault.claimed ? "gray" : isUnlockable ? "green" : "orange"
               }
+              display="inline-flex"
+              alignItems="center"
+              gap={1}
             >
+              {!vault.claimed && (
+                <Icon as={isUnlockable ? TbLockOpen : TbLock} boxSize={3} />
+              )}
               {vault.claimed
                 ? t`Claimed`
                 : isUnlockable
@@ -114,80 +119,68 @@ export default function VaultDetailModal({
           <VStack align="stretch" spacing={4}>
             <Box>
               <Text fontWeight="bold" mb={2}>{t`Vault Information`}</Text>
-              <Table size="sm" variant="simple">
-                <Tbody>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Asset Type`}</Td>
-                    <Td textTransform="uppercase">{vault.assetType}</Td>
-                  </Tr>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Amount`}</Td>
-                    <Td>
-                      <Photons value={vault.value} />
-                    </Td>
-                  </Tr>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Unlock At`}</Td>
-                    <Td>{formatLocktime(vault.locktime, vault.mode)}</Td>
-                  </Tr>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Remaining`}</Td>
-                    <Td>
-                      {vault.claimed
-                        ? t`Claimed`
-                        : remaining.unit === "blocks"
-                        ? `${remaining.value.toLocaleString()} blocks`
-                        : t`Ready`}
-                    </Td>
-                  </Tr>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Recipient`}</Td>
-                    <Td>
-                      <Text
-                        as="span"
-                        fontFamily="mono"
-                        fontSize="xs"
-                        wordBreak="break-all"
-                      >
-                        {vault.recipientAddress || t`(unknown)`}
-                      </Text>
-                      {recipientIsYou && (
-                        <Badge ml={2} colorScheme="green" fontSize="2xs">
-                          {t`You`}
-                        </Badge>
-                      )}
-                    </Td>
-                  </Tr>
-                  <Tr>
-                    <Td fontWeight="medium">{t`Sender`}</Td>
-                    <Td>
-                      <Text
-                        as="span"
-                        fontFamily="mono"
-                        fontSize="xs"
-                        wordBreak="break-all"
-                      >
-                        {vault.senderAddress || t`(unknown)`}
-                      </Text>
-                      {senderIsYou && (
-                        <Badge ml={2} colorScheme="green" fontSize="2xs">
-                          {t`You`}
-                        </Badge>
-                      )}
-                    </Td>
-                  </Tr>
-                </Tbody>
-              </Table>
+              <DataRow label={t`Asset Type`}>
+                <Text textTransform="uppercase">{vault.assetType}</Text>
+              </DataRow>
+              <DataRow label={t`Amount`}>
+                <Box sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  <Photons value={vault.value} />
+                </Box>
+              </DataRow>
+              <DataRow label={t`Unlock At`}>
+                <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  {formatLocktime(vault.locktime, vault.mode)}
+                </Text>
+              </DataRow>
+              <DataRow label={t`Remaining`}>
+                <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  {vault.claimed
+                    ? t`Claimed`
+                    : remaining.unit === "blocks"
+                    ? `${remaining.value.toLocaleString()} blocks`
+                    : t`Ready`}
+                </Text>
+              </DataRow>
+              <DataRow label={t`Recipient`}>
+                <Text
+                  as="span"
+                  fontFamily="mono"
+                  fontSize="xs"
+                  wordBreak="break-all"
+                >
+                  {vault.recipientAddress || t`(unknown)`}
+                </Text>
+                {recipientIsYou && (
+                  <Badge ml={2} colorScheme="green" fontSize="2xs">
+                    {t`You`}
+                  </Badge>
+                )}
+              </DataRow>
+              <DataRow label={t`Sender`}>
+                <Text
+                  as="span"
+                  fontFamily="mono"
+                  fontSize="xs"
+                  wordBreak="break-all"
+                >
+                  {vault.senderAddress || t`(unknown)`}
+                </Text>
+                {senderIsYou && (
+                  <Badge ml={2} colorScheme="green" fontSize="2xs">
+                    {t`You`}
+                  </Badge>
+                )}
+              </DataRow>
             </Box>
             <Divider />
             {/* Recovery section — what you need to restore this vault */}
             <Box>
               <Text fontWeight="bold" mb={2}>{t`Recovery`}</Text>
-              <Text fontSize="xs" color="whiteAlpha.600" mb={3}>
+              <Text fontSize="xs" color="text.muted" mb={3}>
                 {t`Save this transaction ID. Vaults are not part of your recovery phrase — the TXID (or the redeem script below) is what restores access after a wallet rebuild.`}
               </Text>
               <HStack
-                bg="blackAlpha.300"
+                bg="surface.sunken"
                 borderRadius="md"
                 px={2}
                 py={1}
@@ -236,7 +229,7 @@ export default function VaultDetailModal({
               </HStack>
               <Collapse in={showScript} animateOpacity>
                 <HStack
-                  bg="blackAlpha.300"
+                  bg="surface.sunken"
                   borderRadius="md"
                   px={2}
                   py={1}
@@ -276,7 +269,7 @@ export default function VaultDetailModal({
                   isExternal
                   fontFamily="mono"
                   fontSize="xs"
-                  color="blue.400"
+                  color="accent.secondary"
                 >
                   {vault.txid.slice(0, 16)}...
                 </Link>

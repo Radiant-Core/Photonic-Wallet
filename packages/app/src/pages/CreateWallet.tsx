@@ -147,7 +147,7 @@ export default function CreateWallet() {
           <Card mt={{ base: 4, lg: 0 }} mb={{ lg: 4 }} p={4} width="2xl">
             {step === 0 ? (
               <>
-                <Heading size="md" mb={4}>
+                <Heading textStyle="h2" mb={4}>
                   {"Create a wallet"}
                 </Heading>
                 {error && (
@@ -197,6 +197,7 @@ export default function CreateWallet() {
                     </Select>
                   </FormControl>
                   <Button
+                    variant="primary"
                     width="full"
                     type="submit"
                     isLoading={loading}
@@ -213,7 +214,7 @@ export default function CreateWallet() {
               </>
             ) : (
               <>
-                <Heading size="md" mb={4}>
+                <Heading textStyle="h2" mb={4}>
                   {"Wallet created"}
                 </Heading>
                 <Box mb={4}>
@@ -223,6 +224,7 @@ export default function CreateWallet() {
                 </Box>
                 <RecoveryPhrase phrase={phrase} />
                 <Button
+                  variant="primary"
                   display={{ base: "none", lg: "flex" }}
                   as={Link}
                   to="/objects"
@@ -231,6 +233,7 @@ export default function CreateWallet() {
                   {"Confirm"}
                 </Button>
                 <Button
+                  variant="primary"
                   display={{ base: "flex", lg: "none" }}
                   as={Link}
                   to="/home"

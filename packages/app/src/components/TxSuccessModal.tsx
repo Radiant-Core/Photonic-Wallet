@@ -36,7 +36,9 @@ export default function TxSuccessModal({
         <ModalHeader>{"Transaction successful"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          <Text mb={2}>{"Transaction ID:"}</Text>
+          <Text mb={2} textStyle="label">
+            {"Transaction ID:"}
+          </Text>
           <div>
             <Identifier showCopy>{txid || "Unknown"}</Identifier>
           </div>
@@ -45,6 +47,9 @@ export default function TxSuccessModal({
             to={createExplorerUrl(txid)}
             target="_blank"
             isExternal
+            color="accent.secondary"
+            display="inline-flex"
+            alignItems="center"
             my={4}
           >
             {"View on block explorer"}

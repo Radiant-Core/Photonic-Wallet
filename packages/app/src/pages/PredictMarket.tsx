@@ -287,7 +287,7 @@ function OrdersPanel({
 
       {myOrders.length > 0 && (
         <Box mb={4}>
-          <Text fontSize="sm" color="gray.400" mb={1}>
+          <Text fontSize="sm" color="text.muted" mb={1}>
             My posted orders
           </Text>
           <Table size="sm" maxW="3xl">
@@ -342,7 +342,7 @@ function OrdersPanel({
       )}
 
       <Flex align="center" gap={2} mb={1}>
-        <Text fontSize="sm" color="gray.400">
+        <Text fontSize="sm" color="text.muted">
           Order book (indexer)
         </Text>
         <Button size="xs" onClick={reloadBook}>
@@ -352,7 +352,7 @@ function OrdersPanel({
       {live.state.status === Status.OPEN &&
         bookOdds &&
         bookOdds.mid !== null && (
-          <Flex align="center" gap={2} my={1} color="gray.500" fontSize="xs">
+          <Flex align="center" gap={2} my={1} color="text.muted" fontSize="xs">
             <Box
               flex="1"
               borderBottom="1px solid"
@@ -372,12 +372,12 @@ function OrdersPanel({
       {book === null ? (
         <Spinner size="sm" />
       ) : !book.available ? (
-        <Text fontSize="sm" color="gray.500" mb={4}>
+        <Text fontSize="sm" color="text.muted" mb={4}>
           The connected indexer has no swap index — orders can still be filled
           from an advertisement txid below.
         </Text>
       ) : book.asks.length === 0 ? (
-        <Text fontSize="sm" color="gray.500" mb={4}>
+        <Text fontSize="sm" color="text.muted" mb={4}>
           No open orders for this market.
         </Text>
       ) : (
@@ -1002,7 +1002,7 @@ export default function PredictMarket() {
 
       <Flex align="center" gap={3} mb={5} flexWrap="wrap">
         <OracleTrustBadge t={tracked} pool={live?.market.satoshis} />
-        <Text fontFamily="mono" fontSize="xs" color="gray.500">
+        <Text fontFamily="mono" fontSize="xs" color="text.muted">
           market {tracked.marketRef.substring(0, 16)}… · created{" "}
           {tracked.createTxid.substring(0, 8)}…
         </Text>
@@ -1089,7 +1089,7 @@ export default function PredictMarket() {
               <Heading size="sm" mb={2}>
                 Mint complete sets
               </Heading>
-              <Text fontSize="sm" color="gray.400" mb={2}>
+              <Text fontSize="sm" color="text.muted" mb={2}>
                 Lock N RXD collateral (plus N+N carrier value) to mint N YES + N
                 NO. A complete set can always be merged back — only a losing
                 single side at resolution loses value.
@@ -1128,7 +1128,7 @@ export default function PredictMarket() {
             My positions
           </Heading>
           {live.myYes.length + live.myNo.length === 0 ? (
-            <Text fontSize="sm" color="gray.400" mb={6}>
+            <Text fontSize="sm" color="text.muted" mb={6}>
               None.
             </Text>
           ) : (
@@ -1224,7 +1224,7 @@ export default function PredictMarket() {
               proposal on an optimistic one. Shown while the market is open or has a live proposal. */}
           {!soloOracle && (open || proposed || disputed) && (
             <Box mb={2} maxW="2xl">
-              <Text fontSize="sm" color="gray.400" mb={1}>
+              <Text fontSize="sm" color="text.muted" mb={1}>
                 Committee market ({threshold}-of-N). Member pubkeys in slot
                 order and ≥{threshold} member WIFs:
               </Text>
@@ -1271,12 +1271,12 @@ export default function PredictMarket() {
                       : "Finalizable now."}
                   </Text>
                   {proposerPkh && (
-                    <Text color="gray.400" mt={1}>
+                    <Text color="text.muted" mt={1}>
                       Proposed by{" "}
                       <ProposerTag pkh={proposerPkh} isYou={proposerIsYou} />
                     </Text>
                   )}
-                  <Text color="gray.400" mt={1}>
+                  <Text color="text.muted" mt={1}>
                     Proposer bond <Photons value={tracked.optimistic.bond} /> is
                     repaid on finalize, or slashed if the committee overrides the
                     proposal. Anyone may <b>dispute</b> it by locking a counter-bond.
@@ -1306,7 +1306,7 @@ export default function PredictMarket() {
                     the winner takes the whole pot; the loser forfeits their bond.
                   </Text>
                   {live.state.optimistic?.disputerPkh && (
-                    <Text color="gray.400" mt={1}>
+                    <Text color="text.muted" mt={1}>
                       Disputed by{" "}
                       <ProposerTag
                         pkh={live.state.optimistic.disputerPkh}
@@ -1314,7 +1314,7 @@ export default function PredictMarket() {
                       />
                     </Text>
                   )}
-                  <Text color="gray.400" mt={1}>
+                  <Text color="text.muted" mt={1}>
                     {timeoutLeft > 0
                       ? `If the committee never acts, anyone may refund both bonds and revert in ${timeoutLeft} block(s) (≈${blocksToDuration(
                           timeoutLeft
@@ -1560,14 +1560,14 @@ export default function PredictMarket() {
               </>
             )}
             {!open && !proposed && !disputed && (
-              <Text fontSize="sm" color="gray.400">
+              <Text fontSize="sm" color="text.muted">
                 Final.
               </Text>
             )}
           </HStack>
 
           {optimistic && open && live && live.height < tracked.expiry && (
-            <Text fontSize="xs" color="gray.500" maxW="2xl" mb={1}>
+            <Text fontSize="xs" color="text.muted" maxW="2xl" mb={1}>
               Proposals open at block {tracked.expiry.toLocaleString()} (current{" "}
               {live.height.toLocaleString()} · {blockEta(live.height, tracked.expiry)}
               ).
@@ -1581,7 +1581,7 @@ export default function PredictMarket() {
               only be resolved by the committee or reverted after expiry + grace.
             </Text>
           )}
-          <Text fontSize="xs" color="gray.500" maxW="2xl">
+          <Text fontSize="xs" color="text.muted" maxW="2xl">
             {optimistic
               ? "Optimistic market: after expiry anyone proposes the outcome by locking a bond (≥ pool/8); if unchallenged, anyone finalizes after the window and the bond returns. ANYONE may dispute a wrong proposal by locking a counter-bond — that escalates to the committee, and the winner takes both bonds. If the committee never escalates, anyone times the dispute out after the window (both bonds refunded, market reverts). "
               : soloOracle

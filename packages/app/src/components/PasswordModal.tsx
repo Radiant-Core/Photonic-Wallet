@@ -105,7 +105,7 @@ export default function PasswordModal({
           </ModalBody>
 
           <ModalFooter>
-            <Button type="submit" isLoading={loading}>
+            <Button type="submit" variant="primary" isLoading={loading}>
               {"Unlock"}
             </Button>
           </ModalFooter>

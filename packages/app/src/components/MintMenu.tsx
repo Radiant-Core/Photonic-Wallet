@@ -22,7 +22,7 @@ export default function MintMenu() {
         variant="primary"
         as={Button}
         rightIcon={<ChevronDownIcon />}
-        shadow="dark-md"
+        boxShadow="md"
       >
         {"Mint"}
       </MenuButton>

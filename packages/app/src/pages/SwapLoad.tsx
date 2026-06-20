@@ -568,14 +568,14 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
   return (
     <>
       <Card gap={4} p={{ base: 4, md: 8 }} w="full">
-        <Heading size="md" pb={4} pl={2}>
+        <Heading textStyle="h3" pb={4} pl={2}>
           Receive
         </Heading>
         <SwapItem item={swapParams.from} />
       </Card>
       <Icon as={MdOutlineSwapVert} boxSize={6} color="gray.200" />
       <Card gap={4} p={{ base: 4, md: 8 }} w="full">
-        <Heading size="md" pb={4} pl={2}>
+        <Heading textStyle="h3" pb={4} pl={2}>
           Send to
           <Identifier showCopy copyValue={swapParams.address} ml={4}>
             {swapParams.address}
@@ -633,14 +633,13 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
                     hasCopied ? <CheckIcon color="green.400" /> : <CopyIcon />
                   }
                   onClick={onCopy}
-                  shadow="dark-md"
+                  boxShadow="md"
                 >
                   Copy Signed Transaction
                 </Button>
                 <Button
                   leftIcon={<TbSend />}
                   variant="primary"
-                  shadow="dark-md"
                   onClick={() => broadcast()}
                 >
                   Broadcast Transaction
@@ -648,7 +647,7 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
               </>
             ) : (
               <Button
-                shadow="dark-md"
+                variant="primary"
                 leftIcon={<AiOutlineSignature />}
                 onClick={() => signTransaction()}
               >

@@ -66,11 +66,13 @@ export default function SwapTable({
   return (
     <Table size={{ base: "sm", xl: "md" }}>
       <Thead>
-        <Tr>
+        <Tr bg="surface.sunken">
           <Th display={{ base: "none", lg: "table-cell" }} />
-          <Th>{"TX ID"}</Th>
-          <Th>{"Swap"}</Th>
-          <Th display={{ base: "none", md: "table-cell" }}>{"Date"}</Th>
+          <Th textStyle="label">{"TX ID"}</Th>
+          <Th textStyle="label">{"Swap"}</Th>
+          <Th textStyle="label" display={{ base: "none", md: "table-cell" }}>
+            {"Date"}
+          </Th>
           {ActionsComponent && <Th></Th>}
           <Th width="50px" />
           <Th display={{ base: "none", lg: "table-cell" }} />
@@ -80,15 +82,24 @@ export default function SwapTable({
         {swaps
           ?.filter((swap) => !!swap.txid)
           .map((swap) => (
-            <Tr key={swap.txid}>
+            <Tr
+              key={swap.txid}
+              borderBottomWidth="1px"
+              borderColor="border.subtle"
+              transition="background 0.12s"
+              _hover={{ bg: "bg.50" }}
+            >
               <Td display={{ base: "none", lg: "table-cell" }} />
-              <Td>
+              <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
                 {swap.txid.substring(0, 4)}…{swap.txid.substring(60, 64)}
               </Td>
               <Td>
                 <Description swap={swap} />
               </Td>
-              <Td display={{ base: "none", md: "table-cell" }}>
+              <Td
+                display={{ base: "none", md: "table-cell" }}
+                sx={{ fontVariantNumeric: "tabular-nums" }}
+              >
                 {swap.date ? dayjs(swap.date).format("L LT") : "…"}
               </Td>
               {ActionsComponent && (

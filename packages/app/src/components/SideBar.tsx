@@ -34,7 +34,7 @@ export default function SideBar({ ...rest }: GridProps) {
       height="100svh"
       bgColor="bg.300"
       borderRightWidth={{ lg: "1px" }}
-      borderRightColor="whiteAlpha.50"
+      borderRightColor="border.subtle"
       gridTemplateRows={{
         base: "72px auto auto 1fr",
         lg: "auto auto auto 1fr",
@@ -69,9 +69,10 @@ export default function SideBar({ ...rest }: GridProps) {
       <SimpleGrid
         overflow="auto"
         borderTopWidth={1}
-        borderTopColor="whiteAlpha.100"
+        borderTopColor="border.subtle"
         mt={6}
         pt={6}
+        spacingY={0.5}
       >
         <MenuButton
           display={{ base: "inline-flex", lg: "none" }}
@@ -133,7 +134,7 @@ export default function SideBar({ ...rest }: GridProps) {
       </SimpleGrid>
       <Box />
       <SyncBar />
-      <SimpleGrid py={4} borderTopWidth={1} borderTopColor="whiteAlpha.100">
+      <SimpleGrid py={4} borderTopWidth={1} borderTopColor="border.subtle">
         <StatusBar />
       </SimpleGrid>
     </Grid>

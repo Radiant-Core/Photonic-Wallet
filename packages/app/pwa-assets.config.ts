@@ -4,7 +4,7 @@ import {
 } from "@vite-pwa/assets-generator/config";
 
 const preset = minimal2023Preset;
-const background = "#26262b";
+const background = "#1a1a24";
 preset.apple.resizeOptions = { background };
 preset.maskable.resizeOptions = { background };
 preset.maskable.padding = 0.5;

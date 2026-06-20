@@ -67,8 +67,8 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: ["**/*"],
       manifest: {
-        theme_color: "#01579b",
-        background_color: "#26262b",
+        theme_color: "#1a1a24",
+        background_color: "#1a1a24",
         display: "standalone",
         scope: "/",
         start_url: "/",

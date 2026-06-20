@@ -52,7 +52,10 @@ export default function TokenData({ glyph }: { glyph: SmartToken }) {
           p={4}
           whiteSpace="pre-wrap"
           wordBreak="break-all"
-          bg="blackAlpha.300"
+          bg="surface.sunken"
+          borderRadius="md"
+          fontFamily="mono"
+          textStyle="small"
         >
           {jsonHex(
             {

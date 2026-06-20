@@ -62,13 +62,13 @@ export function EncryptToggle({
         <Flex align="center" gap={2}>
           <Icon
             as={enabled ? MdLock : MdLockOpen}
-            color={enabled ? "purple.300" : "gray.500"}
+            color={enabled ? "accent.focus" : "text.muted"}
             boxSize={4}
           />
           <Text
             fontSize="sm"
             fontWeight="medium"
-            color={enabled ? "purple.300" : "gray.400"}
+            color={enabled ? "accent.focus" : "text.muted"}
           >
             {enabled ? "Encryption Enabled" : "Encryption Disabled"}
           </Text>
@@ -85,13 +85,13 @@ export function EncryptToggle({
       </Flex>
 
       {enabled && estimatedSize && (
-        <Text fontSize="xs" color="gray.400" mt={2} ml={1}>
+        <Text fontSize="xs" color="text.muted" mt={2} ml={1}>
           Estimated encrypted size:{" "}
-          <Text as="span" color="gray.200" fontWeight="medium">
+          <Text as="span" color="text.secondary" fontWeight="medium">
             {estimatedSize}
           </Text>
           {numChunks !== undefined && (
-            <Text as="span" color="gray.500">
+            <Text as="span" color="text.muted">
               {" "}
               ({numChunks} chunk{numChunks !== 1 ? "s" : ""})
             </Text>
@@ -105,13 +105,13 @@ export function EncryptToggle({
           spacing={3}
           mt={3}
           p={4}
-          bg="whiteAlpha.50"
+          bg="surface.sunken"
           borderRadius="md"
           borderWidth="1px"
-          borderColor="whiteAlpha.100"
+          borderColor="border.subtle"
         >
-          <Text fontSize="sm" color="gray.200" lineHeight="tall">
-            <Text as="span" fontWeight="semibold" color="white">
+          <Text fontSize="sm" color="text.secondary" lineHeight="tall">
+            <Text as="span" fontWeight="semibold" color="whiteAlpha.900">
               Content Encryption
             </Text>{" "}
             protects your NFT content using XChaCha20-Poly1305 encryption before
@@ -120,24 +120,24 @@ export function EncryptToggle({
 
           <UnorderedList spacing={1} pl={1} styleType="none">
             <ListItem>
-              <Text fontSize="sm" color="gray.300">
+              <Text fontSize="sm" color="text.secondary">
                 🔐 Content encrypted locally before upload
               </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">
+              <Text fontSize="sm" color="text.secondary">
                 ⛓️ Small files (≤512 KB) can be stored on-chain — self-sovereign
                 but higher tx fee
               </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">
+              <Text fontSize="sm" color="text.secondary">
                 📦 Larger files stored off-chain (IPFS or backend) with a hash
                 commitment on-chain
               </Text>
             </ListItem>
             <ListItem>
-              <Text fontSize="sm" color="gray.300">
+              <Text fontSize="sm" color="text.secondary">
                 🗝️ Access controlled by passphrase or recipient public keys
               </Text>
             </ListItem>

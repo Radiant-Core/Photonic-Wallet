@@ -284,7 +284,7 @@ export default function TokenDetails({
                     >
                       <InfoIcon
                         right={0}
-                        color="gray.400"
+                        color="text.muted"
                         display={{ base: "none", md: "block" }}
                       />
                     </Tooltip>
@@ -298,7 +298,8 @@ export default function TokenDetails({
                       width="64px"
                       height="64px"
                       objectFit="contain"
-                      backgroundColor="white"
+                      backgroundColor="surface.sunken"
+                      borderRadius="sm"
                     />
                     {glyph.remote?.h && (
                       <div>
@@ -324,7 +325,7 @@ export default function TokenDetails({
             </SimpleGrid>
             {hasAttrs && (
               <>
-                <Divider my={4} />
+                <Divider my={4} borderColor="border.subtle" />
                 <SimpleGrid columns={[1, 2]} spacing={4} gridAutoRows="1fr">
                   {Object.entries(glyph.attrs).map(([k, v]) => (
                     <PropertyCard heading={k} key={k}>

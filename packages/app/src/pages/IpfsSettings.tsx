@@ -16,7 +16,8 @@ import {
   Textarea,
   useToast,
 } from "@chakra-ui/react";
-import FormSection from "@app/components/FormSection";
+import Card from "@app/components/Card";
+import SectionHeading from "@app/components/SectionHeading";
 import db from "@app/db";
 
 export default function IpfsSettings() {
@@ -52,9 +53,10 @@ export default function IpfsSettings() {
 
   return (
     <Container as={Grid} maxW="container.lg" gap={4} pt={8}>
-      <FormSection>
+      <Card gap={6}>
+        <SectionHeading>{"IPFS"}</SectionHeading>
         <FormControl>
-          <FormLabel>{"NFT.Storage API Key"}</FormLabel>
+          <FormLabel textStyle="label">{"NFT.Storage API Key"}</FormLabel>
           <Textarea
             ref={nftStorageApiKeyRef}
             placeholder={"API key"}
@@ -62,7 +64,7 @@ export default function IpfsSettings() {
             height={{ base: "200px", md: "120px" }}
             defaultValue={apiKey}
           />
-          <FormHelperText>
+          <FormHelperText textStyle="small">
             An NFT.Storage API key is required for uploading files to IPFS.
             Generate a key at{" "}
             <Link to="https://nft.storage" target="_blank">
@@ -72,7 +74,9 @@ export default function IpfsSettings() {
           </FormHelperText>
         </FormControl>
         <FormControl>
-          <FormLabel>{"Method to resolve IPFS token content"}</FormLabel>
+          <FormLabel textStyle="label">
+            {"Method to resolve IPFS token content"}
+          </FormLabel>
           <Select
             ref={ipfsMethodRef}
             defaultValue={ipfsMethod || "gateway"}
@@ -81,13 +85,13 @@ export default function IpfsSettings() {
             <option value="gateway">{"Gateway"}</option>
             <option value="default">{"Default"}</option>
           </Select>
-          <FormHelperText>
+          <FormHelperText textStyle="small">
             Default setting will use <Code>ipfs://</Code> URLs which will be
             handled according to your browser's configuration
           </FormHelperText>
         </FormControl>
         <FormControl>
-          <FormLabel>{"IPFS Gateway URL"}</FormLabel>
+          <FormLabel textStyle="label">{"IPFS Gateway URL"}</FormLabel>
           <Input
             ref={ipfsGatewayUrlRef}
             placeholder={"IPFS gateway"}
@@ -95,9 +99,15 @@ export default function IpfsSettings() {
             defaultValue={ipfsGatewayUrl}
           />
         </FormControl>
-      </FormSection>
+      </Card>
       <Flex justifyContent="center" py={8} mb={16}>
-        <Button size="lg" w="240px" maxW="100%" shadow="dark-md" onClick={save}>
+        <Button
+          variant="primary"
+          size="lg"
+          w="240px"
+          maxW="100%"
+          onClick={save}
+        >
           {"Save"}
         </Button>
       </Flex>

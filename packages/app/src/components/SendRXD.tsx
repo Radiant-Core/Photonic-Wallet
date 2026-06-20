@@ -32,6 +32,7 @@ import {
   Icon,
   HStack,
 } from "@chakra-ui/react";
+import DataRow from "./DataRow";
 import { photonsToRXD } from "@lib/format";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
@@ -317,7 +318,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
           >
             <ModalBody pb={6} gap={4} hidden={scan}>
               <VStack>
-                <Heading size="sm">{"Balance"}</Heading>
+                <Heading textStyle="h3">{"Balance"}</Heading>
                 <Box>
                   <Balance />
                 </Box>
@@ -358,7 +359,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
                 {waveResolver.isResolving && (
                   <Flex align="center" mt={2} gap={2}>
                     <Spinner size="xs" />
-                    <Text fontSize="xs" color="gray.500">
+                    <Text fontSize="xs" color="text.muted">
                       {"Resolving WAVE name..."}
                     </Text>
                   </Flex>
@@ -424,32 +425,45 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
           <ModalHeader>Confirm Transaction</ModalHeader>
           <ModalCloseButton onClick={cancelBroadcast} />
           <ModalBody>
-            <VStack align="start" spacing={3}>
-              <Text>
-                <strong>Recipient:</strong> {pendingTx?.recipientAddress}
-              </Text>
-              <Text>
-                <strong>Amount:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.amount)}{" "}
-                {network.value.ticker}
-              </Text>
-              <Text>
-                <strong>Fee:</strong> {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
-                {network.value.ticker}
-              </Text>
-              <Text>
-                <strong>Total:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.amount + pendingTx.fee)}{" "}
-                {network.value.ticker}
-              </Text>
-              <Text fontSize="xs" color="gray.500">
-                <strong>TxID:</strong> {pendingTx?.txid}
-              </Text>
+            <VStack align="stretch" spacing={3}>
+              <Box>
+                <DataRow label="Recipient">
+                  <Text wordBreak="break-all">
+                    {pendingTx?.recipientAddress}
+                  </Text>
+                </DataRow>
+                <DataRow label="Amount">
+                  <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                    {pendingTx && photonsToRXD(pendingTx.amount)}{" "}
+                    {network.value.ticker}
+                  </Text>
+                </DataRow>
+                <DataRow label="Fee">
+                  <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                    {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                    {network.value.ticker}
+                  </Text>
+                </DataRow>
+                <DataRow label="Total">
+                  <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                    {pendingTx && photonsToRXD(pendingTx.amount + pendingTx.fee)}{" "}
+                    {network.value.ticker}
+                  </Text>
+                </DataRow>
+                <DataRow label="TxID">
+                  <Text fontSize="xs" color="text.muted" wordBreak="break-all">
+                    {pendingTx?.txid}
+                  </Text>
+                </DataRow>
+              </Box>
               <Divider my={2} />
-              <Text fontSize="sm" color="orange.500">
-                Please verify the recipient address and amount before
-                confirming.
-              </Text>
+              <Alert status="warning" borderRadius="md">
+                <AlertIcon />
+                <AlertDescription>
+                  Please verify the recipient address and amount before
+                  confirming.
+                </AlertDescription>
+              </Alert>
             </VStack>
           </ModalBody>
           <ModalFooter>

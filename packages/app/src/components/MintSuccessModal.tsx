@@ -39,7 +39,9 @@ export default function MintSuccessModal({
         <ModalHeader>{"Mint successful"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
-          <Text mb={2}>{"Transaction ID:"}</Text>
+          <Text mb={2} textStyle="label">
+            {"Transaction ID:"}
+          </Text>
           <div>
             <Identifier showCopy>{txid}</Identifier>
           </div>
@@ -48,6 +50,9 @@ export default function MintSuccessModal({
             to={createExplorerUrl(txid)}
             target="_blank"
             isExternal
+            color="accent.secondary"
+            display="inline-flex"
+            alignItems="center"
             my={4}
           >
             {"View on block explorer"}
@@ -56,7 +61,9 @@ export default function MintSuccessModal({
         </ModalBody>
 
         <ModalFooter as={Flex} gap={4}>
-          <Button onClick={onClose}>{"Mint another"}</Button>
+          <Button variant="primary" onClick={onClose}>
+            {"Mint another"}
+          </Button>
           <Button as={RouterLink} to={returnTo}>
             {"Back to wallet"}
           </Button>

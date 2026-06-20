@@ -13,7 +13,9 @@ export default function ValueTag({
       minHeight="auto"
       lineHeight="24px"
       py={1}
+      fontWeight="medium"
       textAlign="center"
+      sx={{ fontVariantNumeric: "tabular-nums" }}
       {...props}
     >
       {children}

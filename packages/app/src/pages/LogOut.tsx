@@ -9,6 +9,7 @@ import {
   Heading,
   Text,
 } from "@chakra-ui/react";
+import Card from "@app/components/Card";
 import opfs from "@app/opfs";
 import { lockWallet } from "@app/wallet";
 
@@ -50,34 +51,34 @@ export default function LogOut() {
   };
 
   return (
-    <Container maxW="container.lg">
-      <Heading mb={4} size="md">
-        {"Log out"}
-      </Heading>
-      <Text mb={4}>
-        {
-          "Logging out will remove your wallet and all saved data from your browser."
-        }
-      </Text>
-      <Alert status="error">
-        <AlertIcon />
-        <AlertDescription>
+    <Container maxW="container.md">
+      <Card gap={5}>
+        <Heading textStyle="h3">{"Log out"}</Heading>
+        <Text textStyle="body" color="text.secondary">
           {
-            "Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet."
+            "Logging out will remove your wallet and all saved data from your browser."
           }
-        </AlertDescription>
-      </Alert>
-      <Flex justifyContent="center" py={8} mb={16}>
-        <Button
-          size="lg"
-          w="240px"
-          maxW="100%"
-          shadow="dark-md"
-          onClick={logout}
-        >
-          {"Log out"}
-        </Button>
-      </Flex>
+        </Text>
+        <Alert status="error">
+          <AlertIcon />
+          <AlertDescription>
+            {
+              "Ensure you have saved your recovery phrase before logging out! Your recovery phrase is the only way you can recreate your wallet."
+            }
+          </AlertDescription>
+        </Alert>
+        <Flex justifyContent="center" pt={2}>
+          <Button
+            variant="primary"
+            size="lg"
+            w="240px"
+            maxW="100%"
+            onClick={logout}
+          >
+            {"Log out"}
+          </Button>
+        </Flex>
+      </Card>
     </Container>
   );
 }

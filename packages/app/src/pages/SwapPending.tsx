@@ -25,9 +25,9 @@ import {
 import { useLiveQuery } from "dexie-react-hooks";
 import { electrumStatus, openModal, wallet } from "@app/signals";
 import SwapTable from "@app/components/SwapTable";
-import Card from "@app/components/Card";
+import NoContent from "@app/components/NoContent";
 import { cancelSwap, syncSwaps } from "@app/swap";
-import { TbZoom } from "react-icons/tb";
+import { TbClockHour7, TbZoom } from "react-icons/tb";
 import {
   createContext,
   PropsWithChildren,
@@ -165,7 +165,12 @@ export default function SwapPending() {
             <SwapTable swaps={pending} actions={Actions} />
           </>
         ) : (
-          <Card>There are no pending swaps</Card>
+          <NoContent
+            icon={TbClockHour7}
+            subtitle="Swap offers you create will appear here until they are filled or cancelled."
+          >
+            There are no pending swaps
+          </NoContent>
         )}
       </Container>
       <Modal isOpen={isOpen} onClose={onClose} isCentered size="lg">

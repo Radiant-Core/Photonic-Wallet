@@ -1,3 +1,15 @@
+:root {
+  /* Reusable brand gradient tokens. The purple→cyan gradient is reserved for
+     the few sanctioned "hero" moments; the soft wash is for a single
+     onboarding accent. Referenced via `bg="var(--gradient-brand-soft)"`. */
+  --gradient-brand: linear-gradient(135deg, #6200ea 0%, #4a4eff 45%, #00b0ff 100%);
+  --gradient-brand-soft: linear-gradient(
+    135deg,
+    rgba(98, 0, 234, 0.18),
+    rgba(0, 176, 255, 0.12)
+  );
+}
+
 @property --angle {
   syntax: "<angle>";
   initial-value: 0deg;
@@ -125,6 +137,19 @@ body :not(:hover, :focus, :focus-within)::-webkit-scrollbar-thumb {
   white-space: pre-wrap;
   margin-top: 12px;
   opacity: 0.6;
+}
+
+/* Respect reduced-motion: neutralise the logo spin, glow-border, page
+   fade-in and all transitions for users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* days-one-latin-400-normal */

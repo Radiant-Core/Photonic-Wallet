@@ -40,6 +40,7 @@ import PasswordModal from "@app/components/PasswordModal";
 import RecoveryPhrase from "@app/components/RecoveryPhrase";
 import { feeRate, language, wallet } from "@app/signals";
 import FormSection from "@app/components/FormSection";
+import DataRow from "@app/components/DataRow";
 import db from "@app/db";
 import { loadCatalog } from "@app/i18n";
 import config from "@app/config.json";
@@ -84,8 +85,8 @@ function PublicKeyField({
   const { onCopy, hasCopied } = useClipboard(value);
   return (
     <FormSection>
-      <Heading size="md">{heading}</Heading>
-      <Text pt={2} fontSize="sm" color="gray.400">
+      <Heading textStyle="h3">{heading}</Heading>
+      <Text pt={2} textStyle="small">
         {description}
       </Text>
       {value ? (
@@ -98,7 +99,7 @@ function PublicKeyField({
             whiteSpace="pre-wrap"
             wordBreak="break-all"
             display="block"
-            bg="bg.200"
+            bg="surface.sunken"
           >
             {value}
           </Code>
@@ -146,7 +147,7 @@ function PublicKeyField({
                 includeMargin={false}
               />
             </Box>
-            <Text fontSize="xs" color="gray.400" mt={2}>
+            <Text fontSize="xs" color="text.muted" mt={2}>
               Recipient can scan this to add your key without typing
             </Text>
           </Collapse>
@@ -247,13 +248,17 @@ export default function WalletSettings() {
   return (
     <Container maxW="container.md" px={4} display="grid" gap={8}>
       <FormSection>
-        <Heading size="md">Address</Heading>
-        <Text pt="2" fontSize="sm">
-          Main: {wallet.value.address}
-        </Text>
-        <Text pt="2" fontSize="sm">
-          Swap: {wallet.value.swapAddress}
-        </Text>
+        <Heading textStyle="h3">Address</Heading>
+        <DataRow label="Main">
+          <Text fontSize="sm" fontFamily="mono" wordBreak="break-all">
+            {wallet.value.address}
+          </Text>
+        </DataRow>
+        <DataRow label="Swap">
+          <Text fontSize="sm" fontFamily="mono" wordBreak="break-all">
+            {wallet.value.swapAddress}
+          </Text>
+        </DataRow>
       </FormSection>
 
       <PublicKeyField
@@ -273,7 +278,7 @@ export default function WalletSettings() {
       />
 
       <FormSection>
-        <Heading size="md" mb={8}>
+        <Heading textStyle="h3" mb={8}>
           Recovery phrase
         </Heading>
         {showMnemonic ? (
@@ -295,7 +300,7 @@ export default function WalletSettings() {
       </FormSection>
 
       <FormSection>
-        <Heading size="md">Manual Sync</Heading>
+        <Heading textStyle="h3">Manual Sync</Heading>
         {consolidationRequired === true &&
           "If your wallet fails to consolidate UTXOs, a resync may be required"}
         <Center mt={8} mb={16}>
@@ -307,7 +312,11 @@ export default function WalletSettings() {
 
       <FormSection>
         <FormControl>
-          <FormLabel id="language-label" htmlFor="language-select">
+          <FormLabel
+            id="language-label"
+            htmlFor="language-select"
+            textStyle="label"
+          >
             Language
           </FormLabel>
           <Select
@@ -326,7 +335,7 @@ export default function WalletSettings() {
           </Select>
         </FormControl>
         <FormControl>
-          <FormLabel>Fee Rate</FormLabel>
+          <FormLabel textStyle="label">Fee Rate</FormLabel>
           <Input
             ref={feeRateRef}
             type="number"
@@ -335,13 +344,14 @@ export default function WalletSettings() {
             placeholder={`${MIN_FEE_RATE}`}
             name="gateway"
             defaultValue={normalizeFeeRate(savedFeeRate || MIN_FEE_RATE)}
+            sx={{ fontVariantNumeric: "tabular-nums" }}
           />
-          <FormHelperText>
+          <FormHelperText textStyle="small">
             {`Photons per byte (minimum ${MIN_FEE_RATE})`}
           </FormHelperText>
         </FormControl>
         <FormControl>
-          <FormLabel>Auto-Lock (minutes)</FormLabel>
+          <FormLabel textStyle="label">Auto-Lock (minutes)</FormLabel>
           <Input
             ref={autoLockRef}
             type="number"
@@ -350,8 +360,9 @@ export default function WalletSettings() {
             step={1}
             placeholder={`${Math.round(DEFAULT_AUTO_LOCK_MS / 60_000)}`}
             defaultValue={Math.round(autoLockMs.value / 60_000)}
+            sx={{ fontVariantNumeric: "tabular-nums" }}
           />
-          <FormHelperText>
+          <FormHelperText textStyle="small">
             {`Idle minutes before the wallet locks and secrets are wiped (default ${Math.round(
               DEFAULT_AUTO_LOCK_MS / 60_000
             )}).`}
@@ -359,7 +370,13 @@ export default function WalletSettings() {
         </FormControl>
       </FormSection>
       <Flex justifyContent="center" py={8} mb={16}>
-        <Button size="lg" w="240px" maxW="100%" shadow="dark-md" onClick={save}>
+        <Button
+          variant="primary"
+          size="lg"
+          w="240px"
+          maxW="100%"
+          onClick={save}
+        >
           Save
         </Button>
       </Flex>

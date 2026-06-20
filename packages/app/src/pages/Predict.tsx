@@ -476,7 +476,7 @@ export default function Predict() {
       )}
 
       <Flex align="center" gap={3} mb={3} px={1}>
-        <Text fontSize="sm" color="gray.400">
+        <Text fontSize="sm" color="text.muted">
           {shown.length === entries.length
             ? `${entries.length} market${entries.length === 1 ? "" : "s"}`
             : `${shown.length} of ${entries.length} markets`}
@@ -498,16 +498,16 @@ export default function Predict() {
 
       {entries.length === 0 ? (
         discovering ? (
-          <Flex align="center" gap={3} px={2} color="gray.400">
+          <Flex align="center" gap={3} px={2} color="text.muted">
             <Spinner size="sm" /> Discovering markets…
           </Flex>
         ) : (
-          <Text color="gray.400" px={2}>
+          <Text color="text.muted" px={2}>
             No markets found yet — create one, or import by creation txid.
           </Text>
         )
       ) : shown.length === 0 ? (
-        <Text color="gray.400" px={2}>
+        <Text color="text.muted" px={2}>
           No markets match your search or filter.
         </Text>
       ) : (

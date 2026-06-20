@@ -219,7 +219,7 @@ export default function AirdropFungible({
                     thumbnail
                   />
                 </Box>
-                <Heading size="sm">{"Balance"}</Heading>
+                <Heading textStyle="h3">{"Balance"}</Heading>
                 <Box>
                   <FtBalance id={glyph.ref} />
                 </Box>
@@ -254,7 +254,10 @@ export default function AirdropFungible({
                   <InputRightAddon children={ticker} userSelect="none" />
                 </InputGroup>
               </FormControl>
-              <Box>
+              <Box
+                color="text.secondary"
+                sx={{ fontVariantNumeric: "tabular-nums" }}
+              >
                 Total: {total} {ticker || glyph.name}
               </Box>
             </ModalBody>

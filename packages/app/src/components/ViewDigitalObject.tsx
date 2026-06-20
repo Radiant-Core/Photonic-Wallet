@@ -82,9 +82,9 @@ export const PropertyCard = ({
       {...rest}
     >
       <Heading
-        size="sm"
+        textStyle="label"
         mb={2}
-        color="lightBlue.A400"
+        color="accent.secondary"
         display="flex"
         flexDirection="row"
         alignItems="center"
@@ -151,7 +151,7 @@ export default function ViewDigitalObject({
     return (
       <ContentContainer>
         <PageHeader />
-        <Box p={8} textAlign="center" color="gray.500">
+        <Box p={8} textAlign="center" color="text.muted">
           {"Loading…"}
         </Box>
       </ContentContainer>
@@ -161,7 +161,7 @@ export default function ViewDigitalObject({
     return (
       <ContentContainer>
         <PageHeader />
-        <Box p={8} textAlign="center" color="gray.500">
+        <Box p={8} textAlign="center" color="text.muted">
           {"Token not found"}
         </Box>
       </ContentContainer>
@@ -295,6 +295,7 @@ export default function ViewDigitalObject({
                 justifyContent="center"
                 position="relative"
                 as={Card}
+                bg="surface.sunken"
                 colSpan={2}
                 sx={{
                   "& img": {
@@ -310,7 +311,7 @@ export default function ViewDigitalObject({
                     right={2}
                     bgColor="blackAlpha.400"
                     p={2}
-                    borderRadius={4}
+                    borderRadius="md"
                   >
                     <LinkIcon boxSize={8} />
                   </Box>
@@ -396,6 +397,7 @@ export default function ViewDigitalObject({
                 </Button>
               )}
               <Button
+                variant="primary"
                 disabled={nft.swapPending}
                 leftIcon={<ActionIcon as={TbArrowUpRight} />}
                 onClick={() => unlock(openSend)}

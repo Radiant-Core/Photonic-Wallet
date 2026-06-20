@@ -212,8 +212,8 @@ export function EncryptionSection({
       p={4}
       borderWidth={1}
       borderRadius="md"
-      borderColor="whiteAlpha.200"
-      bg="whiteAlpha.50"
+      borderColor="border.subtle"
+      bg="surface.sunken"
     >
       <EncryptToggle
         enabled={state.enabled}
@@ -270,7 +270,7 @@ export function EncryptionSection({
                 />
                 <Button
                   size="sm"
-                  colorScheme="blue"
+                  variant="subtle"
                   onClick={handleAddRecipient}
                   isDisabled={
                     disabled ||

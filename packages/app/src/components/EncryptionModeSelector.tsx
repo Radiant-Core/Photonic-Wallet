@@ -96,7 +96,7 @@ export function EncryptionModeSelector({
           leftIcon={<Icon as={MdLock} />}
           onClick={() => onChange("passphrase")}
           variant={mode === "passphrase" ? "solid" : "outline"}
-          colorScheme={mode === "passphrase" ? "blue" : undefined}
+          colorScheme={mode === "passphrase" ? "brand" : undefined}
           flex={1}
         >
           <Trans>Passphrase</Trans>
@@ -105,7 +105,7 @@ export function EncryptionModeSelector({
           leftIcon={<Icon as={MdPeople} />}
           onClick={() => onChange("recipient")}
           variant={mode === "recipient" ? "solid" : "outline"}
-          colorScheme={mode === "recipient" ? "blue" : undefined}
+          colorScheme={mode === "recipient" ? "brand" : undefined}
           flex={1}
         >
           <Trans>Recipients</Trans>
@@ -182,7 +182,7 @@ export function EncryptionModeSelector({
                 <Tag
                   key={index}
                   size="sm"
-                  colorScheme="blue"
+                  colorScheme="brand"
                   borderRadius="full"
                 >
                   <TagLabel fontFamily="mono" fontSize="xs">

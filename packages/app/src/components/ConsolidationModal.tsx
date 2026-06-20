@@ -280,7 +280,7 @@ export default function ConsolidationModal() {
         </ModalBody>
 
         <ModalFooter>
-          <Button isLoading={waiting} onClick={onClick}>
+          <Button variant="primary" isLoading={waiting} onClick={onClick}>
             {waiting ? "Consolidating UTXOs" : "Start consolidation process"}
           </Button>
         </ModalFooter>

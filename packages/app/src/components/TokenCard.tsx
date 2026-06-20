@@ -34,10 +34,36 @@ export default function TokenCard({
   const isTimelocked = !!glyph?.p?.includes(GLYPH_TIMELOCK);
 
   const short = ref.shortInput();
+  // Shared corner-chip style so every status badge reads as one family.
+  const chip = {
+    position: "absolute" as const,
+    bgColor: "blackAlpha.600",
+    backdropFilter: "blur(6px)",
+    borderRadius: "sm",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    p: 1.5,
+  };
   return (
-    <Box borderRadius="md" overflow="hidden" as={Link} to={to}>
+    <Box
+      borderRadius="lg"
+      overflow="hidden"
+      as={Link}
+      to={to}
+      display="block"
+      borderWidth="1px"
+      borderColor="border.subtle"
+      boxShadow="sm"
+      transition="transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease"
+      _hover={{
+        transform: "translateY(-2px)",
+        boxShadow: "md",
+        borderColor: "border.strong",
+      }}
+    >
       <Box
-        bgGradient="linear(to-b, bg.100, bg.300)"
+        bg="surface.sunken"
         height={size === "sm" ? "175px" : "250px"}
         display="flex"
         position="relative"
@@ -46,27 +72,13 @@ export default function TokenCard({
         p={2}
       >
         {isLink && (
-          <Box
-            position="absolute"
-            top={2}
-            right={2}
-            bgColor="blackAlpha.400"
-            p={2}
-            borderRadius={4}
-          >
-            <LinkIcon boxSize={8} />
+          <Box {...chip} top={2} right={2}>
+            <LinkIcon boxSize={4} />
           </Box>
         )}
         {glyph?.swapPending && (
-          <Box
-            position="absolute"
-            bottom={2}
-            right={2}
-            bgColor="blackAlpha.400"
-            p={2}
-            borderRadius={4}
-          >
-            <Icon as={RiSwap2Line} boxSize={8} />
+          <Box {...chip} bottom={2} right={2}>
+            <Icon as={RiSwap2Line} boxSize={4} />
           </Box>
         )}
         {pending && (
@@ -87,18 +99,11 @@ export default function TokenCard({
             label={isTimelocked ? "Timelocked" : "Encrypted"}
             placement="top"
           >
-            <Box
-              position="absolute"
-              top={2}
-              left={2}
-              bgColor={isTimelocked ? "orange.700" : "purple.700"}
-              p={1}
-              borderRadius={4}
-            >
+            <Box {...chip} top={2} left={2}>
               <Icon
                 as={isTimelocked ? MdTimer : MdLock}
                 boxSize={4}
-                color="white"
+                color={isTimelocked ? "orange.300" : "purple.300"}
               />
             </Box>
           </Tooltip>
@@ -108,7 +113,7 @@ export default function TokenCard({
       <Flex
         p={2}
         pr={3}
-        bg="bg.100"
+        bg="surface.raised"
         alignItems="center"
         justifyContent="space-between"
         gap={2}

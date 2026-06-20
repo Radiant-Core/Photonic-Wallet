@@ -158,7 +158,7 @@ export default function BurnTokenModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="lg">
       <ModalOverlay />
-      <ModalContent bg="bg.500">
+      <ModalContent>
         <ModalHeader>Burn Token</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
@@ -196,7 +196,12 @@ export default function BurnTokenModal({
                     <NumberDecrementStepper />
                   </NumberInputStepper>
                 </NumberInput>
-                <Text fontSize="sm" color="gray.400" mt={1}>
+                <Text
+                  fontSize="sm"
+                  color="text.muted"
+                  mt={1}
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   Available: {tokenUtxo.value} tokens
                 </Text>
               </FormControl>
@@ -216,7 +221,11 @@ export default function BurnTokenModal({
               <AlertIcon />
               <VStack align="start" spacing={1}>
                 <Text fontWeight="bold">Photons to be returned:</Text>
-                <Text fontSize="lg" color="green.300">
+                <Text
+                  fontSize="lg"
+                  fontWeight="semibold"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   {photonsToRXD(photonsReturned)} RXD
                 </Text>
               </VStack>

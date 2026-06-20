@@ -52,6 +52,7 @@ import {
 import { CopyIcon, ExternalLinkIcon } from "@chakra-ui/icons";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
+import NoContent from "@app/components/NoContent";
 import Photons from "@app/components/Photons";
 import VaultDetailModal from "@app/components/VaultDetailModal";
 import { wallet, feeRate, openModal } from "@app/signals";
@@ -1728,14 +1729,14 @@ export default function VaultPage() {
         <HStack mb={6} gap={2}>
           <Button
             size="sm"
-            variant={tab === "list" ? "primary" : "ghost"}
+            variant={tab === "list" ? "subtle" : "ghost"}
             onClick={() => setTab("list")}
           >
             {t`My Vaults`}
           </Button>
           <Button
             size="sm"
-            variant={tab === "create" ? "primary" : "ghost"}
+            variant={tab === "create" ? "subtle" : "ghost"}
             onClick={() => setTab("create")}
           >
             {t`Create Vault`}
@@ -1986,7 +1987,7 @@ export default function VaultPage() {
                 <Box
                   p={3}
                   borderWidth="1px"
-                  borderColor="whiteAlpha.200"
+                  borderColor="border.default"
                   borderRadius="md"
                 >
                   <Text
@@ -2035,7 +2036,7 @@ export default function VaultPage() {
                 <Box
                   p={3}
                   borderWidth="1px"
-                  borderColor="whiteAlpha.200"
+                  borderColor="border.default"
                   borderRadius="md"
                 >
                   <HStack mb={2}>
@@ -2100,7 +2101,7 @@ export default function VaultPage() {
                   </Button>
                 </Box>
 
-                <Divider borderColor="whiteAlpha.200" />
+                <Divider borderColor="border.subtle" />
 
                 {/* Tranche rows */}
                 {tranches.map((tr, i) => {
@@ -2436,7 +2437,7 @@ export default function VaultPage() {
                 mb={4}
                 p={3}
                 borderWidth="1px"
-                borderColor="whiteAlpha.200"
+                borderColor="border.default"
                 borderRadius="md"
               >
                 <Text fontSize="xs" color="whiteAlpha.600" mb={2}>
@@ -2468,7 +2469,7 @@ export default function VaultPage() {
                 mb={4}
                 p={3}
                 borderWidth="1px"
-                borderColor="whiteAlpha.200"
+                borderColor="border.default"
                 borderRadius="md"
               >
                 <Text fontSize="xs" color="whiteAlpha.600" mb={2}>
@@ -2496,21 +2497,19 @@ export default function VaultPage() {
             </Collapse>
 
             {!vaults || vaults.length === 0 ? (
-              <VStack gap={3} py={8} align="center">
-                <Text color="whiteAlpha.500" textAlign="center">
-                  {t`No vaults yet. Create one to get started.`}
-                </Text>
-                <Text color="whiteAlpha.400" fontSize="sm" textAlign="center">
-                  {t`Already have vaults? Use "Scan for Vaults" to find timelocked coins in your history, or "Recover by TXID" to restore a specific one.`}
-                </Text>
-              </VStack>
+              <NoContent
+                icon={TbLock}
+                subtitle={t`Already have vaults? Use "Scan for Vaults" to find timelocked coins in your history, or "Recover by TXID" to restore a specific one.`}
+              >
+                {t`No vaults yet. Create one to get started.`}
+              </NoContent>
             ) : vaults.filter((v) => showClaimed || !v.claimed).length === 0 ? (
               <Text color="whiteAlpha.500" py={8} textAlign="center">
                 {t`All vaults claimed. Toggle "Show Claimed" to view history.`}
               </Text>
             ) : (
               <Table size="sm" variant="simple">
-                <Thead>
+                <Thead bg="surface.sunken">
                   <Tr>
                     {(
                       [
@@ -2524,6 +2523,7 @@ export default function VaultPage() {
                     ).map(([col, label]) => (
                       <Th
                         key={col}
+                        textStyle="label"
                         cursor="pointer"
                         userSelect="none"
                         onClick={() => handleSort(col)}
@@ -2568,7 +2568,9 @@ export default function VaultPage() {
                           opacity={v.claimed ? 0.4 : 1}
                           onClick={() => handleVaultClick(v)}
                           cursor="pointer"
-                          _hover={{ bg: "whiteAlpha.100" }}
+                          borderTopWidth="1px"
+                          borderColor="border.subtle"
+                          _hover={{ bg: "bg.50" }}
                         >
                           <Td>
                             {v.claimed ? (
@@ -2588,11 +2590,13 @@ export default function VaultPage() {
                             )}
                           </Td>
                           <Td textTransform="uppercase">{v.assetType}</Td>
-                          <Td>
+                          <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
                             <Photons value={v.value} />
                           </Td>
-                          <Td>{formatLocktime(v.locktime, v.mode)}</Td>
-                          <Td>
+                          <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
+                            {formatLocktime(v.locktime, v.mode)}
+                          </Td>
+                          <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
                             {v.claimed ? (
                               "—"
                             ) : remaining.value === 0 ? (

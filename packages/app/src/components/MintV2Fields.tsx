@@ -62,12 +62,12 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">Royalty Settings</Text>
-            <Text fontSize="sm" color="gray.400">
+            <Text textStyle="label">Royalty Settings</Text>
+            <Text fontSize="sm" color="text.muted">
               Configure on-chain or advisory royalties
             </Text>
           </Box>
-          <Badge colorScheme="purple" mr={2}>
+          <Badge colorScheme="brand" mr={2}>
             v2
           </Badge>
           <AccordionIcon />
@@ -80,12 +80,12 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">Policy Settings</Text>
-            <Text fontSize="sm" color="gray.400">
+            <Text textStyle="label">Policy Settings</Text>
+            <Text fontSize="sm" color="text.muted">
               Renderable, transferable, NSFW flags
             </Text>
           </Box>
-          <Badge colorScheme="purple" mr={2}>
+          <Badge colorScheme="brand" mr={2}>
             v2
           </Badge>
           <AccordionIcon />
@@ -98,12 +98,12 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">Rights & Licensing</Text>
-            <Text fontSize="sm" color="gray.400">
+            <Text textStyle="label">Rights & Licensing</Text>
+            <Text fontSize="sm" color="text.muted">
               License, terms, and attribution
             </Text>
           </Box>
-          <Badge colorScheme="purple" mr={2}>
+          <Badge colorScheme="brand" mr={2}>
             v2
           </Badge>
           <AccordionIcon />
@@ -144,12 +144,12 @@ export default function MintV2Fields({
       <AccordionItem>
         <AccordionButton>
           <Box flex="1" textAlign="left">
-            <Text fontWeight="bold">Creator Signature</Text>
-            <Text fontSize="sm" color="gray.400">
+            <Text textStyle="label">Creator Signature</Text>
+            <Text fontSize="sm" color="text.muted">
               Cryptographically sign this token
             </Text>
           </Box>
-          <Badge colorScheme="purple" mr={2}>
+          <Badge colorScheme="brand" mr={2}>
             v2
           </Badge>
           <AccordionIcon />
@@ -164,7 +164,7 @@ export default function MintV2Fields({
               onChange={(e) => setCreatorSign(e.target.checked)}
             />
           </FormControl>
-          <Text fontSize="sm" color="gray.400" mt={2}>
+          <Text fontSize="sm" color="text.muted" mt={2}>
             Adds a cryptographic signature proving you created this token. This
             provides verifiable provenance.
           </Text>

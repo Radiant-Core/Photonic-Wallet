@@ -30,7 +30,6 @@ import {
   Radio,
   RadioGroup,
   Select,
-  SimpleGrid,
   Stack,
   Tag,
   TagCloseButton,
@@ -73,6 +72,7 @@ import PageHeader from "@app/components/PageHeader";
 import HashStamp from "@app/components/HashStamp";
 import Identifier from "@app/components/Identifier";
 import FormSection from "@app/components/FormSection";
+import DataRow from "@app/components/DataRow";
 import MintSuccessModal from "@app/components/MintSuccessModal";
 import {
   electrumStatus,
@@ -193,8 +193,11 @@ function TargetBox({
       height="100%"
       cursor="pointer"
       flexGrow={1}
-      borderRadius="md"
-      bg="bg.300"
+      borderRadius="lg"
+      borderWidth="2px"
+      borderStyle="dashed"
+      borderColor={isDragActive ? "accent.focus" : "border.default"}
+      bg="surface.sunken"
     >
       {getInputProps && <input {...getInputProps()} />}
       <Flex
@@ -224,12 +227,12 @@ function TargetBox({
               display="block"
               mb={2}
               fontSize="6xl"
-              color="gray.600"
+              color="text.muted"
             />
-            <Text color="gray.300" fontSize="xl" mb={1}>
+            <Text color="text.secondary" fontSize="xl" mb={1}>
               {"Upload file"}
             </Text>
-            <Text color="gray.300" fontSize="md">
+            <Text color="text.muted" fontSize="md">
               Maximum {formatNumber(mintEmbedMaxBytes / 1024)}KB - Images,
               Files, URLs, or Text
             </Text>
@@ -241,7 +244,7 @@ function TargetBox({
 }
 
 function Divider() {
-  return <CUIDivider borderColor="whiteAlpha.300" borderBottomWidth={2} />;
+  return <CUIDivider borderColor="border.subtle" borderBottomWidth={2} />;
 }
 
 type TokenType = "object" | "container" | "user" | "fungible";
@@ -1727,7 +1730,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         justifyContent="space-between"
                         flexDir="row"
                         gap={4}
-                        bg="blackAlpha.500"
+                        bg="surface.sunken"
                         borderRadius="md"
                       >
                         {fileState.imgSrc && (
@@ -1742,10 +1745,10 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         )}
                         <Box flexGrow={1}>
                           <div>{fileState.file.name}</div>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {fileState.file.type || "text/plain"}
                           </Text>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {filesize(fileState.file.size || 0) as string}
                           </Text>
                         </Box>
@@ -1869,7 +1872,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                               alignItems="top"
                               flexDir="row"
                               gap={4}
-                              bg="blackAlpha.500"
+                              bg="surface.sunken"
                               borderRadius="md"
                             >
                               {fileState.file && (
@@ -1910,7 +1913,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         justifyContent="space-between"
                         flexDir="row"
                         gap={4}
-                        bg="blackAlpha.500"
+                        bg="surface.sunken"
                         borderRadius="md"
                       >
                         {dualFileState.previewImgSrc && (
@@ -1923,10 +1926,10 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         )}
                         <Box flexGrow={1}>
                           <div>{dualFileState.previewImage.name}</div>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {dualFileState.previewImage.type}
                           </Text>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {
                               filesize(
                                 dualFileState.previewImage.size
@@ -1967,16 +1970,16 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                         justifyContent="space-between"
                         flexDir="row"
                         gap={4}
-                        bg="blackAlpha.500"
+                        bg="surface.sunken"
                         borderRadius="md"
                       >
                         <Box flexGrow={1}>
                           <div>{dualFileState.contentFile.name}</div>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {dualFileState.contentFile.type ||
                               "application/octet-stream"}
                           </Text>
-                          <Text color="gray.400">
+                          <Text color="text.muted">
                             {filesize(dualFileState.contentFile.size) as string}
                           </Text>
                         </Box>
@@ -2050,8 +2053,8 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     </FormHelperText>
                     <Textarea
                       name="text"
-                      bgColor="whiteAlpha.50"
-                      borderColor="transparent"
+                      bg="surface.sunken"
+                      borderColor="border.default"
                       onChange={onFormChange}
                     />
                   </FormControl>
@@ -2578,40 +2581,37 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
               <FormSection>
                 <FormControl>
                   <FormLabel>{"Summary"}</FormLabel>
-                  <SimpleGrid
-                    templateColumns="max-content max-content"
-                    columnGap={8}
-                    rowGap={2}
-                    py={2}
-                  >
-                    <Box>{"Transaction size"}</Box>
-                    <Box>{filesize(stats.size) as string}</Box>
-                    <Box>{"Fee"}</Box>
-                    <Box>
-                      {photonsToRXD(stats.fee)} {network.value.ticker}
-                    </Box>
+                  <Box py={2}>
+                    <DataRow label="Transaction size">
+                      <Box sx={{ fontVariantNumeric: "tabular-nums" }}>
+                        {filesize(stats.size) as string}
+                      </Box>
+                    </DataRow>
+                    <DataRow label="Fee">
+                      <Box sx={{ fontVariantNumeric: "tabular-nums" }}>
+                        {photonsToRXD(stats.fee)} {network.value.ticker}
+                      </Box>
+                    </DataRow>
                     {tokenType === "fungible" &&
                       formData.deployMethod === "direct" && (
-                        <>
-                          <Box>{"FT supply funding"}</Box>
-                          <Box>
+                        <DataRow label="FT supply funding">
+                          <Box sx={{ fontVariantNumeric: "tabular-nums" }}>
                             {photonsToRXD(parseInt(formData.supply, 10))}{" "}
                             {network.value.ticker}
                           </Box>
-                        </>
+                        </DataRow>
                       )}
                     {tokenType === "fungible" &&
                       formData.deployMethod === "dmint" &&
                       parseInt(formData.premine, 10) > 0 && (
-                        <>
-                          <Box>{"Premine supply funding"}</Box>
-                          <Box>
+                        <DataRow label="Premine supply funding">
+                          <Box sx={{ fontVariantNumeric: "tabular-nums" }}>
                             {photonsToRXD(parseInt(formData.premine, 10))}{" "}
                             {network.value.ticker}
                           </Box>
-                        </>
+                        </DataRow>
                       )}
-                  </SimpleGrid>
+                  </Box>
                 </FormControl>
               </FormSection>
             )}
@@ -2640,7 +2640,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                     maxW="100%"
                     isLoading={loading}
                     loadingText="Minting"
-                    shadow="dark-md"
+                    boxShadow="md"
                     isDisabled={!isConnected}
                   >
                     {"Mint"}
@@ -2656,7 +2656,7 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
                   maxW="100%"
                   isLoading={loading}
                   loadingText="Calculating"
-                  shadow="dark-md"
+                  boxShadow="sm"
                 >
                   {"Calculate Fee"}
                 </Button>

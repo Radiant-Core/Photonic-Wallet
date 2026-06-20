@@ -23,6 +23,7 @@ import NoContent from "@app/components/NoContent";
 import MintMenu from "@app/components/MintMenu";
 import { Search2Icon } from "@chakra-ui/icons";
 import { BsList, BsListUl } from "react-icons/bs";
+import { TbStack2 } from "react-icons/tb";
 import { parseFtScript } from "@lib/script";
 import { reverseRef } from "@lib/Outpoint";
 
@@ -170,7 +171,7 @@ function TokenGrid() {
       >
         <InputGroup size="sm" maxW={{ base: "full", md: "320px" }}>
           <InputLeftElement pointerEvents="none">
-            <Search2Icon color="gray.400" />
+            <Search2Icon color="text.muted" />
           </InputLeftElement>
           <Input
             value={query}
@@ -243,7 +244,12 @@ function TokenGrid() {
         sx={{ scrollbarGutter: "stable both-edges" }}
       >
         {listed.length === 0 ? (
-          <NoContent>{"No assets"}</NoContent>
+          <NoContent
+            icon={TbStack2}
+            subtitle={"Fungible tokens you hold will appear here."}
+          >
+            {"No tokens"}
+          </NoContent>
         ) : (
           listed.map(
             ({ token, value, pending }) =>

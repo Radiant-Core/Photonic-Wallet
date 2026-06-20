@@ -47,10 +47,11 @@ export default function PageHeader({
       height={{ base: "60px", lg: "72px" }}
       position="sticky"
       top="0"
-      bgColor="bg.200"
+      // Translucent canvas so the blur reads as glass over scrolling content.
+      bgColor="rgba(26, 26, 36, 0.72)"
       backdropFilter="blur(12px)"
       borderBottomWidth="1px"
-      borderBottomColor="whiteAlpha.50"
+      borderBottomColor="border.subtle"
       mb={4}
       zIndex={10}
       {...rest}
@@ -72,9 +73,8 @@ export default function PageHeader({
         <Logo display={{ base: "flex", lg: "none" }} svgId="h" />
       ) : (
         <Heading
-          size="md"
+          textStyle="h2"
           ml={2}
-          fontWeight="medium"
           display="flex"
           alignItems="center"
         >

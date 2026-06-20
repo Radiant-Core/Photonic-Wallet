@@ -22,6 +22,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { PromiseExtended } from "dexie";
 import Card from "@app/components/Card";
+import SectionHeading from "@app/components/SectionHeading";
 import { wallet } from "@app/signals";
 import { useToast } from "@chakra-ui/react";
 
@@ -214,7 +215,8 @@ export default function Servers() {
 
   return (
     <Container maxW="container.md" px={4}>
-      <Card p={4}>
+      <Card>
+        <SectionHeading>{"Electrum Servers"}</SectionHeading>
         <VStack spacing={2} align="stretch" divider={<Divider />}>
           <Box key="new" display="flex" alignItems="center" gap={2}>
             <Editable

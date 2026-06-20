@@ -177,11 +177,12 @@ export function StorageBackendSelector({
         .selector-label {
           font-size: 13px;
           font-weight: 600;
-          color: #333;
+          color: rgba(255, 255, 255, 0.9);
         }
 
         .help-toggle {
-          background: #f0f0f0;
+          background: #30303a;
+          color: rgba(255, 255, 255, 0.7);
           border: none;
           border-radius: 50%;
           width: 24px;
@@ -194,17 +195,17 @@ export function StorageBackendSelector({
         }
 
         .help-toggle:hover {
-          background: #e0e0e0;
+          background: #3a3a46;
         }
 
         .help-panel {
-          background: #f8f9fa;
-          border: 1px solid #e9ecef;
+          background: #14141e;
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 6px;
           padding: 12px;
           margin-bottom: 12px;
           font-size: 12px;
-          color: #666;
+          color: rgba(255, 255, 255, 0.7);
           line-height: 1.4;
         }
 
@@ -219,8 +220,8 @@ export function StorageBackendSelector({
           align-items: flex-start;
           gap: 12px;
           padding: 12px;
-          background: white;
-          border: 2px solid #e0e0e0;
+          background: #24242e;
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
           cursor: pointer;
           transition: all 0.2s;
@@ -229,18 +230,18 @@ export function StorageBackendSelector({
 
         .backend-option:hover:not(:disabled) {
           border-color: #4caf50;
-          background: rgba(76, 175, 80, 0.05);
+          background: rgba(76, 175, 80, 0.08);
         }
 
         .backend-option.selected {
           border-color: #4caf50;
-          background: rgba(76, 175, 80, 0.1);
+          background: rgba(76, 175, 80, 0.12);
         }
 
         .backend-option.disabled {
           opacity: 0.5;
           cursor: not-allowed;
-          background: #f5f5f5;
+          background: #1a1a24;
         }
 
         .option-icon {
@@ -258,28 +259,28 @@ export function StorageBackendSelector({
         .option-label {
           font-weight: 600;
           font-size: 14px;
-          color: #333;
+          color: rgba(255, 255, 255, 0.9);
         }
 
         .option-description {
           font-size: 12px;
-          color: #666;
+          color: rgba(255, 255, 255, 0.7);
           line-height: 1.3;
         }
 
         .size-limit {
           font-size: 11px;
-          color: #888;
+          color: rgba(255, 255, 255, 0.5);
           font-weight: 500;
         }
 
         .size-limit.exceeded {
-          color: #dc3545;
+          color: #ff8a8a;
           font-weight: 600;
         }
 
         .checkmark {
-          color: #4caf50;
+          color: #6ee7a8;
           font-weight: bold;
           font-size: 16px;
           flex-shrink: 0;

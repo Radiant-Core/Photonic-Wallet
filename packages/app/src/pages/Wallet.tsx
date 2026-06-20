@@ -174,7 +174,7 @@ function TokenGrid({ open }: { open: boolean }) {
       >
         <InputGroup size="sm" maxW={{ base: "full", md: "320px" }}>
           <InputLeftElement pointerEvents="none">
-            <Search2Icon color="gray.400" />
+            <Search2Icon color="text.muted" />
           </InputLeftElement>
           <Input
             value={query}
@@ -288,7 +288,12 @@ function TokenGrid({ open }: { open: boolean }) {
       </Flex>
 
       {visible.length === 0 ? (
-        <NoContent>{"No assets"}</NoContent>
+        <NoContent
+          icon={TbBox}
+          subtitle={"Non-fungible tokens you own will appear here."}
+        >
+          {"No assets"}
+        </NoContent>
       ) : viewMode === "list" ? (
         <VStack
           align="stretch"

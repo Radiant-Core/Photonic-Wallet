@@ -255,7 +255,7 @@ const Row = ({
       columnGap={2}
       px={4}
       alignItems="center"
-      bgGradient="linear(to-b, bg.100, bg.300)"
+      bg="surface.raised"
       borderRadius="md"
     >
       <GridItem>{icon}</GridItem>
@@ -418,7 +418,7 @@ function OutputSelection({
 
   return (
     <Card as={Flex} p={{ base: 4, md: 8 }}>
-      <Heading size="md" pb={4} pl={2}>
+      <Heading textStyle="h3" pb={4} pl={2}>
         {heading}
       </Heading>
       <Flex flexDir="column" gap={2} mb={4}>
@@ -903,7 +903,7 @@ function Swap() {
   if (psrt) {
     return (
       <Container maxW="container.md" px={4} gap={8}>
-        <Heading size="md" pb={4} pl={2}>
+        <Heading textStyle="h3" pb={4} pl={2}>
           Transaction
         </Heading>
         {broadcastTxid && (
@@ -958,7 +958,7 @@ function Swap() {
         again.
       </Alert>
       <Card>
-        <Heading size="sm" pb={4}>
+        <Heading textStyle="h3" pb={4}>
           Offer Type
         </Heading>
         <RadioGroup
@@ -1006,7 +1006,9 @@ function Swap() {
         </Alert>
         {mode === SwapMode.BROADCAST && (
           <Stack pt={6} spacing={3}>
-            <Heading size="xs">Swap RPC endpoint</Heading>
+            <Heading textStyle="h3" fontSize="sm">
+              Swap RPC endpoint
+            </Heading>
             <Alert status="info" fontSize="sm">
               <AlertIcon />
               Public offers require a CORS-enabled Radiant Core node with
@@ -1038,7 +1040,7 @@ function Swap() {
         flexDir={{ base: "column", md: "row" }}
       >
         <Button
-          shadow="dark-md"
+          variant="primary"
           onClick={prepareTransaction}
           isLoading={preparing}
           loadingText={

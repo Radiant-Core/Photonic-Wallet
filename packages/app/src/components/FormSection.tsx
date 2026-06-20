@@ -7,7 +7,11 @@ export default function FormSection({
 }: PropsWithChildren & FlexProps) {
   return (
     <Flex
-      bgColor="bg.100"
+      bg="surface.raised"
+      borderWidth="1px"
+      borderColor="border.default"
+      borderRadius="xl"
+      boxShadow="md"
       p={{ base: 4, md: 6 }}
       flexDirection="column"
       gap={6}

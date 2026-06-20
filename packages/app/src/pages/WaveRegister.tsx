@@ -19,6 +19,8 @@ import {
 import { useLiveQuery } from "dexie-react-hooks";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
+import Card from "@app/components/Card";
+import SectionHeading from "@app/components/SectionHeading";
 import { wallet, feeRate } from "@app/signals";
 import { mintToken } from "@lib/mint";
 import {
@@ -203,9 +205,10 @@ export default function WaveRegister() {
       <PageHeader>{"Register WAVE Name"}</PageHeader>
 
       <ContentContainer>
-        <VStack spacing={6} align="stretch">
+        <Card as={VStack} spacing={6} align="stretch">
+          <SectionHeading>{"Register a Name"}</SectionHeading>
           <FormControl isInvalid={!!name && !validation.valid}>
-            <FormLabel>WAVE Name</FormLabel>
+            <FormLabel textStyle="label">WAVE Name</FormLabel>
             <HStack>
               <Input
                 value={name}
@@ -266,7 +269,11 @@ export default function WaveRegister() {
               <AlertDescription>
                 <VStack align="start" spacing={1}>
                   <Text fontWeight="bold">Registration Cost</Text>
-                  <Text fontSize="lg" color="blue.300">
+                  <Text
+                    fontSize="lg"
+                    color="blue.300"
+                    sx={{ fontVariantNumeric: "tabular-nums" }}
+                  >
                     {photonsToRXD(cost)} RXD
                   </Text>
                   <Text fontSize="sm">
@@ -280,7 +287,7 @@ export default function WaveRegister() {
           <Divider />
 
           <FormControl>
-            <FormLabel>Target Address/Reference</FormLabel>
+            <FormLabel textStyle="label">Target Address/Reference</FormLabel>
             <HStack>
               <Input
                 value={target}
@@ -297,13 +304,13 @@ export default function WaveRegister() {
                 Use My Address
               </Button>
             </HStack>
-            <FormHelperText>
+            <FormHelperText textStyle="small">
               The address or token reference this name points to
             </FormHelperText>
           </FormControl>
 
           <FormControl>
-            <FormLabel>Description (Optional)</FormLabel>
+            <FormLabel textStyle="label">Description (Optional)</FormLabel>
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -329,14 +336,16 @@ export default function WaveRegister() {
           </Alert>
 
           <FormControl>
-            <FormLabel>Custom Data (Optional JSON)</FormLabel>
+            <FormLabel textStyle="label">Custom Data (Optional JSON)</FormLabel>
             <Input
               value={customData}
               onChange={(e) => setCustomData(e.target.value)}
               placeholder={'{"twitter": "@alice", "website": "alice.com"}'}
               fontFamily="mono"
             />
-            <FormHelperText>Additional metadata in JSON format</FormHelperText>
+            <FormHelperText textStyle="small">
+              Additional metadata in JSON format
+            </FormHelperText>
           </FormControl>
 
           {registrationPhase === "complete" ? (
@@ -348,7 +357,7 @@ export default function WaveRegister() {
             </Alert>
           ) : (
             <Button
-              colorScheme="brand"
+              variant="primary"
               size="lg"
               onClick={handleRegister}
               isLoading={isLoading || registrationPhase === "broadcasting"}
@@ -363,7 +372,7 @@ export default function WaveRegister() {
               {"Register WAVE Name"}
             </Button>
           )}
-        </VStack>
+        </Card>
       </ContentContainer>
     </Container>
   );

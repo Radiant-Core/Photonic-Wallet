@@ -89,7 +89,91 @@ const theme = extendTheme({
     body: `'Inter Variable', sans-serif`,
     mono: `'Source Code Pro Variable', monospace`,
   },
+  // Semantic aliases give every screen one vocabulary for surfaces, borders,
+  // accents and feedback. They resolve to the raw palette below, so the visual
+  // system can be retuned in one place without touching call sites.
+  semanticTokens: {
+    colors: {
+      "surface.canvas": "bg.200",
+      "surface.raised": "bg.100",
+      "surface.overlay": "bg.100",
+      "surface.sunken": "bg.300",
+      "surface.hover": "whiteAlpha.50",
+      "border.subtle": "whiteAlpha.50",
+      "border.default": "whiteAlpha.100",
+      "border.strong": "whiteAlpha.200",
+      "accent.primary": "brand.500",
+      "accent.focus": "brand.400",
+      "accent.secondary": "lightBlue.A400",
+      "text.secondary": "whiteAlpha.700",
+      "text.muted": "whiteAlpha.500",
+      // Alert/toast status fills (dark-only).
+      "feedback.successBg": "#1C4532EE",
+      "feedback.errorBg": "#C53030EE",
+      "feedback.warningBg": "#C05621EE",
+      "feedback.infoBg": "#1A365DEE",
+    },
+  },
+  // Deliberate type scale on Inter Variable. Apply with `textStyle="h2"` etc.
+  // `numeric` (tabular-nums) is for balances/amounts so digits don't jitter.
+  textStyles: {
+    display: {
+      fontSize: "3xl",
+      fontWeight: 700,
+      lineHeight: 1.1,
+      letterSpacing: "-0.02em",
+    },
+    h1: {
+      fontSize: "2xl",
+      fontWeight: 600,
+      lineHeight: 1.2,
+      letterSpacing: "-0.015em",
+    },
+    h2: {
+      fontSize: "xl",
+      fontWeight: 600,
+      lineHeight: 1.25,
+      letterSpacing: "-0.01em",
+    },
+    h3: { fontSize: "lg", fontWeight: 600, lineHeight: 1.3 },
+    body: { fontSize: "md", fontWeight: 400, lineHeight: 1.55 },
+    small: {
+      fontSize: "sm",
+      fontWeight: 400,
+      lineHeight: 1.5,
+      color: "whiteAlpha.700",
+    },
+    label: {
+      fontSize: "xs",
+      fontWeight: 600,
+      lineHeight: 1.4,
+      letterSpacing: "0.04em",
+      textTransform: "uppercase",
+      color: "whiteAlpha.600",
+    },
+    numeric: { fontVariantNumeric: "tabular-nums" },
+  },
   components: {
+    // Chakra's Heading size recipe (default size "xl" => fontSize 4xl, bold)
+    // otherwise overrides `textStyle`, so every `textStyle="h2"` heading would
+    // render at the same oversized default. Neutralise the size layer (empty
+    // "unset" default size) and provide a gentle baseStyle fallback so the
+    // `textStyle` token wins for fontSize/weight. Explicit `size="md"` etc.
+    // still work (Chakra's built-in sizes remain merged in).
+    Heading: {
+      baseStyle: {
+        fontWeight: 600,
+        fontSize: "xl",
+        lineHeight: 1.25,
+        letterSpacing: "-0.01em",
+      },
+      sizes: {
+        unset: {},
+      },
+      defaultProps: {
+        size: "unset",
+      },
+    },
     Input: {
       defaultProps: {
         variant: "filled",
@@ -100,9 +184,15 @@ const theme = extendTheme({
           field: {
             bg: "whiteAlpha.50",
             borderWidth: "1px",
-            borderColor: "whiteAlpha.100",
+            borderColor: "border.default",
+            transitionProperty: "background, border-color, box-shadow",
+            transitionDuration: "0.18s",
             _hover: { bg: "whiteAlpha.100" },
-            _focus: { bg: "whiteAlpha.100", borderColor: "brand.400" },
+            _focusVisible: {
+              bg: "whiteAlpha.100",
+              borderColor: "brand.400",
+              boxShadow: "0 0 0 1px var(--chakra-colors-brand-400)",
+            },
           },
         },
       },
@@ -116,9 +206,15 @@ const theme = extendTheme({
         filled: {
           bg: "whiteAlpha.50",
           borderWidth: "1px",
-          borderColor: "whiteAlpha.100",
+          borderColor: "border.default",
+          transitionProperty: "background, border-color, box-shadow",
+          transitionDuration: "0.18s",
           _hover: { bg: "whiteAlpha.100" },
-          _focus: { bg: "whiteAlpha.100", borderColor: "brand.400" },
+          _focusVisible: {
+            bg: "whiteAlpha.100",
+            borderColor: "brand.400",
+            boxShadow: "0 0 0 1px var(--chakra-colors-brand-400)",
+          },
         },
       },
     },
@@ -145,8 +241,12 @@ const theme = extendTheme({
       variants: {
         line: {
           tab: {
+            color: "whiteAlpha.600",
+            fontWeight: "medium",
+            transition: "color 0.18s ease",
+            _hover: { color: "whiteAlpha.900" },
             _selected: {
-              color: "chakra-body-text",
+              color: "white",
               borderColor: "brand.400",
               bg: `url(${gradient})`,
               bgSize: "cover",
@@ -169,10 +269,10 @@ const theme = extendTheme({
       variants: {
         subtle: {
           container: {
-            "&[data-status='success']": { bg: "#1C4532EE" },
-            "&[data-status='error']": { bg: "#C53030EE" },
-            "&[data-status='warning']": { bg: "#C05621EE" },
-            "&[data-status='info']": { bg: "#1A365DEE" },
+            "&[data-status='success']": { bg: "feedback.successBg" },
+            "&[data-status='error']": { bg: "feedback.errorBg" },
+            "&[data-status='warning']": { bg: "feedback.warningBg" },
+            "&[data-status='info']": { bg: "feedback.infoBg" },
           },
         },
       },
@@ -192,9 +292,9 @@ const theme = extendTheme({
             bgSize: "cover",
             bgPosition: "center center",
             _hover: {
-              filter: "brightness(1.15)",
+              filter: "brightness(1.12)",
               transform: "translateY(-1px)",
-              boxShadow: "0 4px 12px rgba(98, 0, 234, 0.3)",
+              boxShadow: "glowBrand",
               _disabled: {
                 bg: "deepPurple.A700",
                 transform: "none",
@@ -223,6 +323,13 @@ const theme = extendTheme({
             bg: "whiteAlpha.100",
           },
         },
+        // Tinted secondary action — quieter than `solid`, clearly on-brand.
+        subtle: {
+          bg: "rgba(74, 78, 255, 0.12)",
+          color: "brand.200",
+          _hover: { bg: "rgba(74, 78, 255, 0.2)", transform: "translateY(-1px)" },
+          _active: { bg: "rgba(74, 78, 255, 0.28)", transform: "translateY(0)" },
+        },
       },
     },
     Modal: {
@@ -233,11 +340,15 @@ const theme = extendTheme({
         },
         dialog: {
           mx: { base: 4, md: 0 },
-          bg: "bg.100",
+          bg: "surface.overlay",
           borderWidth: "1px",
-          borderColor: "whiteAlpha.100",
+          borderColor: "border.default",
           borderRadius: "xl",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          boxShadow: "xl",
+        },
+        header: {
+          fontWeight: "semibold",
+          letterSpacing: "-0.01em",
         },
         body: {
           display: "flex",
@@ -247,7 +358,7 @@ const theme = extendTheme({
     },
     Divider: {
       baseStyle: {
-        borderColor: "whiteAlpha.100",
+        borderColor: "border.subtle",
       },
     },
   },
@@ -326,11 +437,13 @@ const theme = extendTheme({
       A700: "#0091ea",
     },
     bg: {
-      50: "#2e2e36",
-      100: "#252530",
-      200: "#1c1c28",
-      300: "#161622",
-      400: "#10101a",
+      // Cooler, more even dark elevation ladder (~+10 luminance per step).
+      // Keys preserved so all existing `bg.*` call sites keep resolving.
+      50: "#30303a", // hover fill on raised surfaces
+      100: "#24242e", // raised: cards, modals, token tiles
+      200: "#1a1a24", // canvas / body
+      300: "#14141e", // sidebar, wells, sunken
+      400: "#0e0e16", // deepest
     },
     blueGrayAlpha: {
       50: "#4A55680a",
@@ -346,13 +459,23 @@ const theme = extendTheme({
     },
   },
   shadows: {
-    "dark-md":
-      "rgba(0, 0, 0, 0.15) 0px 0px 0px 1px, rgba(0, 0, 0, 0.15) 0px 10px 20px, rgba(0, 0, 0, 0.1) 0px 4px 8px",
+    // Deliberate dark-tuned elevation scale. The faint 1px inner ring keeps
+    // raised surfaces crisp against the dark canvas.
+    xs: "0 1px 2px rgba(0, 0, 0, 0.4)",
+    sm: "0 2px 8px rgba(0, 0, 0, 0.35)",
+    md: "0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.3)",
+    lg: "0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.3)",
+    xl: "0 24px 60px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.04)",
+    glowBrand: "0 4px 18px rgba(74, 78, 255, 0.35)",
+    // Back-compat alias — existing `shadow="dark-md"` call sites resolve to `md`.
+    "dark-md": "0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.3)",
   },
   radii: {
-    lg: "12px",
-    xl: "16px",
-    "2xl": "24px",
+    sm: "6px",
+    md: "8px",
+    lg: "10px",
+    xl: "14px",
+    "2xl": "20px",
   },
 });
 

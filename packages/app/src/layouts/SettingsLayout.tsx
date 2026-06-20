@@ -1,8 +1,9 @@
-import { Button, HStack } from "@chakra-ui/react";
+import { Button } from "@chakra-ui/react";
 import { t } from "@lingui/macro";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import ContentContainer from "@app/components/ContentContainer";
 import PageHeader from "@app/components/PageHeader";
+import Toolbar from "@app/components/Toolbar";
 import { ChevronRightIcon } from "@chakra-ui/icons";
 import { language } from "@app/signals";
 
@@ -22,9 +23,11 @@ export default function SettingsLayout() {
   return (
     <ContentContainer>
       <PageHeader>
-        {t`Settings`} <ChevronRightIcon mx={2} /> {heading}
+        {t`Settings`}
+        <ChevronRightIcon mx={2} color="text.muted" />
+        {heading}
       </PageHeader>
-      <HStack mb={6} pl={4}>
+      <Toolbar mb={6} pl={4} flexWrap="wrap" rowGap={2}>
         <Button size="sm" as={Link} to="/settings/wallet">
           {t`Wallet`}
         </Button>
@@ -40,7 +43,7 @@ export default function SettingsLayout() {
         <Button size="sm" as={Link} to="/settings/logout">
           {t`Log out`}
         </Button>
-      </HStack>
+      </Toolbar>
       <Outlet />
     </ContentContainer>
   );

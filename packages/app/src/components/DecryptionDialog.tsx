@@ -208,7 +208,8 @@ export function DecryptionDialog({
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(4px);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -217,11 +218,12 @@ export function DecryptionDialog({
         }
 
         .decryption-dialog {
-          background: white;
+          background: #24242e;
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 12px;
           width: 100%;
           max-width: 480px;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
           overflow: hidden;
         }
 
@@ -230,7 +232,7 @@ export function DecryptionDialog({
           align-items: center;
           gap: 12px;
           padding: 16px 20px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #6200ea, #4a4eff, #00b0ff);
           color: white;
         }
 
@@ -276,20 +278,20 @@ export function DecryptionDialog({
         .content-info {
           margin-bottom: 20px;
           padding: 12px;
-          background: rgba(102, 126, 234, 0.05);
+          background: rgba(92, 100, 255, 0.1);
           border-radius: 8px;
         }
 
         .content-name {
           font-weight: 600;
-          color: #333;
+          color: rgba(255, 255, 255, 0.9);
           margin: 0 0 8px 0;
         }
 
         .security-notice {
           margin: 0;
           font-size: 13px;
-          color: #667eea;
+          color: #8b91ff;
         }
 
         .input-section {
@@ -300,12 +302,12 @@ export function DecryptionDialog({
           display: block;
           font-size: 13px;
           font-weight: 600;
-          color: #333;
+          color: rgba(255, 255, 255, 0.9);
           margin-bottom: 8px;
         }
 
         .required {
-          color: #dc3545;
+          color: #ff8a8a;
           margin-left: 4px;
         }
 
@@ -317,7 +319,9 @@ export function DecryptionDialog({
         .key-input {
           flex: 1;
           padding: 12px;
-          border: 2px solid #e0e0e0;
+          background: #14141e;
+          color: rgba(255, 255, 255, 0.9);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
           font-size: 14px;
           transition: border-color 0.2s;
@@ -325,18 +329,19 @@ export function DecryptionDialog({
 
         .key-input:focus {
           outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+          border-color: #5c64ff;
+          box-shadow: 0 0 0 3px rgba(92, 100, 255, 0.25);
         }
 
         .key-input:disabled {
-          background: #f5f5f5;
+          background: #1a1a24;
         }
 
         .toggle-visibility {
           padding: 8px 12px;
-          background: white;
-          border: 2px solid #e0e0e0;
+          background: #24242e;
+          color: rgba(255, 255, 255, 0.9);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
           cursor: pointer;
           font-size: 18px;
@@ -344,7 +349,7 @@ export function DecryptionDialog({
         }
 
         .toggle-visibility:hover:not(:disabled) {
-          border-color: #667eea;
+          border-color: #5c64ff;
         }
 
         .toggle-visibility:disabled {
@@ -354,14 +359,14 @@ export function DecryptionDialog({
         .input-hint {
           margin: 8px 0 0 0;
           font-size: 12px;
-          color: #888;
+          color: rgba(255, 255, 255, 0.5);
         }
 
         .error-message {
           padding: 12px;
-          background: rgba(220, 53, 69, 0.1);
+          background: rgba(220, 53, 69, 0.12);
           border-radius: 8px;
-          color: #dc3545;
+          color: #ff8a8a;
           font-size: 13px;
           margin-top: 12px;
         }
@@ -370,8 +375,8 @@ export function DecryptionDialog({
           display: flex;
           gap: 12px;
           padding: 16px 20px;
-          background: #f8f9fa;
-          border-top: 1px solid #e0e0e0;
+          background: #1a1a24;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .btn-cancel,
@@ -386,17 +391,17 @@ export function DecryptionDialog({
         }
 
         .btn-cancel {
-          background: white;
-          border: 2px solid #e0e0e0;
-          color: #666;
+          background: #24242e;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: rgba(255, 255, 255, 0.7);
         }
 
         .btn-cancel:hover:not(:disabled) {
-          border-color: #999;
+          border-color: rgba(255, 255, 255, 0.3);
         }
 
         .btn-decrypt {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #6200ea, #4a4eff, #00b0ff);
           border: none;
           color: white;
           display: flex;
@@ -408,7 +413,7 @@ export function DecryptionDialog({
         .btn-decrypt:hover:not(:disabled) {
           opacity: 0.9;
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+          box-shadow: 0 4px 12px rgba(92, 100, 255, 0.4);
         }
 
         .btn-decrypt:disabled {

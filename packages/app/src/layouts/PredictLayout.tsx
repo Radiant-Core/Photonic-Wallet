@@ -26,7 +26,7 @@ export default function PredictLayout() {
             as={Link}
             to="/predict/create"
             leftIcon={<Icon as={TbPlus} />}
-            shadow="dark-md"
+            shadow="md"
           >
             New Market
           </Button>

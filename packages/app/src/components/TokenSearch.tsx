@@ -109,7 +109,17 @@ export default function TokenSearch({
       />
       {(!!results.length || loading) && (
         <Box position="absolute" inset={0} top="100%" w="full" zIndex={10}>
-          <Flex bgColor="bg.300" p={2} flexDir="column" gap={2} ref={listRef}>
+          <Flex
+            bgColor="surface.sunken"
+            borderWidth="1px"
+            borderColor="border.default"
+            borderRadius="md"
+            boxShadow="lg"
+            p={2}
+            flexDir="column"
+            gap={2}
+            ref={listRef}
+          >
             {loading ? (
               <Flex justifyContent="center" gap={4} p={4}>
                 <Spinner /> Fetching glyph
@@ -121,7 +131,7 @@ export default function TokenSearch({
                   justifyContent="left"
                   p={2}
                   key={glyph.id}
-                  bgColor={index === focusIndex ? "bg.100" : "transparent"}
+                  bgColor={index === focusIndex ? "surface.hover" : "transparent"}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     onSelectItem(index);
@@ -135,7 +145,7 @@ export default function TokenSearch({
                   }
                   rightIcon={
                     <Icon
-                      color="gray.500"
+                      color="text.muted"
                       as={
                         glyph.tokenType === SmartTokenType.NFT
                           ? TbTriangleSquareCircle
@@ -146,7 +156,7 @@ export default function TokenSearch({
                   }
                 >
                   {glyph.ticker && (
-                    <Text color="lightBlue.A400" mr={1}>
+                    <Text color="accent.secondary" mr={1}>
                       {glyph.ticker}
                     </Text>
                   )}

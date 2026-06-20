@@ -194,7 +194,7 @@ export default function PredictCatMarket() {
 
       <Flex align="center" gap={3} mb={4} flexWrap="wrap">
         <OracleTrustBadge t={tracked} />
-        <Text fontFamily="mono" fontSize="xs" color="gray.500">
+        <Text fontFamily="mono" fontSize="xs" color="text.muted">
           market {tracked.marketRef.substring(0, 16)}… · created{" "}
           {tracked.createTxid.substring(0, 8)}…
         </Text>
@@ -282,7 +282,7 @@ export default function PredictCatMarket() {
               <Heading size="sm" mb={2}>
                 Mint complete sets
               </Heading>
-              <Text fontSize="sm" color="gray.400" mb={2}>
+              <Text fontSize="sm" color="text.muted" mb={2}>
                 Lock N RXD to mint N of every outcome. A complete set (one share
                 of each outcome) can always be merged back for the collateral —
                 only holding a non-winning outcome at resolution loses value.
@@ -321,7 +321,7 @@ export default function PredictCatMarket() {
             My positions by outcome
           </Heading>
           {live.myShares.every((s) => s.length === 0) ? (
-            <Text fontSize="sm" color="gray.400" mb={6}>
+            <Text fontSize="sm" color="text.muted" mb={6}>
               None.
             </Text>
           ) : (
@@ -377,14 +377,14 @@ export default function PredictCatMarket() {
 
           {sets.length > 0 && (
             <Box mb={6}>
-              <Text fontSize="sm" color="gray.400" mb={2}>
+              <Text fontSize="sm" color="text.muted" mb={2}>
                 {sets.length} complete set{sets.length > 1 ? "s" : ""} mergeable
                 back to RXD:
               </Text>
               {sets.map((set, i) => (
                 <Flex key={i} align="center" gap={3} mb={1}>
                   <Photons value={set[0].satoshis} />
-                  <Text fontSize="sm" color="gray.500">
+                  <Text fontSize="sm" color="text.muted">
                     × {set.length} outcomes
                   </Text>
                   <Button

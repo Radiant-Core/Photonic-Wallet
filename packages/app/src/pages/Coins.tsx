@@ -98,19 +98,19 @@ export default function Coins() {
       >
         <ButtonGroup size="sm" isAttached variant="outline">
           <Button
-            variant={filter === "unspent" ? "solid" : "outline"}
+            variant={filter === "unspent" ? "subtle" : "ghost"}
             onClick={() => setFilter("unspent")}
           >
             Unspent
           </Button>
           <Button
-            variant={filter === "spent" ? "solid" : "outline"}
+            variant={filter === "spent" ? "subtle" : "ghost"}
             onClick={() => setFilter("spent")}
           >
             Spent
           </Button>
           <Button
-            variant={filter === "all" ? "solid" : "outline"}
+            variant={filter === "all" ? "subtle" : "ghost"}
             onClick={() => setFilter("all")}
           >
             All
@@ -142,31 +142,44 @@ export default function Coins() {
       </Flex>
 
       <Table size={{ base: "sm", xl: "md" }}>
-        <Thead>
+        <Thead bg="surface.sunken">
           <Tr>
             <Th display={{ base: "none", lg: "table-cell" }} />
-            <Th>TX ID</Th>
-            <Th>Block</Th>
-            <Th>Status</Th>
-            <Th textAlign="right">Value</Th>
+            <Th textStyle="label">TX ID</Th>
+            <Th textStyle="label">Block</Th>
+            <Th textStyle="label">Status</Th>
+            <Th textStyle="label" textAlign="right">
+              Value
+            </Th>
             <Th width="50px" />
             <Th display={{ base: "none", lg: "table-cell" }} />
           </Tr>
         </Thead>
         <Tbody fontFamily="mono">
           {pageRows.map(({ txid, vout, value, height, spent }) => (
-            <Tr key={`${txid}${vout}`} opacity={spent ? 0.5 : 1}>
+            <Tr
+              key={`${txid}${vout}`}
+              opacity={spent ? 0.5 : 1}
+              borderTopWidth="1px"
+              borderColor="border.subtle"
+              _hover={{ bg: "bg.50" }}
+            >
               <Td display={{ base: "none", lg: "table-cell" }} />
               <Td>
                 {txid.substring(0, 4)}…{txid.substring(60, 64)}
               </Td>
-              <Td>{height === Infinity ? "…" : height}</Td>
+              <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
+                {height === Infinity ? "…" : height}
+              </Td>
               <Td>
                 <Badge colorScheme={spent ? "red" : "green"} fontSize="xs">
                   {spent ? "Spent" : "Unspent"}
                 </Badge>
               </Td>
-              <Td textAlign="right">
+              <Td
+                textAlign="right"
+                sx={{ fontVariantNumeric: "tabular-nums" }}
+              >
                 <Photons value={value} />
               </Td>
               <Td>

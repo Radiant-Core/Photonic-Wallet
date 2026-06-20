@@ -42,6 +42,7 @@ import {
 } from "react-icons/md";
 import { QRCodeSVG } from "qrcode.react";
 import { Scanner } from "@yudiel/react-qr-scanner";
+import Card from "@app/components/Card";
 import { openModal, wallet } from "@app/signals";
 import { withWif } from "@app/wallet";
 import { signMessageWithWif } from "@lib/sign";
@@ -111,10 +112,10 @@ export default function Connect() {
 
   return (
     <Container maxW="container.md" py={8}>
-      <Heading size="lg" mb={1}>
+      <Heading textStyle="h1" mb={1}>
         Connect &amp; sign
       </Heading>
-      <Text color="gray.400" mb={6}>
+      <Text textStyle="body" color="text.secondary" mb={6}>
         Prove you control this wallet to an app by signing its challenge. This
         never spends funds and never reveals your seed.
       </Text>
@@ -166,14 +167,8 @@ function InputPanel({
 
   return (
     <Stack spacing={4}>
-      <Box
-        bg="bg.100"
-        borderWidth="1px"
-        borderColor="whiteAlpha.100"
-        borderRadius="xl"
-        p={5}
-      >
-        <Text fontWeight="semibold" mb={2}>
+      <Card p={5}>
+        <Text textStyle="label" mb={3}>
           Paste a connect request
         </Text>
         <Textarea
@@ -202,16 +197,10 @@ function InputPanel({
             Paste from clipboard
           </Button>
         </HStack>
-      </Box>
+      </Card>
 
       {scanning && (
-        <Box
-          bg="bg.100"
-          borderWidth="1px"
-          borderColor="whiteAlpha.100"
-          borderRadius="xl"
-          p={4}
-        >
+        <Card p={4}>
           <Box w="100%" maxW="320px" mx="auto" aspectRatio={1}>
             <Scanner
               onScan={(codes) => {
@@ -222,7 +211,7 @@ function InputPanel({
               }}
             />
           </Box>
-        </Box>
+        </Card>
       )}
     </Stack>
   );
@@ -247,15 +236,9 @@ function RequestPanel({
 
   return (
     <Stack spacing={4}>
-      <Box
-        bg="bg.100"
-        borderWidth="1px"
-        borderColor="whiteAlpha.100"
-        borderRadius="xl"
-        p={5}
-      >
+      <Card p={5}>
         <Flex align="center" justify="space-between" mb={4}>
-          <Text fontWeight="semibold">Signature request</Text>
+          <Text textStyle="label">Signature request</Text>
           {recognized ? (
             <Badge
               colorScheme="green"
@@ -279,7 +262,7 @@ function RequestPanel({
 
         {request.origin || request.app ? (
           <Box mb={4}>
-            <Text fontSize="sm" color="gray.400" mb={1}>
+            <Text textStyle="label" mb={1}>
               Requested by
             </Text>
             <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
@@ -311,7 +294,7 @@ function RequestPanel({
           </Alert>
         )}
 
-        <Text fontSize="sm" color="gray.400" mb={1}>
+        <Text textStyle="label" mb={1}>
           Message to sign
         </Text>
         <Code
@@ -326,7 +309,7 @@ function RequestPanel({
           {request.challenge}
         </Code>
 
-        <Text fontSize="sm" color="gray.400" mb={1}>
+        <Text textStyle="label" mb={1}>
           Signing as
         </Text>
         <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
@@ -345,11 +328,11 @@ function RequestPanel({
         )}
 
         {locked && (
-          <Text fontSize="sm" color="gray.500" mt={4}>
+          <Text textStyle="small" mt={4}>
             You will be asked to unlock your wallet to sign.
           </Text>
         )}
-      </Box>
+      </Card>
 
       <Alert status="info" borderRadius="lg">
         <AlertIcon />
@@ -394,25 +377,19 @@ function ResultPanel({
         </Box>
       </Alert>
 
-      <Box
-        bg="bg.100"
-        borderWidth="1px"
-        borderColor="whiteAlpha.100"
-        borderRadius="xl"
-        p={5}
-      >
+      <Card p={5}>
         <VStack spacing={4}>
           <Box borderRadius="md" overflow="hidden" bg="white" p={3}>
             <QRCodeSVG size={232} value={envelope} includeMargin />
           </Box>
-          <Text fontSize="sm" color="gray.400">
+          <Text textStyle="small">
             Scan to return the full response, or copy the signature below.
           </Text>
         </VStack>
 
         <Divider my={4} />
 
-        <Text fontSize="sm" color="gray.400" mb={1}>
+        <Text textStyle="label" mb={1}>
           Signature
         </Text>
         <Code
@@ -434,13 +411,13 @@ function ResultPanel({
           {hasCopied ? "Copied!" : "Copy signature"}
         </Button>
 
-        <Text fontSize="sm" color="gray.400" mt={4} mb={1}>
+        <Text textStyle="label" mt={4} mb={1}>
           Signed by
         </Text>
         <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
           {result.address}
         </Code>
-      </Box>
+      </Card>
 
       <Button variant="solid" onClick={onDone}>
         Sign another

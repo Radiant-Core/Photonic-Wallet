@@ -28,7 +28,7 @@ function CopyButton({ value, ...rest }: { value: string } & ButtonProps) {
     <Button
       leftIcon={hasCopied ? <CheckIcon color="green.400" /> : <CopyIcon />}
       onClick={onCopy}
-      shadow="dark-md"
+      boxShadow="md"
       {...rest}
     />
   );

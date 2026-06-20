@@ -59,6 +59,8 @@ import {
 } from "react-icons/md";
 import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
+import NoContent from "@app/components/NoContent";
+import Card from "@app/components/Card";
 import { wallet, feeRate, openModal } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
@@ -448,27 +450,29 @@ export default function WaveNames() {
               {isLoadingNames && displayNames.length === 0 ? (
                 <VStack spacing={4} align="center" py={8}>
                   <Spinner size="lg" color="brand.400" />
-                  <Text color="gray.400">Loading your WAVE names...</Text>
+                  <Text color="text.secondary">Loading your WAVE names...</Text>
                 </VStack>
               ) : !displayNames.length ? (
-                <Alert status="info" borderRadius="md">
-                  <AlertIcon />
-                  <VStack align="start" spacing={2}>
-                    <Text>{"You don't own any WAVE names yet."}</Text>
+                <NoContent
+                  icon={HiOutlineAtSymbol}
+                  subtitle="Register a name to give your wallet a memorable, human-readable identity."
+                  action={
                     <Button
+                      variant="primary"
                       size="sm"
-                      colorScheme="brand"
                       onClick={() => setActiveTab(2)}
                     >
                       {"Register your first name"}
                     </Button>
-                  </VStack>
-                </Alert>
+                  }
+                >
+                  {"You don't own any WAVE names yet."}
+                </NoContent>
               ) : (
                 <VStack spacing={4} align="stretch">
                   {/* Loading indicator for cached data */}
                   {isLoadingNames && cachedNames && !waveNames && (
-                    <HStack spacing={2} color="gray.500">
+                    <HStack spacing={2} color="text.muted">
                       <Spinner size="xs" />
                       <Text fontSize="xs">Refreshing names...</Text>
                     </HStack>
@@ -477,7 +481,7 @@ export default function WaveNames() {
                   {/* Search */}
                   <InputGroup>
                     <InputLeftElement pointerEvents="none">
-                      <SearchIcon color="gray.400" />
+                      <SearchIcon color="text.muted" />
                     </InputLeftElement>
                     <Input
                       placeholder={"Search your names..."}
@@ -488,7 +492,7 @@ export default function WaveNames() {
 
                   {/* Results count */}
                   {(searchQuery || isLoadingNames) && (
-                    <Text fontSize="sm" color="gray.500">
+                    <Text fontSize="sm" color="text.muted">
                       {filteredNames.length === 0
                         ? "No names found"
                         : `Showing ${filteredNames.length} of ${
@@ -515,10 +519,10 @@ export default function WaveNames() {
             <ContentContainer>
               <VStack spacing={6} align="stretch">
                 <FormControl>
-                  <FormLabel>{"Lookup WAVE Name"}</FormLabel>
+                  <FormLabel textStyle="label">{"Lookup WAVE Name"}</FormLabel>
                   <InputGroup>
                     <InputLeftElement pointerEvents="none">
-                      <Icon as={HiOutlineAtSymbol} color="gray.400" />
+                      <Icon as={HiOutlineAtSymbol} color="text.muted" />
                     </InputLeftElement>
                     <Input
                       value={resolveQuery}
@@ -530,7 +534,7 @@ export default function WaveNames() {
                 </FormControl>
 
                 <Button
-                  colorScheme="brand"
+                  variant="primary"
                   onClick={handleResolve}
                   isLoading={isResolving}
                   loadingText={"Resolving..."}
@@ -543,9 +547,9 @@ export default function WaveNames() {
                   <Box
                     p={4}
                     borderWidth="1px"
-                    borderRadius="md"
+                    borderRadius="lg"
                     borderColor="green.500"
-                    bg="green.900"
+                    bg="surface.raised"
                   >
                     <VStack align="start" spacing={2}>
                       <HStack>
@@ -613,7 +617,7 @@ export default function WaveNames() {
                             p={2}
                             borderWidth="1px"
                             borderRadius="md"
-                            borderColor="whiteAlpha.200"
+                            borderColor="border.subtle"
                             cursor="pointer"
                             onClick={() => {
                               setResolveQuery(lookup.name);
@@ -622,14 +626,14 @@ export default function WaveNames() {
                                 target: lookup.target,
                               });
                             }}
-                            _hover={{ bg: "whiteAlpha.100" }}
+                            _hover={{ bg: "bg.50" }}
                           >
                             <HStack justify="space-between">
                               <VStack align="start" spacing={0}>
                                 <Text fontWeight="medium">{lookup.name}</Text>
                                 <Text
                                   fontSize="xs"
-                                  color="gray.500"
+                                  color="text.muted"
                                   fontFamily="mono"
                                 >
                                   {lookup.target.slice(0, 20)}...
@@ -667,7 +671,7 @@ export default function WaveNames() {
                   {"Ready to register a new WAVE name?"}
                 </Text>
                 <Button
-                  colorScheme="brand"
+                  variant="primary"
                   size="lg"
                   leftIcon={<Icon as={HiOutlineAtSymbol} />}
                   onClick={() => (window.location.href = "#/names")}
@@ -1166,13 +1170,7 @@ function WaveNameCard({
   };
 
   return (
-    <Box
-      p={4}
-      borderWidth="1px"
-      borderRadius="lg"
-      borderColor="whiteAlpha.200"
-      bg="gray.800"
-    >
+    <Card p={4}>
       <Flex
         justify="space-between"
         align="start"
@@ -1202,7 +1200,7 @@ function WaveNameCard({
           <HStack spacing={2} w="100%" minW={0}>
             <Text
               fontSize="sm"
-              color="gray.400"
+              color="text.secondary"
               fontFamily="mono"
               isTruncated
               minW={0}
@@ -1262,7 +1260,7 @@ function WaveNameCard({
                     ? "red.400"
                     : record.status === "reclaimable"
                     ? "purple.400"
-                    : "gray.500"
+                    : "text.muted"
                 }
               >
                 {record.status === "expiring" && "⚠️ Expires soon: "}
@@ -1273,7 +1271,7 @@ function WaveNameCard({
                 {new Date((record.expires ?? 0) * 1000).toLocaleDateString()}
               </Text>
               {record.gracePeriodEnd && record.status !== "reclaimable" && (
-                <Text fontSize="xs" color="gray.500">
+                <Text fontSize="xs" color="text.muted">
                   (Grace until:{" "}
                   {new Date(record.gracePeriodEnd * 1000).toLocaleDateString()})
                 </Text>
@@ -1407,12 +1405,12 @@ function WaveNameCard({
           <ModalBody>
             <VStack spacing={4}>
               <FormControl>
-                <FormLabel>{"Name"}</FormLabel>
-                <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
+                <FormLabel textStyle="label">{"Name"}</FormLabel>
+                <Input value={record.name} isReadOnly bg="surface.sunken" />
               </FormControl>
               <FormControl>
                 <Flex justify="space-between" align="center" mb={2}>
-                  <FormLabel mb={0}>{"New Target Address"}</FormLabel>
+                  <FormLabel mb={0} textStyle="label">{"New Target Address"}</FormLabel>
                   <Button
                     size="xs"
                     variant="link"
@@ -1467,12 +1465,12 @@ function WaveNameCard({
                 </Text>
               </Alert>
               <FormControl>
-                <FormLabel>{"Name"}</FormLabel>
-                <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
+                <FormLabel textStyle="label">{"Name"}</FormLabel>
+                <Input value={record.name} isReadOnly bg="surface.sunken" />
               </FormControl>
               {record.expires && (
                 <Box>
-                  <Text fontSize="sm" color="gray.400">
+                  <Text fontSize="sm" color="text.secondary">
                     {"Current expiration:"}{" "}
                     {new Date(record.expires * 1000).toLocaleDateString()}
                   </Text>
@@ -1485,7 +1483,7 @@ function WaveNameCard({
                   </Text>
                 </Box>
               )}
-              <Text fontSize="sm" color="gray.500">
+              <Text fontSize="sm" color="text.muted">
                 {"Renewal cost: Same as registration based on name length"}
               </Text>
             </VStack>
@@ -1527,11 +1525,11 @@ function WaveNameCard({
                 </VStack>
               </Alert>
               <FormControl>
-                <FormLabel>{"Name to Burn"}</FormLabel>
-                <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
+                <FormLabel textStyle="label">{"Name to Burn"}</FormLabel>
+                <Input value={record.name} isReadOnly bg="surface.sunken" />
               </FormControl>
               <FormControl>
-                <FormLabel>{"Reason (Optional)"}</FormLabel>
+                <FormLabel textStyle="label">{"Reason (Optional)"}</FormLabel>
                 <Input
                   value={burnReason}
                   onChange={(e) => setBurnReason(e.target.value)}
@@ -1574,11 +1572,11 @@ function WaveNameCard({
           <ModalBody>
             <VStack spacing={4} align="stretch">
               <FormControl>
-                <FormLabel>{"Name"}</FormLabel>
-                <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
+                <FormLabel textStyle="label">{"Name"}</FormLabel>
+                <Input value={record.name} isReadOnly bg="surface.sunken" />
               </FormControl>
               <FormControl>
-                <FormLabel>{"Recipient Address"}</FormLabel>
+                <FormLabel textStyle="label">{"Recipient Address"}</FormLabel>
                 <Input
                   value={transferAddress}
                   onChange={(e) => setTransferAddress(e.target.value)}
@@ -1629,8 +1627,8 @@ function WaveNameCard({
                 </VStack>
               </Alert>
               <FormControl>
-                <FormLabel>{"Name to Reclaim"}</FormLabel>
-                <Input value={record.name} isReadOnly bg="whiteAlpha.100" />
+                <FormLabel textStyle="label">{"Name to Reclaim"}</FormLabel>
+                <Input value={record.name} isReadOnly bg="surface.sunken" />
               </FormControl>
               <Alert status="info" borderRadius="md">
                 <AlertIcon />
@@ -1645,7 +1643,7 @@ function WaveNameCard({
                   <Text fontSize="sm">
                     {"3. The name becomes available for new registration"}
                   </Text>
-                  <Text fontSize="sm" color="gray.500">
+                  <Text fontSize="sm" color="text.muted">
                     {
                       "Photons from the burned token will be returned to your wallet."
                     }
@@ -1669,6 +1667,6 @@ function WaveNameCard({
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </Box>
+    </Card>
   );
 }

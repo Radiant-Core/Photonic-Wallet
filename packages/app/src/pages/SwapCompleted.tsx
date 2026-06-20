@@ -4,9 +4,10 @@ import { SwapStatus } from "@app/types";
 import { Container } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
 import SwapTable from "@app/components/SwapTable";
-import Card from "@app/components/Card";
+import NoContent from "@app/components/NoContent";
 import { syncSwaps } from "@app/swap";
 import { electrumStatus } from "@app/signals";
+import { TbChecks } from "react-icons/tb";
 
 export default function SwapCompleted() {
   const completed = useLiveQuery(() =>
@@ -22,7 +23,12 @@ export default function SwapCompleted() {
       {completed?.length ? (
         <SwapTable swaps={completed} />
       ) : (
-        <Card>There are no completed swaps</Card>
+        <NoContent
+          icon={TbChecks}
+          subtitle="Swaps that have settled on-chain will be listed here."
+        >
+          There are no completed swaps
+        </NoContent>
       )}
     </Container>
   );

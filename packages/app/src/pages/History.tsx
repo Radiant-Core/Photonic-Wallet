@@ -108,39 +108,55 @@ export default function HistoryPage() {
         <VStack align="stretch" spacing={6}>
           <BalanceHistoryChart />
           <Box>
-            <Text mb={3}>{broadcasts.length} transactions recorded</Text>
-            <Table>
-              <Thead>
-                <Tr>
-                  <Th>Type</Th>
-                  <Th>Timestamp</Th>
-                  <Th>TXID</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {filtered.map((a) => (
-                  <Tr key={a.id}>
-                    <Td>
-                      <Badge colorScheme={typeColors[a.type] || "gray"}>
-                        {a.type}
-                      </Badge>
-                    </Td>
-                    <Td fontSize="xs">
-                      {new Date(a.timestamp).toLocaleString()}
-                    </Td>
-                    <Td>
-                      <Link
-                        href={createExplorerUrl(a.txid)}
-                        isExternal
-                        color="blue.400"
-                      >
-                        {a.txid.slice(0, 12)}...
-                      </Link>
-                    </Td>
+            <Text mb={3} textStyle="small">
+              {broadcasts.length} transactions recorded
+            </Text>
+            <Box
+              borderWidth="1px"
+              borderColor="border.default"
+              borderRadius="lg"
+              overflow="hidden"
+            >
+              <Table>
+                <Thead bg="surface.sunken">
+                  <Tr>
+                    <Th textStyle="label">Type</Th>
+                    <Th textStyle="label">Timestamp</Th>
+                    <Th textStyle="label">TXID</Th>
                   </Tr>
-                ))}
-              </Tbody>
-            </Table>
+                </Thead>
+                <Tbody>
+                  {filtered.map((a) => (
+                    <Tr
+                      key={a.id}
+                      borderTopWidth="1px"
+                      borderColor="border.subtle"
+                      _hover={{ bg: "bg.50" }}
+                    >
+                      <Td>
+                        <Badge colorScheme={typeColors[a.type] || "gray"}>
+                          {a.type}
+                        </Badge>
+                      </Td>
+                      <Td fontSize="xs" color="text.secondary">
+                        {new Date(a.timestamp).toLocaleString()}
+                      </Td>
+                      <Td>
+                        <Link
+                          href={createExplorerUrl(a.txid)}
+                          isExternal
+                          color="accent.secondary"
+                          fontFamily="mono"
+                          fontSize="xs"
+                        >
+                          {a.txid.slice(0, 12)}...
+                        </Link>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </Box>
           </Box>
         </VStack>
       )}

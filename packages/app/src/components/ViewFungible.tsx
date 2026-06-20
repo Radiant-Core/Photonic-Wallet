@@ -65,9 +65,9 @@ export const PropertyCard = ({
       {...rest}
     >
       <Heading
-        size="sm"
+        textStyle="label"
         mb={2}
-        color="lightBlue.A400"
+        color="accent.secondary"
         display="flex"
         flexDirection="row"
         alignItems="center"
@@ -126,7 +126,7 @@ export default function ViewFungible({
     return (
       <ContentContainer>
         <PageHeader />
-        <Box p={8} textAlign="center" color="gray.500">
+        <Box p={8} textAlign="center" color="text.muted">
           {"Loading…"}
         </Box>
       </ContentContainer>
@@ -136,7 +136,7 @@ export default function ViewFungible({
     return (
       <ContentContainer>
         <PageHeader />
-        <Box p={8} textAlign="center" color="gray.500">
+        <Box p={8} textAlign="center" color="text.muted">
           {"Token not found"}
         </Box>
       </ContentContainer>
@@ -233,8 +233,8 @@ export default function ViewFungible({
                     </Box>
                   )}
                   <Box ml={4} flexGrow={1}>
-                    <Heading size="md">{token.name}</Heading>
-                    <Heading size="md" fontWeight="normal" color="gray.400">
+                    <Heading textStyle="h3">{token.name}</Heading>
+                    <Heading textStyle="h3" fontWeight="normal" color="text.muted">
                       {(token.ticker as string) || <i>No ticker</i>}
                     </Heading>
                   </Box>
@@ -266,6 +266,7 @@ export default function ViewFungible({
               )}
               <HStack>
                 <Button
+                  variant="primary"
                   leftIcon={<ActionIcon as={TbArrowUpRight} />}
                   onClick={() => unlock(openSend)}
                   flexGrow={1}

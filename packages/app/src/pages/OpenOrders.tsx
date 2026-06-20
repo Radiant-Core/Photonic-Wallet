@@ -52,6 +52,8 @@ import {
 } from "react-icons/md";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
+import NoContent from "@app/components/NoContent";
+import { TbInbox } from "react-icons/tb";
 import TokenContent from "@app/components/TokenContent";
 import { WaveExpiryBadge } from "@app/components/WaveAssetLabel";
 import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
@@ -720,7 +722,7 @@ function MyOffersPanel() {
     <Card p={4}>
       <VStack align="stretch" spacing={3}>
         <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
-          <Heading size="md">My Public Offers</Heading>
+          <Heading textStyle="h3">My Public Offers</Heading>
           <Text fontSize="xs" color="gray.500">
             Offers you have broadcast on-chain. Cancel to reclaim the asset.
           </Text>
@@ -728,11 +730,15 @@ function MyOffersPanel() {
         <Box overflowX="auto">
           <Table size="sm">
             <Thead>
-              <Tr>
-                <Th>Swap</Th>
-                <Th>Status</Th>
-                <Th display={{ base: "none", md: "table-cell" }}>Date</Th>
-                <Th textAlign="right">Actions</Th>
+              <Tr bg="surface.sunken">
+                <Th textStyle="label">Swap</Th>
+                <Th textStyle="label">Status</Th>
+                <Th textStyle="label" display={{ base: "none", md: "table-cell" }}>
+                  Date
+                </Th>
+                <Th textStyle="label" textAlign="right">
+                  Actions
+                </Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -1576,7 +1582,7 @@ export default function OpenOrders({
       <VStack spacing={4} align="stretch">
         {/* Header with controls */}
         <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
-          <Heading size="lg">{"Open Orders"}</Heading>
+          <Heading textStyle="h2">{"Open Orders"}</Heading>
           <HStack spacing={2}>
             {lastUpdated && (
               <HStack
@@ -1746,26 +1752,24 @@ export default function OpenOrders({
         <Card>
           {loading && orders.length === 0 ? (
             <VStack p={8} spacing={4}>
-              <Skeleton height="40px" width="100%" />
-              <Skeleton height="40px" width="100%" />
-              <Skeleton height="40px" width="100%" />
+              <Skeleton height="40px" width="100%" bg="surface.sunken" />
+              <Skeleton height="40px" width="100%" bg="surface.sunken" />
+              <Skeleton height="40px" width="100%" bg="surface.sunken" />
             </VStack>
           ) : emptyState ? (
-            <Box p={8} textAlign="center">
-              <Text color="gray.500" fontWeight="medium">
+            <Box pb={8}>
+              <NoContent icon={TbInbox} subtitle={emptyState.description}>
                 {emptyState.title}
-              </Text>
-              <Text fontSize="sm" color="gray.400" mt={2}>
-                {emptyState.description}
-              </Text>
+              </NoContent>
             </Box>
           ) : viewMode === "table" ? (
             <Box overflowX="auto">
               <Table size="sm">
                 <Thead>
-                  <Tr>
-                    <Th>{"Swap"}</Th>
+                  <Tr bg="surface.sunken">
+                    <Th textStyle="label">{"Swap"}</Th>
                     <Th
+                      textStyle="label"
                       cursor="pointer"
                       onClick={() => handleSort("name")}
                       _hover={{ color: "blue.400" }}
@@ -1775,6 +1779,7 @@ export default function OpenOrders({
                         (sortDirection === "asc" ? "↑" : "↓")}
                     </Th>
                     <Th
+                      textStyle="label"
                       cursor="pointer"
                       onClick={() => handleSort("value")}
                       _hover={{ color: "blue.400" }}
@@ -1784,6 +1789,7 @@ export default function OpenOrders({
                         (sortDirection === "asc" ? "↑" : "↓")}
                     </Th>
                     <Th
+                      textStyle="label"
                       display={{ base: "none", md: "table-cell" }}
                       cursor="pointer"
                       onClick={() => handleSort("block")}

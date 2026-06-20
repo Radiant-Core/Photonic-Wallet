@@ -3,13 +3,25 @@ import { PropsWithChildren } from "react";
 
 function Word({ n, children }: PropsWithChildren<{ n: number }>) {
   return (
-    <Flex bg="blackAlpha.400" p={2} borderRadius={8}>
+    <Flex
+      bg="surface.sunken"
+      borderWidth="1px"
+      borderColor="border.subtle"
+      p={2}
+      borderRadius="md"
+      alignItems="center"
+    >
       <Box mr={2} userSelect="none">
-        <Tag width={8} justifyContent="center" bg="gray.700">
+        <Tag
+          width={8}
+          justifyContent="center"
+          bg="whiteAlpha.100"
+          color="whiteAlpha.700"
+        >
           {n + 1}
         </Tag>
       </Box>
-      <Box flexGrow={1} textAlign="center">
+      <Box flexGrow={1} textAlign="center" fontFamily="mono" fontWeight="medium">
         {children}
       </Box>
     </Flex>

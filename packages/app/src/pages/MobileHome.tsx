@@ -12,7 +12,7 @@ import ContentContainer from "@app/components/ContentContainer";
 import { Navigate } from "react-router-dom";
 import { network, openModal } from "@app/signals";
 import Balance from "@app/components/Balance";
-import ValueTag from "@app/components/ValueTag";
+import { Box } from "@chakra-ui/react";
 
 export default function MobileHome() {
   const mobile = useBreakpointValue({ base: true, lg: false });
@@ -27,16 +27,20 @@ export default function MobileHome() {
       <PageHeader showLogo />
       <Container maxW="container.md" px={4}>
         <Card mx="auto">
-          <Flex flexDirection="column" alignItems="center" mb={4}>
-            <Text fontSize="xl" fontWeight="medium" mb={2}>
-              {network.value.ticker} BALANCE
-            </Text>
-            <ValueTag>
+          <Flex flexDirection="column" alignItems="center" mb={6} gap={1}>
+            <Text textStyle="label">{network.value.ticker} balance</Text>
+            <Box
+              textStyle="numeric"
+              fontSize="3xl"
+              fontWeight="bold"
+              lineHeight={1.1}
+            >
               <Balance />
-            </ValueTag>
+            </Box>
           </Flex>
           <SimpleGrid columns={[1, 2]} spacing={4} alignSelf="stretch">
             <Button
+              variant="primary"
               onClick={() => {
                 openModal.value = { modal: "send" };
               }}

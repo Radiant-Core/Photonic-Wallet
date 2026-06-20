@@ -69,7 +69,7 @@ export function EncryptedBadge({
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #6200ea, #4a4eff, #00b0ff);
           color: white;
           border-radius: 20px;
           font-weight: 600;
@@ -102,7 +102,7 @@ export function EncryptedBadge({
 
         .encrypted-badge:hover {
           transform: scale(1.05);
-          box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+          box-shadow: 0 2px 8px rgba(92, 100, 255, 0.4);
         }
 
         .lock-icon {
@@ -122,7 +122,7 @@ export function EncryptedBadge({
  */
 export function LockIcon({
   size = 16,
-  color = "#667eea",
+  color = "#5c64ff",
 }: {
   size?: number;
   color?: string;

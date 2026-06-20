@@ -43,7 +43,9 @@ export default function TokenRow({
   const short = ref.shortInput();
   return (
     <Flex
-      bgGradient="linear(to-b, bg.100, bg.300)"
+      bg="surface.raised"
+      borderWidth="1px"
+      borderColor="border.subtle"
       alignItems="center"
       p={size === "sm" ? 2 : 3}
       pr={size === "sm" ? 3 : 4}
@@ -54,6 +56,8 @@ export default function TokenRow({
       as={Link}
       to={to}
       w="100%"
+      transition="background 0.18s ease, border-color 0.18s ease"
+      _hover={{ bg: "bg.50", borderColor: "border.strong" }}
     >
       <Box
         w={size === "sm" ? "40px" : "48px"}

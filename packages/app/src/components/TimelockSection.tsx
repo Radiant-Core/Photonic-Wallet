@@ -9,6 +9,9 @@
 
 import { useState } from "react";
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
   Box,
   Button,
   Flex,
@@ -89,9 +92,9 @@ export function TimelockSection({
       borderWidth="1px"
       borderRadius="md"
       borderColor={
-        state.enabled && encryptionEnabled ? "purple.400" : "whiteAlpha.200"
+        state.enabled && encryptionEnabled ? "accent.focus" : "border.subtle"
       }
-      bg={state.enabled && encryptionEnabled ? "purple.900" : "whiteAlpha.50"}
+      bg={state.enabled && encryptionEnabled ? "surface.hover" : "surface.sunken"}
       p={4}
       mt={2}
     >
@@ -101,7 +104,7 @@ export function TimelockSection({
           <Text fontWeight="semibold" fontSize="sm">
             {"Timelock"}
           </Text>
-          <Text fontSize="xs" color="gray.400">
+          <Text fontSize="xs" color="text.muted">
             {encryptionEnabled
               ? "Lock content until a block height or date"
               : "Enable encryption first to use timelock"}
@@ -121,7 +124,7 @@ export function TimelockSection({
         <Stack spacing={3} mt={4}>
           {/* Mode selector */}
           <FormControl>
-            <FormLabel fontSize="xs" color="gray.300" mb={1}>
+            <FormLabel textStyle="label" mb={1}>
               {"Lock until"}
             </FormLabel>
             <RadioGroup
@@ -153,9 +156,9 @@ export function TimelockSection({
                   onChange={(e) => update({ unlockValue: e.target.value })}
                   isDisabled={disabled}
                   size="sm"
-                  bg="whiteAlpha.100"
+                  bg="surface.sunken"
                 />
-                <FormHelperText fontSize="xs" color="gray.400">
+                <FormHelperText fontSize="xs" color="text.muted">
                   {"Content will be inaccessible until this date."}
                 </FormHelperText>
               </>
@@ -173,10 +176,10 @@ export function TimelockSection({
                   isDisabled={disabled}
                   min={currentBlock ? currentBlock + 1 : 1}
                   size="sm"
-                  bg="whiteAlpha.100"
+                  bg="surface.sunken"
                 />
                 {currentBlock !== undefined && state.unlockValue && (
-                  <FormHelperText fontSize="xs" color="gray.400">
+                  <FormHelperText fontSize="xs" color="text.muted">
                     {(() => {
                       const blocksLeft =
                         parseInt(state.unlockValue, 10) - currentBlock;
@@ -209,7 +212,7 @@ export function TimelockSection({
 
           {showAdvanced && (
             <FormControl>
-              <FormLabel fontSize="xs" color="gray.300" mb={1}>
+              <FormLabel textStyle="label" mb={1}>
                 {"Hint for viewers"}
               </FormLabel>
               <Input
@@ -219,29 +222,23 @@ export function TimelockSection({
                 isDisabled={disabled}
                 size="sm"
                 maxLength={120}
-                bg="whiteAlpha.100"
+                bg="surface.sunken"
               />
-              <FormHelperText fontSize="xs" color="gray.400">
+              <FormHelperText fontSize="xs" color="text.muted">
                 {"Shown publicly before unlock. Do not include sensitive info."}
               </FormHelperText>
             </FormControl>
           )}
 
           {/* Security warning */}
-          <Box
-            bg="orange.900"
-            borderColor="orange.600"
-            borderWidth="1px"
-            borderRadius="sm"
-            p={2}
-          >
-            <Text fontSize="xs" color="orange.200">
-              ⚠️{" "}
+          <Alert status="warning" borderRadius="md" py={2}>
+            <AlertIcon />
+            <AlertDescription fontSize="xs">
               {
                 "Your wallet's backup key is always added as a recipient. Keep your wallet seed phrase safe — it's the only way to recover timelocked content if the reveal is lost."
               }
-            </Text>
-          </Box>
+            </AlertDescription>
+          </Alert>
         </Stack>
       )}
     </Box>

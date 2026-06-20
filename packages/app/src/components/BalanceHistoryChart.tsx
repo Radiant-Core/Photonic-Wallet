@@ -100,10 +100,17 @@ export default function BalanceHistoryChart() {
 
   return (
     <Box>
-      <Text fontWeight="bold" mb={4}>{t`Balance History (Last 30 Days)`}</Text>
+      <Text textStyle="label" mb={4}>{t`Balance History (Last 30 Days)`}</Text>
 
       {/* Simple bar chart visualization using Chakra UI */}
-      <Box bg="gray.800" p={4} borderRadius="md" overflowX="auto">
+      <Box
+        bg="surface.sunken"
+        p={4}
+        borderRadius="lg"
+        borderWidth="1px"
+        borderColor="border.default"
+        overflowX="auto"
+      >
         <VStack align="stretch" spacing={2}>
           {chartData.map((point, index) => {
             const heightPercent =
@@ -112,7 +119,7 @@ export default function BalanceHistoryChart() {
 
             return (
               <HStack key={point.date} spacing={3} align="center">
-                <Text fontSize="xs" w="60px" color="whiteAlpha.600">
+                <Text fontSize="xs" w="60px" color="text.muted">
                   {dayjs(point.date).format("MMM DD")}
                 </Text>
 
@@ -120,7 +127,7 @@ export default function BalanceHistoryChart() {
                 <Box
                   flex={1}
                   h="20px"
-                  bg="gray.700"
+                  bg="bg.50"
                   borderRadius="sm"
                   position="relative"
                   overflow="hidden"
@@ -128,13 +135,18 @@ export default function BalanceHistoryChart() {
                   <Box
                     h="100%"
                     w={`${heightPercent}%`}
-                    bg={isRecent ? "blue.400" : "blue.600"}
+                    bg={isRecent ? "lightBlue.A400" : "brand.500"}
                     borderRadius="sm"
                     transition="all 0.2s"
                   />
                 </Box>
 
-                <Text fontSize="xs" w="80px" textAlign="right">
+                <Text
+                  fontSize="xs"
+                  w="80px"
+                  textAlign="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   {point.balance.toLocaleString()} RXD
                 </Text>
               </HStack>
@@ -147,7 +159,8 @@ export default function BalanceHistoryChart() {
         mt={4}
         justify="space-between"
         fontSize="xs"
-        color="whiteAlpha.600"
+        color="text.muted"
+        sx={{ fontVariantNumeric: "tabular-nums" }}
       >
         <Text>
           {t`Min`}: {minBalance.toLocaleString()} RXD

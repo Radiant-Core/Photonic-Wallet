@@ -23,7 +23,6 @@ import {
   ButtonGroup,
   Container,
   Flex,
-  Heading,
   HStack,
   Icon,
   Image,
@@ -42,12 +41,15 @@ import {
   VStack,
 } from "@chakra-ui/react";
 import { MdRefresh, MdOutlineSwapHoriz } from "react-icons/md";
+import { TbTagOff } from "react-icons/tb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import Card from "@app/components/Card";
 import ContentContainer from "@app/components/ContentContainer";
+import NoContent from "@app/components/NoContent";
 import PageHeader from "@app/components/PageHeader";
+import SectionHeading from "@app/components/SectionHeading";
 import TokenContent from "@app/components/TokenContent";
 import db from "@app/db";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -177,7 +179,7 @@ function AssetLabel({
           {name || shortRef(displayRef)}
         </Text>
         {ticker && name && ticker !== name ? (
-          <Text fontSize="xs" color="gray.500">
+          <Text fontSize="xs" color="text.muted">
             ${ticker}
           </Text>
         ) : null}
@@ -241,10 +243,15 @@ function MyListingRow({
       <Flex align="center" gap={3} wrap="wrap">
         <Box flex={1} minW="200px">
           <Text fontWeight="bold">{listing.name || "Unnamed token"}</Text>
-          <Text fontSize="xs" color="gray.500" fontFamily="mono">
+          <Text fontSize="xs" color="text.muted" fontFamily="mono">
             {shortRef(listing.ref)}
           </Text>
-          <Text fontSize="sm" color="gray.400" mt={1}>
+          <Text
+            fontSize="sm"
+            color="text.secondary"
+            mt={1}
+            sx={{ fontVariantNumeric: "tabular-nums" }}
+          >
             Price {photonsToRXD(listing.price)} RXD · Royalty{" "}
             {photonsToRXD(listing.royaltyTotal)} RXD
           </Text>
@@ -622,8 +629,7 @@ export default function MarketHub() {
               <Button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
-                colorScheme={filter === f.key ? "blue" : undefined}
-                variant={filter === f.key ? "solid" : "outline"}
+                variant={filter === f.key ? "subtle" : "ghost"}
               >
                 {f.label}
               </Button>
@@ -633,9 +639,7 @@ export default function MarketHub() {
           {/* My royalty listings */}
           {myRoyaltyListings.length > 0 && (
             <Box>
-              <Heading size="sm" mb={2}>
-                My Listings
-              </Heading>
+              <SectionHeading>My Listings</SectionHeading>
               <VStack align="stretch" spacing={2}>
                 {myRoyaltyListings.map((l) => (
                   <MyListingRow
@@ -653,42 +657,64 @@ export default function MarketHub() {
             {!loaded ? (
               connected ? (
                 <VStack p={8} spacing={4}>
-                  <Skeleton height="40px" width="100%" />
-                  <Skeleton height="40px" width="100%" />
-                  <Skeleton height="40px" width="100%" />
+                  <Skeleton
+                    height="40px"
+                    width="100%"
+                    startColor="surface.sunken"
+                    endColor="bg.50"
+                  />
+                  <Skeleton
+                    height="40px"
+                    width="100%"
+                    startColor="surface.sunken"
+                    endColor="bg.50"
+                  />
+                  <Skeleton
+                    height="40px"
+                    width="100%"
+                    startColor="surface.sunken"
+                    endColor="bg.50"
+                  />
                 </VStack>
               ) : (
                 <Box p={8} textAlign="center">
-                  <Text color="gray.500" fontWeight="medium">
+                  <Text color="text.muted" fontWeight="medium">
                     Connecting to the network…
                   </Text>
                 </Box>
               )
             ) : empty ? (
-              <Box p={8} textAlign="center">
-                <Text color="gray.500" fontWeight="medium">
-                  No active listings
-                </Text>
-                <Text fontSize="sm" color="gray.400" mt={2}>
-                  Nothing matches this filter right now. Create an offer from the
-                  Swap page, or list an NFT with enforced royalties.
-                </Text>
-              </Box>
+              <NoContent
+                icon={TbTagOff}
+                subtitle="Nothing matches this filter right now. Create an offer from the Swap page, or list an NFT with enforced royalties."
+              >
+                No active listings
+              </NoContent>
             ) : (
               <Box overflowX="auto">
                 <Table size="sm">
-                  <Thead>
+                  <Thead bg="surface.sunken">
                     <Tr>
-                      <Th>Item</Th>
-                      <Th>Price / For</Th>
-                      <Th display={{ base: "none", md: "table-cell" }}>Type</Th>
+                      <Th textStyle="label">Item</Th>
+                      <Th textStyle="label">Price / For</Th>
+                      <Th
+                        textStyle="label"
+                        display={{ base: "none", md: "table-cell" }}
+                      >
+                        Type
+                      </Th>
                       <Th></Th>
                     </Tr>
                   </Thead>
                   <Tbody>
                     {visible.map((l) =>
                       l.kind === "royalty" ? (
-                        <Tr key={l.key}>
+                        <Tr
+                          key={l.key}
+                          borderTopWidth="1px"
+                          borderColor="border.subtle"
+                          _hover={{ bg: "bg.50" }}
+                        >
                           <Td>
                             <AssetLabel
                               displayRef={l.ref}
@@ -697,11 +723,18 @@ export default function MarketHub() {
                           </Td>
                           <Td>
                             <VStack align="start" spacing={0}>
-                              <Text fontWeight="medium">
+                              <Text
+                                fontWeight="medium"
+                                sx={{ fontVariantNumeric: "tabular-nums" }}
+                              >
                                 {photonsToRXD(l.price)} RXD
                               </Text>
                               {l.royaltyTotal > 0 && (
-                                <Text fontSize="xs" color="gray.500">
+                                <Text
+                                  fontSize="xs"
+                                  color="text.muted"
+                                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                                >
                                   +{photonsToRXD(l.royaltyTotal)} royalty
                                 </Text>
                               )}
@@ -716,7 +749,7 @@ export default function MarketHub() {
                             ) : (
                               <Button
                                 size="sm"
-                                colorScheme="purple"
+                                variant="subtle"
                                 onClick={() => buyRoyalty(l)}
                                 isLoading={buyingKey === l.key}
                               >
@@ -747,14 +780,19 @@ export default function MarketHub() {
                             />
                           );
                           return (
-                            <Tr key={l.key}>
+                            <Tr
+                              key={l.key}
+                              borderTopWidth="1px"
+                              borderColor="border.subtle"
+                              _hover={{ bg: "bg.50" }}
+                            >
                               <Td>{isBuy ? quoteCell : tokenCell}</Td>
                               <Td>
                                 <HStack spacing={2} minW={0}>
                                   <Icon
                                     as={MdOutlineSwapHoriz}
                                     boxSize={4}
-                                    color="gray.400"
+                                    color="text.muted"
                                     display={{ base: "none", sm: "inline" }}
                                   />
                                   {isBuy ? tokenCell : quoteCell}
@@ -787,7 +825,6 @@ export default function MarketHub() {
                                 >
                                   <Button
                                     size="sm"
-                                    colorScheme="blue"
                                     variant="outline"
                                     isDisabled={!orderTokenId(l)}
                                     onClick={() => openSwap(l)}
@@ -822,12 +859,10 @@ export default function MarketHub() {
 
           {/* Buy a royalty listing from a shared descriptor */}
           <Box>
-            <Heading size="sm" mb={2}>
-              Buy with a listing descriptor
-            </Heading>
+            <SectionHeading>Buy with a listing descriptor</SectionHeading>
             <Card p={4}>
               <VStack align="stretch" spacing={3}>
-                <Text fontSize="sm" color="gray.400">
+                <Text fontSize="sm" color="text.secondary">
                   Paste a royalty listing descriptor shared by a seller. The
                   covenant enforces the committed price and royalty on-chain — no
                   maker signature needed.

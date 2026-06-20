@@ -162,12 +162,12 @@ export default function RoyaltyConfig({ value, onChange }: RoyaltyConfigProps) {
 
           <VStack align="stretch" spacing={3}>
             <HStack justify="space-between">
-              <Text fontWeight="bold">Royalty Splits (Optional)</Text>
+              <Text textStyle="label">Royalty Splits (Optional)</Text>
               <Button
                 size="sm"
                 leftIcon={<AddIcon />}
                 onClick={addSplit}
-                variant="outline"
+                variant="subtle"
               >
                 Add Split
               </Button>

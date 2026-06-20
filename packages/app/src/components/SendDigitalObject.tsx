@@ -41,6 +41,7 @@ import { UnfinalizedInput } from "@lib/types";
 import { BsQrCodeScan } from "react-icons/bs";
 import AddressInput from "./AddressInput";
 import { TransferError, transferNonFungible } from "@lib/transfer";
+import DataRow from "./DataRow";
 
 interface Props {
   glyph: SmartToken;
@@ -357,30 +358,42 @@ export default function SendDigitalObject({
           <ModalHeader>Confirm Transaction</ModalHeader>
           <ModalCloseButton onClick={cancelBroadcast} />
           <ModalBody>
-            <VStack align="start" spacing={3}>
-              <Text>
-                <strong>Recipient:</strong> {pendingTx?.recipientAddress}
-              </Text>
-              <Text>
-                <strong>NFT:</strong> {pendingTx?.nftName}
-              </Text>
-              <Text>
-                <strong>Fee:</strong> {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
-                {network.value.ticker}
-              </Text>
-              <Text>
-                <strong>Total Cost:</strong>{" "}
-                {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
-                {network.value.ticker}
-              </Text>
-              <Text fontSize="xs" color="gray.500">
-                <strong>TxID:</strong> {pendingTx?.txid}
-              </Text>
+            <VStack align="stretch" spacing={3}>
+              <VStack align="stretch" spacing={0}>
+                <DataRow label="Recipient">
+                  <Text wordBreak="break-all">
+                    {pendingTx?.recipientAddress}
+                  </Text>
+                </DataRow>
+                <DataRow label="NFT">
+                  <Text>{pendingTx?.nftName}</Text>
+                </DataRow>
+                <DataRow label="Fee">
+                  <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                    {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                    {network.value.ticker}
+                  </Text>
+                </DataRow>
+                <DataRow label="Total Cost">
+                  <Text sx={{ fontVariantNumeric: "tabular-nums" }}>
+                    {pendingTx && photonsToRXD(pendingTx.fee)}{" "}
+                    {network.value.ticker}
+                  </Text>
+                </DataRow>
+                <DataRow label="TxID">
+                  <Text fontSize="xs" color="text.muted" wordBreak="break-all">
+                    {pendingTx?.txid}
+                  </Text>
+                </DataRow>
+              </VStack>
               <Divider my={2} />
-              <Text fontSize="sm" color="orange.500">
-                Please verify the recipient address before confirming. This
-                action cannot be undone.
-              </Text>
+              <Alert status="warning" borderRadius="md">
+                <AlertIcon />
+                <AlertDescription>
+                  Please verify the recipient address before confirming. This
+                  action cannot be undone.
+                </AlertDescription>
+              </Alert>
             </VStack>
           </ModalBody>
           <ModalFooter>

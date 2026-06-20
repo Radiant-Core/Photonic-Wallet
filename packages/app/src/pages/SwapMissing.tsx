@@ -16,7 +16,7 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
-import Card from "@app/components/Card";
+import NoContent from "@app/components/NoContent";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { electrumStatus, openModal, wallet } from "@app/signals";
 import { useEffect, useState } from "react";
@@ -159,20 +159,26 @@ export default function SwapMissing() {
       {missing?.length ? (
         <Table size={{ base: "sm", xl: "md" }}>
           <Thead>
-            <Tr>
+            <Tr bg="surface.sunken">
               <Th display={{ base: "none", lg: "table-cell" }} />
-              <Th>{"TX ID"}</Th>
-              <Th>{"Swap"}</Th>
-              <Th>{"Radiant ID"}</Th>
-              <Th>{"Value"}</Th>
-              <Th>{"Actions"}</Th>
+              <Th textStyle="label">{"TX ID"}</Th>
+              <Th textStyle="label">{"Swap"}</Th>
+              <Th textStyle="label">{"Radiant ID"}</Th>
+              <Th textStyle="label">{"Value"}</Th>
+              <Th textStyle="label">{"Actions"}</Th>
               <Th width="50px" />
               <Th display={{ base: "none", lg: "table-cell" }} />
             </Tr>
           </Thead>
           <Tbody fontFamily="mono">
             {missing?.map(({ utxo, contractType }) => (
-              <Tr key={utxo.tx_hash}>
+              <Tr
+                key={utxo.tx_hash}
+                borderBottomWidth="1px"
+                borderColor="border.subtle"
+                transition="background 0.12s"
+                _hover={{ bg: "bg.50" }}
+              >
                 <Td display={{ base: "none", lg: "table-cell" }} />
                 <Td>
                   <Identifier showCopy copyValue={utxo.tx_hash}>
@@ -181,7 +187,9 @@ export default function SwapMissing() {
                   </Identifier>
                 </Td>
                 <SwapDetail utxo={utxo} />
-                <Td>{utxo.value}</Td>
+                <Td sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  {utxo.value}
+                </Td>
                 <Td>
                   {!done.includes(utxo.tx_hash) ? (
                     // TODO this can be done a better way
@@ -206,15 +214,12 @@ export default function SwapMissing() {
           </Tbody>
         </Table>
       ) : (
-        <>
-          <Card gap={4}>
-            <p>There are no missing swaps.</p>
-            <p>
-              Any Radiant or tokens sent to your swap address which aren't found
-              in the database can be recovered here.
-            </p>
-          </Card>
-        </>
+        <NoContent
+          icon={TbQuestionMark}
+          subtitle="Any Radiant or tokens sent to your swap address which aren't found in the database can be recovered here."
+        >
+          There are no missing swaps
+        </NoContent>
       )}
     </Container>
   );

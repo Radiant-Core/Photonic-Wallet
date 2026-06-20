@@ -121,7 +121,7 @@ export default function RecoverWallet() {
       height={{ lg: "calc(100vh - 72px)" }}
     >
       <Card mb={4} p={4} width="2xl">
-        <Heading size="md" mb={4}>
+        <Heading textStyle="h2" mb={4}>
           {"Recover your wallet"}
         </Heading>
         {error && (
@@ -190,6 +190,7 @@ export default function RecoverWallet() {
             </FormHelperText>
           </FormControl>
           <Button
+            variant="primary"
             width="full"
             type="submit"
             isLoading={loading}

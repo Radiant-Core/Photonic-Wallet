@@ -49,7 +49,18 @@ export default function LicenseModal({
           <Heading size="md" my={4}>
             License
           </Heading>
-          <Box bgColor="white" color="black" p={4} mb={4}>
+          <Box
+            bg="surface.sunken"
+            borderWidth="1px"
+            borderColor="border.subtle"
+            borderRadius="md"
+            color="whiteAlpha.800"
+            fontSize="sm"
+            p={4}
+            mb={4}
+            maxH="40vh"
+            overflowY="auto"
+          >
             <License />
           </Box>
           <RadioGroup onChange={(value) => setAgree(value === "1")}>
@@ -64,8 +75,10 @@ export default function LicenseModal({
           </RadioGroup>
         </ModalBody>
         <ModalFooter as={Flex} gap={4}>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button onClick={onProceed} isDisabled={!agree}>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onProceed} isDisabled={!agree}>
             Proceed
           </Button>
         </ModalFooter>

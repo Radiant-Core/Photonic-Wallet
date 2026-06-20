@@ -78,10 +78,10 @@ export default function ViewPanelLayout({ children }: PropsWithChildren) {
               order={0}
               display="flex"
               width={collapsed || !is2XL ? 0 : "8px"}
-              bgColor="whiteAlpha.200"
+              bgColor="border.subtle"
               sx={{
                 "&[data-resize-handle-active], &:hover": {
-                  bgColor: "lightBlue.A400",
+                  bgColor: "accent.secondary",
                 },
                 "&:hover": {
                   transitionDelay: "0.5s",
