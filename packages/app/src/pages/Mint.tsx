@@ -3,6 +3,7 @@ import mime from "mime";
 import { Link } from "react-router-dom";
 import {
   GLYPH_AUTHORITY,
+  GLYPH_CONTAINER,
   GLYPH_DMINT,
   GLYPH_ENCRYPTED,
   GLYPH_FT,
@@ -836,6 +837,13 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
         : undefined;
 
     const protocols = [tokenType === "fungible" ? GLYPH_FT : GLYPH_NFT];
+    // A collection parent is an NFT that carries the CONTAINER (7) protocol so
+    // spec-compliant indexers (RXinDexer get_tokens_by_type, glyph explorers)
+    // classify it as a container rather than a plain/mutable NFT. Without this
+    // it minted as p:[2] / p:[2,5] with only the `type:"container"` string hint.
+    if (tokenType === "container") {
+      protocols.push(GLYPH_CONTAINER);
+    }
     if (deployMethod === "dmint") {
       protocols.push(GLYPH_DMINT);
     }
