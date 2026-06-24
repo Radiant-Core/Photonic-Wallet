@@ -47,6 +47,7 @@ import config from "@app/config.json";
 import { useLiveQuery } from "dexie-react-hooks";
 import { PromiseExtended } from "dexie";
 import { electrumWorker } from "@app/electrum/Electrum";
+import { discoverCovenants, syncCovenants } from "@app/covenant";
 import {
   autoLockMs,
   clampAutoLockMs,
@@ -201,6 +202,33 @@ export default function WalletSettings() {
   const feeRateRef = useRef<HTMLInputElement>(null);
   const autoLockRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const [resyncing, setResyncing] = useState(false);
+
+  // Resync: re-subscribe wallet scripthashes AND reconcile on-chain covenants
+  // (royalty listings, soulbound, authority). The covenant reconcile is what
+  // restores a royalty listing that an earlier build wrongly marked resolved —
+  // manualSync() alone never touches covenant tracking, so a plain resync could
+  // not bring such a listing back.
+  const handleResync = async () => {
+    setResyncing(true);
+    try {
+      await electrumWorker.value.manualSync();
+      if (wallet.value.address) await discoverCovenants(wallet.value.address);
+      if (wallet.value.swapAddress) {
+        await discoverCovenants(wallet.value.swapAddress);
+      }
+      await syncCovenants();
+      toast({ status: "success", title: "Resynced" });
+    } catch (err) {
+      toast({
+        status: "error",
+        title: "Resync failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setResyncing(false);
+    }
+  };
 
   const keys = ["language", "feeRate"];
   const save = async () => {
@@ -304,7 +332,7 @@ export default function WalletSettings() {
         {consolidationRequired === true &&
           "If your wallet fails to consolidate UTXOs, a resync may be required"}
         <Center mt={8} mb={16}>
-          <Button onClick={() => electrumWorker.value.manualSync()}>
+          <Button onClick={handleResync} isLoading={resyncing}>
             Resync Wallet
           </Button>
         </Center>
