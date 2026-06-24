@@ -69,7 +69,7 @@ import {
   type CatScripts,
   type CatState,
 } from "radiantswap";
-import { scriptHash } from "@lib/script";
+import { scriptHash, zeroRefs } from "@lib/script";
 import db from "@app/db";
 import { wallet, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -402,39 +402,9 @@ export async function openMarketByRef(ref: string): Promise<TrackedMarket> {
 // scripthash on the script with every 36-byte ref operand ZEROED — but only for scripts that
 // contain a checksig opcode (so one watch key covers a wallet's holdings across all refs).
 // ShareToken code checks signatures, so anchors/positions index under their zeroed form; the
-// resulting hash collides across markets and across YES/NO, hence the ref filter below.
-const INPUT_REF_OPS = new Set([0xd0, 0xd1, 0xd2, 0xd3, 0xd8]);
-const CHECKSIG_OPS = new Set([0xac, 0xad, 0xae, 0xaf]);
-
-function zeroRefs(script: Buffer): Buffer {
-  const out = Buffer.from(script);
-  let requiresSig = false;
-  let n = 0;
-  while (n < script.length) {
-    const op = script[n];
-    n += 1;
-    if (CHECKSIG_OPS.has(op)) {
-      requiresSig = true;
-    } else if (op <= 0x4e) {
-      let dlen = op;
-      if (op === 0x4c) {
-        dlen = script[n];
-        n += 1;
-      } else if (op === 0x4d) {
-        dlen = script.readUInt16LE(n);
-        n += 2;
-      } else if (op === 0x4e) {
-        dlen = script.readUInt32LE(n);
-        n += 4;
-      }
-      n += dlen;
-    } else if (INPUT_REF_OPS.has(op)) {
-      out.fill(0, n, n + 36);
-      n += 36;
-    }
-  }
-  return requiresSig ? out : script;
-}
+// resulting hash collides across markets and across YES/NO, hence the ref filter below. The
+// zero_refs walk itself lives in @lib/script (shared with covenant.ts) so the two copies that
+// mirror the indexer can't drift.
 
 /** List unspent outputs locked by `lock`, keyed the way the indexer keys them (zero_refs), and
  *  filtered to entries actually carrying `expectRef` (the zeroed hash collides across markets). */
@@ -443,7 +413,7 @@ async function unspentByScript(
   expectRef?: Buffer
 ): Promise<Utxo[]> {
   const utxos = await electrumWorker.value.getUtxosByScriptHash(
-    scriptHash(zeroRefs(lock).toString("hex"))
+    scriptHash(zeroRefs(lock.toString("hex")))
   );
   let filtered = utxos;
   if (expectRef) {

@@ -18,7 +18,7 @@
  * its UTXO is spent (bought, cancelled, burned, or moved).
  */
 import { signal } from "@preact/signals-react";
-import { scriptHash as scriptToHash } from "@lib/script";
+import { scriptHash as scriptToHash, zeroRefs } from "@lib/script";
 import { soulboundNftScript, parseSoulboundRef } from "@lib/soulbound";
 import {
   authorityGatedNftScript,
@@ -182,11 +182,25 @@ export const recordCovenant = async (
 export const loading = signal(false);
 
 /**
- * Reconcile ACTIVE covenants against the chain. A covenant whose UTXO is no
- * longer unspent has been resolved (listing bought/cancelled, soulbound
- * burned/moved). When a listing resolves we clear the swap-pending-style flag
- * on its glyph; cancellation returns the NFT to `nftScript(owner)`, which the
- * ordinary subscription re-discovers.
+ * Reconcile covenants against the chain. A covenant whose UTXO is no longer
+ * unspent has been resolved (listing bought/cancelled, soulbound burned/moved);
+ * when a listing resolves we clear the swap-pending-style flag on its glyph
+ * (cancellation returns the NFT to `nftScript(owner)`, which the ordinary
+ * subscription re-discovers).
+ *
+ * The on-chain check MUST hash the covenant's *zero-refs* form: every one of
+ * these covenants gates on a signature (a royalty listing's seller-cancel
+ * branch, soulbound, authority-gated), so RXinDexer keys their UTXO under
+ * `sha256(zero_refs(script))`, not the raw script. Hashing `cov.script` directly
+ * (with its real ref operand) queried a scripthash the indexer never populates →
+ * `listunspent` returned [], every fresh listing looked "gone", and was wrongly
+ * marked RESOLVED on the first poll — vanishing from the royalty market while its
+ * NFT reappeared as owned. See `zeroRefs` and `nftScriptHash` in @lib/script.
+ *
+ * Listings wrongly resolved by that earlier behaviour are healed here: a RESOLVED
+ * royalty listing whose covenant UTXO is in fact still unspent is restored to
+ * ACTIVE (and its glyph re-flagged listed). A genuinely bought/cancelled listing
+ * has a spent UTXO, so it stays RESOLVED.
  */
 export const syncCovenants = async () => {
   if (loading.value) return;
@@ -196,28 +210,44 @@ export const syncCovenants = async () => {
     const active = await db.covenant
       .where({ status: CovenantStatus.ACTIVE })
       .toArray();
-    if (active.length === 0) return;
+    const staleListings = await db.covenant
+      .where({
+        status: CovenantStatus.RESOLVED,
+        type: CovenantType.ROYALTY_LISTING,
+      })
+      .toArray();
+    const toCheck = [...active, ...staleListings];
+    if (toCheck.length === 0) return;
 
-    // Group outpoints by scripthash so we make one listunspent call per script.
-    for (const cov of active) {
+    for (const cov of toCheck) {
       let unspent: { tx_hash: string; tx_pos: number }[] = [];
       try {
         unspent = (await electrumWorker.value.getUtxosByScriptHash(
-          scriptToHash(cov.script)
+          scriptToHash(zeroRefs(cov.script))
         )) as { tx_hash: string; tx_pos: number }[];
       } catch {
-        // Transient lookup failure — leave the covenant ACTIVE and retry later.
+        // Transient lookup failure — leave the covenant as-is and retry later.
         continue;
       }
-      const stillThere = unspent.some(
+      const live = unspent.some(
         (u) => u.tx_hash === cov.txid && u.tx_pos === cov.vout
       );
-      if (!stillThere && cov.id) {
+      if (!cov.id) continue;
+      if (cov.status === CovenantStatus.ACTIVE && !live) {
         await db.covenant.update(cov.id, { status: CovenantStatus.RESOLVED });
         if (cov.ref) {
           await db.glyph
             .where({ ref: cov.ref })
             .modify({ swapPending: false })
+            .catch(() => undefined);
+        }
+      } else if (cov.status === CovenantStatus.RESOLVED && live) {
+        // Wrongly resolved by the old raw-script lookup — restore it.
+        await db.covenant.update(cov.id, { status: CovenantStatus.ACTIVE });
+        if (cov.ref) {
+          await db.glyph
+            .where({ ref: cov.ref })
+            .modify({ swapPending: true })
             .catch(() => undefined);
         }
       }

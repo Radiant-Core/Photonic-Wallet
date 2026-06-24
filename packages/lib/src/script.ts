@@ -166,6 +166,59 @@ export function scriptHash(hex: string): string {
     .toString("hex");
 }
 
+// Input-ref opcodes that carry a 36-byte immediate ref operand
+// (OP_PUSHINPUTREF/…SINGLETON families) and the checksig opcodes.
+const INPUT_REF_OPS = new Set([0xd0, 0xd1, 0xd2, 0xd3, 0xd8]);
+const CHECKSIG_OPS = new Set([0xac, 0xad, 0xae, 0xaf]);
+
+/**
+ * Mirror of RXinDexer's `Script.zero_refs` (electrumx/lib/script.py): the indexer
+ * keys a UTXO's scripthash on the script with every 36-byte input-ref OPERAND
+ * ZEROED — but ONLY for scripts that contain a checksig opcode (so a single watch
+ * key covers a wallet's holdings across every ref). Token-bearing covenants that
+ * also gate on a signature (royalty listings, soulbound, authority-gated NFTs,
+ * ShareTokens) are therefore indexed under their zeroed form, so a `listunspent`
+ * lookup MUST hash `scriptHash(zeroRefs(script))`, NOT the raw script — otherwise
+ * the indexer returns nothing and the caller wrongly concludes the UTXO is gone.
+ * Scripts with no checksig are indexed verbatim and returned unchanged.
+ *
+ * Walks the script as an opcode stream and skips push payloads, so a 0xd0–0xd8
+ * byte inside a push payload (e.g. a pubkey hash) is never mistaken for a ref
+ * opcode. Stays in lockstep with the indexer — see `nftScriptHash` (which builds
+ * the zeroed form from a literal zero ref) and `covenant.ts#syncCovenants`.
+ */
+export function zeroRefs(scriptHex: string): string {
+  const script = Buffer.from(scriptHex, "hex");
+  const out = Buffer.from(script);
+  let requiresSig = false;
+  let n = 0;
+  while (n < script.length) {
+    const op = script[n];
+    n += 1;
+    if (CHECKSIG_OPS.has(op)) {
+      requiresSig = true;
+    } else if (op <= 0x4e) {
+      // Push opcode: skip its data payload.
+      let dlen = op;
+      if (op === 0x4c) {
+        dlen = script[n];
+        n += 1;
+      } else if (op === 0x4d) {
+        dlen = script.readUInt16LE(n);
+        n += 2;
+      } else if (op === 0x4e) {
+        dlen = script.readUInt32LE(n);
+        n += 4;
+      }
+      n += dlen;
+    } else if (INPUT_REF_OPS.has(op)) {
+      out.fill(0, n, n + 36);
+      n += 36;
+    }
+  }
+  return (requiresSig ? out : script).toString("hex");
+}
+
 export function p2pkhScript(address: string): string {
   try {
     return Script.buildPublicKeyHashOut(address).toHex();
