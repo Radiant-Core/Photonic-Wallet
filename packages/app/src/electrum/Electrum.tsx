@@ -9,7 +9,7 @@ import { wrap } from "comlink";
 import { signal } from "@preact/signals-react";
 import { ElectrumRefResponse, ElectrumUtxo } from "@lib/types";
 import type { VaultRecord, VaultScanResult } from "@app/types";
-import { discoverCovenants, syncCovenants } from "@app/covenant";
+import { discoverAll } from "@app/walletSync";
 
 // Android Chrome doesn't support shared workers, fall back to dedicated worker
 // TEMP: Force dedicated worker for debugging (SharedWorker logs go to separate console)
@@ -224,62 +224,23 @@ export default function Electrum() {
         console.debug("[Storage] persist() request failed:", e);
       }
 
-      console.debug("[Electrum] Starting vault discovery");
+      console.debug("[Electrum] Starting discovery sweep");
       try {
-        // Materialise WIFs only for the duration of the worker calls; refs
-        // fall out of scope when this effect returns.
-        const wifStr = wallet.value.wif.toString();
-        const swapWifStr = wallet.value.swapWif?.toString();
-        // Scan main address - also try swapWif for decryption if main fails
-        const mainResult = await electrumWorker.value.discoverVaults(
-          wifStr,
-          wallet.value.address,
-          swapWifStr // Try swap WIF if main fails to decrypt
-        );
-        if (mainResult.skipped > 0) complete = false;
-        if (mainResult.discovered > 0) {
+        // Vaults + covenant-held tokens + covenant reconcile. Shared with the
+        // manual "Resync Wallet" button so the two paths can't drift. A skipped
+        // vault scan flips `incomplete` so the latch retries on a later connect.
+        const result = await discoverAll();
+        if (result.incomplete) complete = false;
+        if (result.vaultsDiscovered > 0) {
           console.log(
-            `[Electrum] Discovered ${mainResult.discovered} vault(s) on main address`
+            `[Electrum] Discovered ${result.vaultsDiscovered} vault(s)`
           );
-        }
-
-        // Scan swap address if different from main
-        if (swapWifStr && wallet.value.swapAddress) {
-          const swapResult = await electrumWorker.value.discoverVaults(
-            swapWifStr,
-            wallet.value.swapAddress,
-            wifStr // Try main WIF if swap fails to decrypt
-          );
-          if (swapResult.skipped > 0) complete = false;
-          if (swapResult.discovered > 0) {
-            console.log(
-              `[Electrum] Discovered ${swapResult.discovered} vault(s) on swap address`
-            );
-          }
-        }
-
-        // Discover covenant-held tokens (soulbound / authority-gated) owned by
-        // this wallet from the indexer, so they appear after a re-import / on a
-        // fresh device even without local covenant tracking. Owner-stable
-        // scripthashes only — royalty listings stay on local tracking. Failures
-        // are non-fatal (best-effort, retried on next connect).
-        try {
-          await discoverCovenants(wallet.value.address);
-          if (wallet.value.swapAddress) {
-            await discoverCovenants(wallet.value.swapAddress);
-          }
-          // Reconcile active covenants (royalty listings + soulbound/authority)
-          // against the chain so a bought/cancelled listing resolves even when
-          // the Market page isn't open. (Previously only triggered from Market.)
-          await syncCovenants();
-        } catch (covErr) {
-          console.warn("[Electrum] Covenant discovery failed:", covErr);
         }
       } catch (error) {
         // A throw (e.g. history could not be loaded) means the scan did not
         // complete — keep the latch open so the next CONNECTED event retries.
         complete = false;
-        console.warn("[Electrum] Vault discovery failed:", error);
+        console.warn("[Electrum] Discovery sweep failed:", error);
       } finally {
         discoveryInFlightRef.current = false;
         // Latch only on a confirmed-complete scan (no skipped tx, no throw).

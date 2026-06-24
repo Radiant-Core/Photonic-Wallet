@@ -47,7 +47,7 @@ import config from "@app/config.json";
 import { useLiveQuery } from "dexie-react-hooks";
 import { PromiseExtended } from "dexie";
 import { electrumWorker } from "@app/electrum/Electrum";
-import { discoverCovenants, syncCovenants } from "@app/covenant";
+import { discoverAll } from "@app/walletSync";
 import {
   autoLockMs,
   clampAutoLockMs,
@@ -204,21 +204,30 @@ export default function WalletSettings() {
   const toast = useToast();
   const [resyncing, setResyncing] = useState(false);
 
-  // Resync: re-subscribe wallet scripthashes AND reconcile on-chain covenants
-  // (royalty listings, soulbound, authority). The covenant reconcile is what
-  // restores a royalty listing that an earlier build wrongly marked resolved —
-  // manualSync() alone never touches covenant tracking, so a plain resync could
-  // not bring such a listing back.
+  // Full resync: re-subscribe wallet scripthashes (RXD / FT / NFT / WAVE-name
+  // UTXOs, balances, history) AND run the discovery sweep for everything that
+  // does NOT live at a by-owner scripthash — covenant-held tokens (soulbound /
+  // authority-gated) and vault records — plus a covenant reconcile that
+  // self-heals a royalty listing an earlier build wrongly marked resolved.
+  // Covenant work runs whether locked or not; vault discovery needs the WIF, so
+  // it's skipped (with a hint) when locked rather than blocking on an unlock.
   const handleResync = async () => {
+    if (resyncing) return;
     setResyncing(true);
     try {
       await electrumWorker.value.manualSync();
-      if (wallet.value.address) await discoverCovenants(wallet.value.address);
-      if (wallet.value.swapAddress) {
-        await discoverCovenants(wallet.value.swapAddress);
-      }
-      await syncCovenants();
-      toast({ status: "success", title: "Resynced" });
+      const result = await discoverAll();
+      const found = result.vaultsDiscovered
+        ? `Recovered ${result.vaultsDiscovered} vault(s).`
+        : "";
+      const hint = result.vaultsSkippedLocked
+        ? "Unlock the wallet and resync again to also scan for vaults."
+        : "";
+      toast({
+        status: "success",
+        title: "Resynced",
+        description: [found, hint].filter(Boolean).join(" ") || undefined,
+      });
     } catch (err) {
       toast({
         status: "error",
