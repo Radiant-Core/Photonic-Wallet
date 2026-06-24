@@ -858,6 +858,7 @@ function Swap() {
         setPsrt(rawPsrt);
         db.swap.put({
           txid: tx.id,
+          vout: swapOutput.vout,
           tx: rawPsrt,
           from,
           fromGlyph: send?.glyph?.ref || null,
@@ -886,6 +887,7 @@ function Swap() {
 
     db.swap.put({
       txid: tx.id,
+      vout: swapOutput.vout,
       tx: rawPsrt,
       from,
       fromGlyph: send?.glyph?.ref || null, // null for RXD

@@ -17,6 +17,7 @@
 import { electrumWorker } from "@app/electrum/Electrum";
 import { wallet } from "@app/signals";
 import { discoverCovenants, syncCovenants } from "@app/covenant";
+import { recoverSwaps, syncSwaps } from "@app/swap";
 
 export interface DiscoverAllResult {
   vaultsDiscovered: number;
@@ -81,6 +82,16 @@ export async function discoverAll(): Promise<DiscoverAllResult> {
     await syncCovenants();
   } catch (covErr) {
     console.warn("[walletSync] covenant discovery failed:", covErr);
+  }
+
+  // Reserved swap-address tokens/RXD that lost their local db.swap row: recover
+  // them so they reappear in My Swaps with a working Cancel, then reconcile.
+  // Address-only (uses the swap address) so it runs while locked too.
+  try {
+    await recoverSwaps();
+    await syncSwaps();
+  } catch (swapErr) {
+    console.warn("[walletSync] swap recovery failed:", swapErr);
   }
 
   return { vaultsDiscovered, incomplete, vaultsSkippedLocked };

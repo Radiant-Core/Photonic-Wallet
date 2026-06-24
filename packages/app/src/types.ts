@@ -69,6 +69,15 @@ export interface TokenSwap {
   // New fields for broadcast swaps
   mode?: SwapMode;
   broadcastTxid?: string; // txid of the broadcast advertisement tx
+  // The output index of the reserved swap-address UTXO. Older records predate
+  // this field and were always vout 0 (the cancel path historically hardcoded
+  // it); a token reserved at a non-zero vout (e.g. an NFT whose ref is output 1)
+  // needs the real index to be cancellable. See cancelSwap and recoverSwaps.
+  vout?: number;
+  // True for a record reconstructed by recoverSwaps() from an on-chain
+  // swap-address UTXO that had no local db.swap row (lost/never-written). Such
+  // a record has no pre-signed PSRT (`tx` is "") — only enough to Cancel.
+  recovered?: boolean;
 }
 
 // On-chain covenant a token can rest in. These scriptPubKeys are NOT the plain

@@ -125,7 +125,8 @@ export default function SwapMissing() {
         contractType,
         utxo.tx_hash,
         utxo.value,
-        ref ? Outpoint.fromShortInput(ref).toString() : undefined
+        ref ? Outpoint.fromShortInput(ref).toString() : undefined,
+        utxo.tx_pos
       );
     } catch (error) {
       console.debug(error);

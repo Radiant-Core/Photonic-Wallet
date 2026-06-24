@@ -56,7 +56,8 @@ const Actions = ({ swap }: { swap: TokenSwap }) => {
         swap.from,
         swap.txid,
         swap.fromValue,
-        swap.fromGlyph || undefined
+        swap.fromGlyph || undefined,
+        swap.vout ?? 0
       );
     } catch (error) {
       console.debug(error);
@@ -73,14 +74,17 @@ const Actions = ({ swap }: { swap: TokenSwap }) => {
 
   return (
     <>
-      <Button
-        size="sm"
-        leftIcon={<TbZoom />}
-        mr={2}
-        onClick={() => openSwap?.(swap)}
-      >
-        View
-      </Button>
+      {/* A recovered record has no PSRT to show, so it gets Cancel only. */}
+      {swap.tx ? (
+        <Button
+          size="sm"
+          leftIcon={<TbZoom />}
+          mr={2}
+          onClick={() => openSwap?.(swap)}
+        >
+          View
+        </Button>
+      ) : null}
       <Button size="sm" onClick={() => cancel(swap)}>
         Cancel
       </Button>
@@ -108,6 +112,10 @@ export default function SwapPending() {
   }, [electrumStatus.value]);
 
   const openSwapModal = async (swap: TokenSwap) => {
+    // A recovered record has no pre-signed PSRT (and an unknown want side), so
+    // there is nothing to render in the swap view — only Cancel applies. Skip
+    // opening the modal for it.
+    if (!swap.tx) return;
     // TODO this is a bit messy
     const from =
       swap.from === ContractType.RXD
