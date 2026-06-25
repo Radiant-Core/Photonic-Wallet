@@ -23,7 +23,6 @@ import {
 } from "react-icons/tb";
 import MenuButton from "./MenuButton";
 import SyncBar from "./SyncBar";
-import NotificationBell from "./NotificationBell";
 
 export default function SideBar({ ...rest }: GridProps) {
   // Trigger rerender when language changes
@@ -64,7 +63,6 @@ export default function SideBar({ ...rest }: GridProps) {
             openMenu.value = false;
           }}
         />
-        <NotificationBell />
       </Flex>
       <Flex
         display={{ base: "none", lg: "flex" }}
@@ -73,9 +71,6 @@ export default function SideBar({ ...rest }: GridProps) {
         position="relative"
       >
         <Logo my={6} svgId="d" />
-        <Box position="absolute" right={4}>
-          <NotificationBell />
-        </Box>
       </Flex>
       <AccountBar display={{ base: "flex", lg: "flex" }} />
       <SimpleGrid

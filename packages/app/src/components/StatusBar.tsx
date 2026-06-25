@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, Spinner, useToast } from "@chakra-ui/react";
+import { Flex, Icon, Spinner, useToast } from "@chakra-ui/react";
 import { LockIcon, SettingsIcon, UnlockIcon } from "@chakra-ui/icons";
 import {
   TbPlug as ConnectedIcon,
@@ -10,6 +10,7 @@ import { ElectrumStatus } from "@app/types";
 import MenuButton from "./MenuButton";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { lockWallet } from "@app/wallet";
+import NotificationBell from "./NotificationBell";
 
 const UnlockButton = () => {
   const toast = useToast();
@@ -128,13 +129,17 @@ export default function StatusBar() {
     <>
       <ConnectButton />
       <UnlockButton />
-      <MenuButton
-        to="/settings/wallet"
-        leftIcon={<SettingsIcon boxSize={5} />}
-        match="/settings"
-      >
-        {"Settings"}
-      </MenuButton>
+      <Flex align="center" justifyContent="space-between">
+        <MenuButton
+          to="/settings/wallet"
+          leftIcon={<SettingsIcon boxSize={5} />}
+          match="/settings"
+          flexGrow={1}
+        >
+          {"Settings"}
+        </MenuButton>
+        <NotificationBell />
+      </Flex>
     </>
   );
 }
