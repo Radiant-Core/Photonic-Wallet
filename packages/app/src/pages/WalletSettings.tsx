@@ -38,6 +38,7 @@ import { publicKeyHexFromWif } from "@lib/wallet";
 import { bytesToHex } from "@noble/hashes/utils";
 import PasswordModal from "@app/components/PasswordModal";
 import RecoveryPhrase from "@app/components/RecoveryPhrase";
+import SweepModal from "@app/components/SweepModal";
 import { feeRate, language, wallet } from "@app/signals";
 import FormSection from "@app/components/FormSection";
 import DataRow from "@app/components/DataRow";
@@ -165,6 +166,7 @@ function PublicKeyField({
 
 export default function WalletSettings() {
   const disclosure = useDisclosure();
+  const sweepDisclosure = useDisclosure();
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [mnemonic, setMnemonic] = useState("");
   const passwordSuccess = (walletMnemonic: string) => {
@@ -346,6 +348,22 @@ export default function WalletSettings() {
           </Button>
         </Center>
       </FormSection>
+
+      <FormSection>
+        <Heading textStyle="h3">Sweep Wallet</Heading>
+        <Text pt={2} textStyle="small">
+          Move all RXD, fungible tokens and NFTs to another address in a single
+          transaction. The network fee is calculated automatically and deducted
+          from the swept RXD, leaving the wallet empty.
+        </Text>
+        <Center mt={8} mb={4}>
+          <Button colorScheme="red" onClick={() => sweepDisclosure.onOpen()}>
+            Sweep all funds &amp; tokens
+          </Button>
+        </Center>
+      </FormSection>
+
+      <SweepModal disclosure={sweepDisclosure} />
 
       <FormSection>
         <FormControl>

@@ -10,6 +10,7 @@ import { ElectrumUtxo } from "@lib/types";
 import { validateElectrumUtxo, verifyTxoInclusion } from "./verifyTxo";
 import { backfillHeaders } from "./Headers";
 import { updateFtBalances } from "@app/utxos";
+import { readBlockTime } from "@lib/spv";
 
 export type ElectrumTxMap = {
   [key: string]: { hex: string; tx: Transaction };
@@ -302,8 +303,76 @@ export const buildUpdateTXOs =
       await reverifyPendingTxos(electrum, contractType);
     }
 
+    // Record incoming coins/tokens as activity so the unified timeline
+    // (History page + notifications) reflects receives, not just our own sends.
+    await recordReceivedActivity(added, contractType);
+
     return { added, confs, conflict, spent, utxoCount: utxos.length };
   };
+
+/**
+ * Description string written to `db.broadcast` for an incoming UTXO, keyed by
+ * contract type. Mirrors the receive entries classified in `@app/activity`.
+ * Returns undefined for contract types that aren't surfaced as receives.
+ */
+function receiveDescription(contractType: ContractType): string | undefined {
+  switch (contractType) {
+    case ContractType.RXD:
+      return "rxd_receive";
+    case ContractType.FT:
+      return "ft_receive";
+    case ContractType.NFT:
+      return "nft_receive";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Persist a receive activity entry for each newly-discovered incoming txo.
+ *
+ * Incoming = `change === 0` (the tx was not broadcast by this wallet). The
+ * timestamp is taken from the confirming block header when available (so a
+ * restored wallet's backlog lands at its true position in the timeline and
+ * doesn't fire a toast storm — see ActivityNotifications mount-time gating);
+ * unconfirmed coins fall back to "now". Entries are keyed by txid in
+ * `db.broadcast`, so this is idempotent across re-syncs and de-dupes multiple
+ * UTXOs belonging to the same received transaction.
+ */
+async function recordReceivedActivity(
+  added: TxO[],
+  contractType: ContractType
+): Promise<void> {
+  const description = receiveDescription(contractType);
+  if (!description) return;
+
+  const seen = new Set<string>();
+  for (const txo of added) {
+    if (txo.change !== 0) continue; // skip our own change outputs
+    if (seen.has(txo.txid)) continue;
+    seen.add(txo.txid);
+
+    // Don't overwrite an existing entry (e.g. our own broadcast record, or a
+    // receive already logged on a previous sync).
+    if (await db.broadcast.get(txo.txid)) continue;
+
+    let date = Date.now();
+    const height = txo.height;
+    if (height !== undefined && Number.isFinite(height) && height > 0) {
+      try {
+        const header = await db.header.where("height").equals(height).first();
+        if (header?.buffer) {
+          const seconds = readBlockTime(new Uint8Array(header.buffer));
+          if (seconds > 0) date = seconds * 1000;
+        }
+      } catch (e) {
+        console.warn("[updateTxos] could not read block time for receive", e);
+      }
+    }
+
+    await db.broadcast.put({ txid: txo.txid, description, date });
+  }
+}
 
 /**
  * Retry SPV inclusion verification for unspent, confirmed txos that are still

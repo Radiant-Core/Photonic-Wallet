@@ -1,4 +1,12 @@
-import { Badge, Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
+import {
+  Badge,
+  Box,
+  Checkbox,
+  Flex,
+  Icon,
+  Text,
+  Tooltip,
+} from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -19,6 +27,9 @@ export default function TokenCard({
   size = "md",
   defaultIcon,
   pending,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   glyph?: SmartToken;
   value: number;
@@ -27,6 +38,11 @@ export default function TokenCard({
   defaultIcon?: IconType;
   // True while the holding UTXO is unconfirmed (still in the mempool).
   pending?: boolean;
+  // Multi-select mode: when set, clicking toggles selection instead of
+  // navigating, and a checkbox overlay is shown.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isLink = !!glyph?.location;
@@ -51,9 +67,19 @@ export default function TokenCard({
       overflow="hidden"
       as={Link}
       to={to}
+      onClick={
+        selectable
+          ? (e: React.MouseEvent) => {
+              // Block navigation; in select mode a click toggles selection.
+              e.preventDefault();
+              onToggleSelect?.();
+            }
+          : undefined
+      }
       display="block"
+      position="relative"
       borderWidth="1px"
-      borderColor="border.subtle"
+      borderColor={selected ? "accent.secondary" : "border.subtle"}
       boxShadow="sm"
       transition="transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease"
       _hover={{
@@ -62,6 +88,19 @@ export default function TokenCard({
         borderColor: "border.strong",
       }}
     >
+      {selectable && (
+        <Checkbox
+          isChecked={!!selected}
+          pointerEvents="none"
+          position="absolute"
+          top={2}
+          left={2}
+          zIndex={1}
+          size="lg"
+          bg="blackAlpha.600"
+          borderRadius="sm"
+        />
+      )}
       <Box
         bg="surface.sunken"
         height={size === "sm" ? "175px" : "250px"}

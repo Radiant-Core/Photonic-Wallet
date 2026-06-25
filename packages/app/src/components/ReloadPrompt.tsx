@@ -1,21 +1,28 @@
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { pwaInfo } from "virtual:pwa-info";
-import { useToast } from "@chakra-ui/react";
-import { useEffect, useRef } from "react";
-import { openModal } from "@app/signals";
+import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
+  Button,
+  useToast,
+} from "@chakra-ui/react";
+import { useEffect, useRef, useState } from "react";
 
 console.log(pwaInfo);
 
 /**
- * Auto-applies a new app version so users never have to manually clear the
- * service worker / hard-refresh after a deploy. When a new build is detected we
- * activate it (skipWaiting) and reload — but NEVER while a modal is open
- * (send / unlock / receive), so an auto-reload can't drop an in-progress action.
- * If a modal is open we retry shortly. A short initial grace lets a freshly
- * loaded page settle before any reload.
+ * Shows a user-facing "Update available" dialog when a new build is detected.
+ * The user chooses when to update — we never reload out from under an
+ * in-progress action.
  */
 function ReloadPrompt() {
   const toast = useToast();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const [showUpdate, setShowUpdate] = useState(false);
   const {
     offlineReady: [offlineReady, setOfflineReady],
     needRefresh: [needRefresh],
@@ -34,27 +41,48 @@ function ReloadPrompt() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offlineReady]);
 
-  const applied = useRef(false);
   useEffect(() => {
-    if (!needRefresh || applied.current) return;
-    let timer: ReturnType<typeof setTimeout>;
-    const apply = () => {
-      if (applied.current) return;
-      // Don't reload out from under an open modal — defer until it closes.
-      if (openModal.value?.modal) {
-        timer = setTimeout(apply, 4000);
-        return;
-      }
-      applied.current = true;
-      toast({ status: "info", title: "Updating to the latest version…" });
-      updateServiceWorker(true); // skipWaiting + reload to the new build
-    };
-    timer = setTimeout(apply, 2000);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setShowUpdate(needRefresh);
   }, [needRefresh]);
 
-  return null;
+  const handleUpdate = () => {
+    setShowUpdate(false);
+    toast({ status: "info", title: "Updating to the latest version…" });
+    updateServiceWorker(true);
+  };
+
+  const handleDismiss = () => {
+    setShowUpdate(false);
+  };
+
+  return (
+    <AlertDialog
+      isOpen={showUpdate}
+      leastDestructiveRef={cancelRef}
+      onClose={handleDismiss}
+      isCentered
+    >
+      <AlertDialogOverlay>
+        <AlertDialogContent>
+          <AlertDialogHeader fontSize="lg" fontWeight="bold">
+            Update available
+          </AlertDialogHeader>
+          <AlertDialogBody>
+            A new version of Photonic Wallet is available. Update now to get the
+            latest features and fixes.
+          </AlertDialogBody>
+          <AlertDialogFooter>
+            <Button ref={cancelRef} onClick={handleDismiss}>
+              Later
+            </Button>
+            <Button colorScheme="blue" onClick={handleUpdate} ml={3}>
+              Update now
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialogOverlay>
+    </AlertDialog>
+  );
 }
 
 export default ReloadPrompt;

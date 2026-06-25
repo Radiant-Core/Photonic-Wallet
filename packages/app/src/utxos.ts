@@ -2,7 +2,7 @@ import { SelectableInput } from "@lib/coinSelect";
 import db from "./db";
 import { UnfinalizedInput } from "@lib/types";
 import { ContractType, TxO } from "./types";
-import { parseFtScript } from "@lib/script";
+import { parseFtScript, p2pkhScript } from "@lib/script";
 import { reverseRef } from "@lib/Outpoint";
 
 /**
@@ -74,6 +74,81 @@ export async function updateWalletUtxos(
     }
   });
   return newTxos;
+}
+
+// Reconcile the local UTXO set after a multi-asset batch send or wallet sweep.
+//
+// A batch/sweep transaction can spend RXD + several FT types + several NFTs and
+// produce token outputs to a recipient plus (optionally) RXD change. The
+// single-contract `updateWalletUtxos` doesn't fit, so this applies the changes
+// directly:
+//   - every selected input is marked spent;
+//   - any output paying our own P2PKH (RXD change — present for a batch send,
+//     absent for a sweep, where change goes to the recipient) is recorded;
+//   - NFTs that left the wallet have their glyph row marked spent so the grid
+//     drops them immediately (mirrors SendDigitalObject);
+//   - FT and RXD balances are recomputed.
+export async function updateAfterBatchTransfer({
+  ownAddress,
+  txid,
+  inputs,
+  outputs,
+  ftScripts,
+  sentNftTxoIds,
+  nftLeftWallet,
+}: {
+  ownAddress: string;
+  txid: string;
+  inputs: SelectableInput[];
+  outputs: UnfinalizedInput[];
+  ftScripts: Set<string>;
+  sentNftTxoIds: number[];
+  nftLeftWallet: boolean;
+}) {
+  const changeScript = p2pkhScript(ownAddress);
+
+  await db.transaction("rw", db.txo, db.glyph, async () => {
+    // Spend every selected input.
+    await Promise.all(
+      inputs.map(async (input) => {
+        const { utxo } = input;
+        const { id } = (utxo as TxO) || (input as unknown as TxO);
+        if (id) {
+          await db.txo.update(id, { spent: 1 });
+        }
+      })
+    );
+
+    // Record our own RXD change so it isn't lost before the next sync.
+    for (const [vout, output] of outputs.entries()) {
+      if (output.script === changeScript) {
+        const txo: TxO = {
+          contractType: ContractType.RXD,
+          script: output.script,
+          spent: 0,
+          height: Infinity,
+          txid,
+          vout,
+          value: output.value,
+          change: 1,
+          date: Date.now(),
+        };
+        await db.txo.put(txo);
+      }
+    }
+
+    // NFTs that left the wallet: drop their glyph rows from the owned grid.
+    if (nftLeftWallet) {
+      for (const txoId of sentNftTxoIds) {
+        await db.glyph.where({ lastTxoId: txoId }).modify({ spent: 1 });
+      }
+    }
+  });
+
+  if (ftScripts.size) {
+    await updateFtBalances(ftScripts);
+  }
+  await updateRxdBalances(ownAddress);
 }
 
 // Update RXD balances

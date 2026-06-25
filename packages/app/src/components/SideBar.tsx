@@ -16,13 +16,14 @@ import { HiOutlineAtSymbol } from "react-icons/hi";
 import { MdHome, MdStorefront, MdLink } from "react-icons/md";
 import {
   TbTriangleSquareCircle,
-  TbCoins,
+  TbHistory,
   TbStack2,
   TbLock,
   TbChartLine,
 } from "react-icons/tb";
 import MenuButton from "./MenuButton";
 import SyncBar from "./SyncBar";
+import NotificationBell from "./NotificationBell";
 
 export default function SideBar({ ...rest }: GridProps) {
   // Trigger rerender when language changes
@@ -63,8 +64,19 @@ export default function SideBar({ ...rest }: GridProps) {
             openMenu.value = false;
           }}
         />
+        <NotificationBell />
       </Flex>
-      <Logo my={6} display={{ base: "none", lg: "flex" }} svgId="d" />
+      <Flex
+        display={{ base: "none", lg: "flex" }}
+        alignItems="center"
+        justifyContent="center"
+        position="relative"
+      >
+        <Logo my={6} svgId="d" />
+        <Box position="absolute" right={4}>
+          <NotificationBell />
+        </Box>
+      </Flex>
       <AccountBar display={{ base: "flex", lg: "flex" }} />
       <SimpleGrid
         overflow="auto"
@@ -101,8 +113,12 @@ export default function SideBar({ ...rest }: GridProps) {
         >
           {"Wave Names"}
         </MenuButton>
-        <MenuButton to="/coins" leftIcon={<Icon as={TbCoins} boxSize={5} />}>
-          {"Coins"}
+        <MenuButton
+          to="/coins"
+          match={["/coins", "/history"]}
+          leftIcon={<Icon as={TbHistory} boxSize={5} />}
+        >
+          {"History"}
         </MenuButton>
         <MenuButton
           to="/market"

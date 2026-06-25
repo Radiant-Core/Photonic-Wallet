@@ -5,6 +5,7 @@ import {
   dsha512_256,
   extractMerkleRoot,
   hashBlockHeader,
+  readBlockTime,
   readNBits,
   verifyHeaderTarget,
   verifyMerkleProof,
@@ -117,6 +118,14 @@ describe("genesis block — algorithm-independent paths (SHA256d Merkle)", () =>
 
   it("readNBits reads the genesis nBits (0x1d00ffff)", () => {
     expect(readNBits(GENESIS_HEADER)).toBe(0x1d00ffff);
+  });
+
+  it("readBlockTime reads the genesis timestamp (1231006505)", () => {
+    expect(readBlockTime(GENESIS_HEADER)).toBe(1231006505);
+  });
+
+  it("readBlockTime rejects a wrong-size header", () => {
+    expect(() => readBlockTime(GENESIS_HEADER.slice(0, 79))).toThrow();
   });
 
   it("single-tx block: Merkle proof with empty branch returns the root", () => {

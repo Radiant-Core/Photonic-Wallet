@@ -4,6 +4,7 @@ import {
   ButtonGroup,
   Flex,
   Grid,
+  HStack,
   Icon,
   Input,
   InputGroup,
@@ -15,6 +16,8 @@ import {
   MenuOptionGroup,
   Select,
   Spacer,
+  Text,
+  useDisclosure,
   VStack,
 } from "@chakra-ui/react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -33,9 +36,10 @@ import { MdFilterAlt } from "react-icons/md";
 import { useLiveQuery } from "dexie-react-hooks";
 import db from "@app/db";
 import { SmartTokenType, TxO } from "@app/types";
-import { TbBox } from "react-icons/tb";
-import { BsGrid3X3Gap, BsListUl } from "react-icons/bs";
+import { TbArrowUpRight, TbBox } from "react-icons/tb";
+import { BsCheck2Square, BsGrid3X3Gap, BsListUl } from "react-icons/bs";
 import TokenRow from "@app/components/TokenRow";
+import SendBatch, { BatchSendItem } from "@app/components/SendBatch";
 
 const pageSize = 60;
 
@@ -66,6 +70,27 @@ function TokenGrid({ open }: { open: boolean }) {
   const [viewMode, setViewMode] = useState<"grid" | "compact" | "list">(
     open ? "compact" : "grid"
   );
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const sendDisclosure = useDisclosure();
+  const [batchItems, setBatchItems] = useState<BatchSendItem[]>([]);
+
+  const toggleSelect = (ref: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(ref)) {
+        next.delete(ref);
+      } else {
+        next.add(ref);
+      }
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
 
   const nft = useLiveQuery(
     async () => {
@@ -261,6 +286,15 @@ function TokenGrid({ open }: { open: boolean }) {
           </Button>
         </ButtonGroup>
 
+        <Button
+          size="sm"
+          leftIcon={<Icon as={BsCheck2Square} />}
+          variant={selectMode ? "solid" : "outline"}
+          onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+        >
+          {selectMode ? "Done" : "Select"}
+        </Button>
+
         {container && (
           <Button
             size="sm"
@@ -314,6 +348,9 @@ function TokenGrid({ open }: { open: boolean }) {
                     page > 0 ? `?p=${page}` : ""
                   }`}
                   size="md"
+                  selectable={selectMode}
+                  selected={selected.has(token.glyph.ref)}
+                  onToggleSelect={() => toggleSelect(token.glyph.ref)}
                 />
               )
           )}
@@ -342,11 +379,66 @@ function TokenGrid({ open }: { open: boolean }) {
                   }`}
                   size={viewMode === "compact" || open ? "sm" : "md"}
                   pending={token.txo.height === Infinity}
+                  selectable={selectMode}
+                  selected={selected.has(token.glyph.ref)}
+                  onToggleSelect={() => toggleSelect(token.glyph.ref)}
                 />
               )
           )}
         </Grid>
       )}
+
+      {selectMode && selected.size > 0 && (
+        <Flex
+          position="sticky"
+          bottom={0}
+          mt={2}
+          mx={2}
+          p={3}
+          bg="surface.raised"
+          borderTopWidth="1px"
+          borderColor="border.subtle"
+          borderRadius="md"
+          alignItems="center"
+          boxShadow="lg"
+          zIndex={2}
+        >
+          <Text fontWeight="500">{selected.size} selected</Text>
+          <Spacer />
+          <HStack>
+            <Button size="sm" variant="ghost" onClick={exitSelectMode}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              leftIcon={<Icon as={TbArrowUpRight} />}
+              onClick={() => {
+                const items: BatchSendItem[] = filtered
+                  .filter(({ glyph }) => selected.has(glyph.ref))
+                  .map(({ glyph }) => ({
+                    kind: "nft",
+                    ref: glyph.ref,
+                    name: glyph.name,
+                  }));
+                setBatchItems(items);
+                sendDisclosure.onOpen();
+              }}
+            >
+              Send selected
+            </Button>
+          </HStack>
+        </Flex>
+      )}
+
+      <SendBatch
+        items={batchItems}
+        disclosure={sendDisclosure}
+        onSuccess={() => {
+          sendDisclosure.onClose();
+          exitSelectMode();
+        }}
+      />
     </>
   );
 }

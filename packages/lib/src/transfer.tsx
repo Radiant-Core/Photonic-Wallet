@@ -141,6 +141,164 @@ export function transferFungibleToMany(
   };
 }
 
+// Upper bound on the number of inputs a single batch/sweep transaction may
+// consume. Keeps the signed transaction well within relay size limits and the
+// browser's signing budget. A wallet with more spendable UTXOs than this should
+// consolidate first (Settings → consolidation) or send in parts.
+export const MAX_BATCH_INPUTS = 500;
+
+export type BatchFtInput = {
+  // Little-endian token ref.
+  refLE: string;
+  // All spendable UTXOs of this token type (the full balance is sent).
+  utxos: SelectableInput[];
+};
+
+export type BatchNftInput = {
+  // Little-endian singleton ref.
+  refLE: string;
+  utxo: SelectableInput;
+};
+
+/**
+ * Build a single transaction that sends several tokens to ONE recipient.
+ *
+ * - Each fungible token type is consolidated into one output carrying its full
+ *   selected balance (sum of its UTXOs).
+ * - Each non-fungible token becomes its own singleton output.
+ * - RXD coins fund the fee.
+ *
+ * Two modes:
+ * - Batch send (default): RXD funds only the fee; change returns to the sender.
+ * - Sweep (`options.sweep`): every RXD coin is consumed and the leftover
+ *   (total RXD − fee) is sent to the recipient, emptying the wallet of ordinary
+ *   RXD / FT / NFT UTXOs. The fee is computed automatically from the final
+ *   transaction size.
+ *
+ * Note on covenants: each FT/NFT covenant validates independently per ref, so
+ * combining many token types (and RXD) in one transaction is safe — see the
+ * per-ref CODESCRIPTHASHVALUESUM / singleton checks in `script.ts`.
+ */
+export function transferBatch(
+  coins: SelectableInput[],
+  fts: BatchFtInput[],
+  nfts: BatchNftInput[],
+  fromAddress: string,
+  toAddress: string,
+  feeRate: number,
+  wif: string,
+  options: { sweep?: boolean } = {}
+) {
+  const { sweep = false } = options;
+  const senderChangeScript = p2pkhScript(fromAddress);
+  const recipientScript = p2pkhScript(toAddress);
+
+  if (!senderChangeScript || !recipientScript) {
+    throw new TransferError("Invalid address");
+  }
+
+  const requiredInputs: SelectableInput[] = [];
+  const outputs: { script: string; value: number }[] = [];
+
+  // FT groups: one consolidated output per token type, carrying the full
+  // selected balance. No FT change is produced (the entire balance moves).
+  for (const ft of fts) {
+    const toScript = ftScript(toAddress, ft.refLE);
+    if (!toScript) {
+      throw new TransferError("Invalid address");
+    }
+    let sum = 0;
+    for (const u of ft.utxos) {
+      requiredInputs.push({ ...u, required: true });
+      sum += u.value;
+    }
+    // Skip a token type with no value rather than emitting a zero-value output.
+    if (sum <= 0) continue;
+    outputs.push({ script: toScript, value: sum });
+  }
+
+  // NFTs: one singleton output each, preserving the NFT's photon value.
+  for (const nft of nfts) {
+    const toScript = nftScript(toAddress, nft.refLE);
+    if (!toScript) {
+      throw new TransferError("Invalid address");
+    }
+    requiredInputs.push({ ...nft.utxo, required: true });
+    outputs.push({ script: toScript, value: nft.utxo.value });
+  }
+
+  // A batch send must move at least one token. A sweep may legitimately have
+  // no token outputs (an RXD-only wallet) — the recipient still receives all
+  // RXD via the change output below.
+  if (!outputs.length && !(options.sweep && coins.length)) {
+    throw new TransferError("Nothing to send");
+  }
+
+  // Sweep consumes every RXD coin (leftover → recipient via the change script).
+  // A batch send treats RXD as discretionary funding for the fee, returning
+  // change to the sender.
+  const rxdInputs: SelectableInput[] = sweep
+    ? coins.map((c) => ({ ...c, required: true }))
+    : coins.slice();
+  const changeScript = sweep ? recipientScript : senderChangeScript;
+
+  // Guard against an unreasonably large transaction. For a sweep every coin is
+  // required; for a batch send only the token inputs are guaranteed-spent.
+  const guaranteedInputs = sweep
+    ? requiredInputs.length + rxdInputs.length
+    : requiredInputs.length;
+  if (guaranteedInputs > MAX_BATCH_INPUTS) {
+    throw new TransferError(
+      `Too many coins for a single transaction (${guaranteedInputs} > ${MAX_BATCH_INPUTS}). ` +
+        `Consolidate your wallet first or send in smaller batches.`
+    );
+  }
+
+  const selected = coinSelect(
+    fromAddress,
+    [...requiredInputs, ...rxdInputs],
+    outputs,
+    changeScript,
+    feeRate
+  );
+
+  if (!selected.inputs?.length) {
+    throw new TransferError("Insufficient funds");
+  }
+
+  const privKey = PrivateKey.fromString(wif);
+
+  return {
+    tx: buildTx(
+      fromAddress,
+      privKey.toString(),
+      selected.inputs,
+      selected.outputs,
+      false
+    ),
+    selected,
+  };
+}
+
+/**
+ * Sweep all ordinary RXD / FT / NFT UTXOs to a single recipient, emptying the
+ * wallet. Thin wrapper over `transferBatch` with `sweep: true` — the fee is
+ * deducted automatically and the remaining RXD is sent to the recipient.
+ */
+export function sweepAll(
+  coins: SelectableInput[],
+  fts: BatchFtInput[],
+  nfts: BatchNftInput[],
+  fromAddress: string,
+  toAddress: string,
+  feeRate: number,
+  wif: string
+) {
+  return transferBatch(coins, fts, nfts, fromAddress, toAddress, feeRate, wif, {
+    sweep: true,
+  });
+}
+
 export function transferNonFungible(
   coins: SelectableInput[],
   nft: SelectableInput,

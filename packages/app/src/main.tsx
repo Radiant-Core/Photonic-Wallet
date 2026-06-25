@@ -58,7 +58,6 @@ import SwapCompleted from "./pages/SwapCompleted";
 import SwapLoad from "./pages/SwapLoad";
 import SwapMissing from "./pages/SwapMissing";
 import OpenOrders from "./pages/OpenOrders";
-import History from "./pages/History";
 import VaultPage from "./pages/Vault";
 import MarketHub from "./pages/MarketHub";
 import WaveRegister from "./pages/WaveRegister";
@@ -564,8 +563,9 @@ const router = createHashRouter([
             element: <Connect />,
           },
           {
+            // History/activity folded into the unified History tab (/coins).
             path: "/history",
-            element: <History />,
+            element: <Navigate to="/coins" replace />,
           },
           {
             element: <SwapLayout />,

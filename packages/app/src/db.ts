@@ -2,6 +2,7 @@ import Dexie, { Table } from "dexie";
 import {
   SmartToken,
   TxO,
+  ContractType,
   BlockHeader,
   SubscriptionStatus,
   ContractBalance,
@@ -12,6 +13,7 @@ import {
 } from "./types";
 import config from "@app/config.json";
 import { shuffle } from "@lib/util";
+import { readBlockTime } from "@lib/spv";
 
 const PINNED_SERVER = "wss://electrumx.radiantcore.org";
 
@@ -231,6 +233,70 @@ export class Database extends Dexie {
           { mainnet: upgrade(current.mainnet), testnet: current.testnet },
           "servers"
         );
+    });
+
+    // Backfill receive activity for coins/tokens already in the wallet.
+    //
+    // Incoming UTXOs (change === 0) are now logged to `broadcast` as receive
+    // events so the unified History timeline + notifications show receives, not
+    // just our own sends (see electrum/worker/updateTxos.ts). Existing wallets
+    // already hold those UTXOs and won't re-process them, so seed entries here.
+    //
+    // Only confirmed coins (a finite height with a stored header) are backfilled
+    // — their real block time positions them correctly and keeps them in the
+    // past, so the mount-time toast gate never fires for backlog. Pending coins
+    // are skipped (they're captured live once they confirm). Keyed by txid, so
+    // this never clobbers an existing own-send record.
+    this.version(18).upgrade(async (transaction) => {
+      const RECEIVE_DESCRIPTIONS: Record<number, string> = {
+        [ContractType.RXD]: "rxd_receive",
+        [ContractType.FT]: "ft_receive",
+        [ContractType.NFT]: "nft_receive",
+      };
+
+      const txoTable = transaction.table("txo");
+      const headerTable = transaction.table("header");
+      const broadcastTable = transaction.table("broadcast");
+
+      // Cache header timestamps by height to avoid repeated lookups.
+      const timeByHeight = new Map<number, number | undefined>();
+      const blockTime = async (
+        height: number
+      ): Promise<number | undefined> => {
+        if (timeByHeight.has(height)) return timeByHeight.get(height);
+        let ms: number | undefined;
+        try {
+          const header = await headerTable.where("height").equals(height).first();
+          const buffer = (header as BlockHeader | undefined)?.buffer;
+          if (buffer) {
+            const seconds = readBlockTime(new Uint8Array(buffer));
+            if (seconds > 0) ms = seconds * 1000;
+          }
+        } catch {
+          ms = undefined;
+        }
+        timeByHeight.set(height, ms);
+        return ms;
+      };
+
+      const txos = (await txoTable.toArray()) as TxO[];
+      const recorded = new Set<string>();
+      for (const txo of txos) {
+        if (txo.change !== 0) continue;
+        const description = RECEIVE_DESCRIPTIONS[txo.contractType];
+        if (!description) continue;
+        const height = txo.height;
+        if (height === undefined || !Number.isFinite(height) || height <= 0)
+          continue;
+        if (recorded.has(txo.txid)) continue;
+
+        const date = await blockTime(height);
+        if (date === undefined) continue; // header unavailable → capture live later
+        if (await broadcastTable.get(txo.txid)) continue;
+
+        recorded.add(txo.txid);
+        await broadcastTable.put({ txid: txo.txid, description, date });
+      }
     });
   }
 }

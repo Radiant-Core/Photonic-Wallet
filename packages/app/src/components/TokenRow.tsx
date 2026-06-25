@@ -1,4 +1,12 @@
-import { Badge, Box, Flex, Icon, Text, Tooltip } from "@chakra-ui/react";
+import {
+  Badge,
+  Box,
+  Checkbox,
+  Flex,
+  Icon,
+  Text,
+  Tooltip,
+} from "@chakra-ui/react";
 import Outpoint from "@lib/Outpoint";
 import { SmartToken } from "@app/types";
 import { Link } from "react-router-dom";
@@ -27,6 +35,9 @@ export default function TokenRow({
   size = "md",
   defaultIcon,
   pending,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   glyph: SmartToken;
   value: number;
@@ -35,6 +46,11 @@ export default function TokenRow({
   defaultIcon?: IconType;
   // True while there is an unconfirmed (mempool) balance for this token.
   pending?: boolean;
+  // Multi-select mode: when set, clicking toggles selection instead of
+  // navigating, and a checkbox is shown.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const ref = Outpoint.fromString(glyph?.ref || "");
   const isEncrypted = !!glyph?.p?.includes(GLYPH_ENCRYPTED);
@@ -43,9 +59,9 @@ export default function TokenRow({
   const short = ref.shortInput();
   return (
     <Flex
-      bg="surface.raised"
+      bg={selected ? "bg.50" : "surface.raised"}
       borderWidth="1px"
-      borderColor="border.subtle"
+      borderColor={selected ? "accent.secondary" : "border.subtle"}
       alignItems="center"
       p={size === "sm" ? 2 : 3}
       pr={size === "sm" ? 3 : 4}
@@ -55,10 +71,27 @@ export default function TokenRow({
       overflow="hidden"
       as={Link}
       to={to}
+      onClick={
+        selectable
+          ? (e: React.MouseEvent) => {
+              // Block navigation; in select mode a click toggles selection.
+              e.preventDefault();
+              onToggleSelect?.();
+            }
+          : undefined
+      }
       w="100%"
       transition="background 0.18s ease, border-color 0.18s ease"
       _hover={{ bg: "bg.50", borderColor: "border.strong" }}
     >
+      {selectable && (
+        <Checkbox
+          isChecked={!!selected}
+          pointerEvents="none"
+          mr={1}
+          size="lg"
+        />
+      )}
       <Box
         w={size === "sm" ? "40px" : "48px"}
         h={size === "sm" ? "40px" : "48px"}

@@ -51,6 +51,9 @@ export const BLOCK_HEADER_SIZE = 80;
 /** Byte offset of the 32-byte Merkle root within a serialized header. */
 const MERKLE_ROOT_OFFSET = 36;
 
+/** Byte offset of the 4-byte little-endian timestamp within a serialized header. */
+const TIME_OFFSET = 68;
+
 /** Byte offset of the 4-byte little-endian nBits within a serialized header. */
 const NBITS_OFFSET = 72;
 
@@ -109,6 +112,20 @@ export function hashBlockHeader(header: Uint8Array): string {
     );
   }
   return internalToDisplayHex(dsha512_256(header));
+}
+
+/**
+ * Read the little-endian block timestamp (Unix seconds) from a header.
+ * Returns the miner-declared time the block was created.
+ */
+export function readBlockTime(header: Uint8Array): number {
+  if (header.length !== BLOCK_HEADER_SIZE) {
+    throw new Error(
+      `Block header must be ${BLOCK_HEADER_SIZE} bytes; got ${header.length}`
+    );
+  }
+  const dv = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  return dv.getUint32(TIME_OFFSET, true);
 }
 
 /** Read the little-endian nBits (compact target) field from a header. */
