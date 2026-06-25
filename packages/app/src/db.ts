@@ -13,6 +13,14 @@ import {
 import config from "@app/config.json";
 import { shuffle } from "@lib/util";
 
+const PINNED_SERVER = "wss://electrumx.radiantcore.org";
+
+function shuffleWithPinned(servers: string[]): string[] {
+  const rest = servers.filter((s) => s !== PINNED_SERVER);
+  shuffle(rest);
+  return servers.includes(PINNED_SERVER) ? [PINNED_SERVER, ...rest] : rest;
+}
+
 export type KeyValuePairs = unknown;
 
 export class Database extends Dexie {
@@ -41,8 +49,8 @@ export class Database extends Dexie {
     });
 
     this.version(2).upgrade((transaction) => {
-      // Populate servers with updated config, in random order
-      const mainnet = shuffle(config.defaultConfig.servers.mainnet);
+      // Populate servers with updated config, pinning radiantcore first
+      const mainnet = shuffleWithPinned(config.defaultConfig.servers.mainnet);
       const testnet = config.defaultConfig.servers.testnet;
       transaction.table("kvp").put({ mainnet, testnet }, "servers");
     });
@@ -69,11 +77,11 @@ export class Database extends Dexie {
       if (!hasNewServers) {
         const newServers = config.defaultConfig.servers.mainnet.slice(2);
         mainnet.push(...newServers);
-        shuffle(mainnet);
       }
+      const orderedMainnet = shuffleWithPinned(mainnet);
 
       const testnet = config.defaultConfig.servers.testnet;
-      transaction.table("kvp").put({ mainnet, testnet }, "servers");
+      transaction.table("kvp").put({ mainnet: orderedMainnet, testnet }, "servers");
     });
 
     this.version(6).stores({
@@ -82,14 +90,14 @@ export class Database extends Dexie {
 
     // Update servers to latest list (V2 hard fork compatible)
     this.version(7).upgrade(async (transaction) => {
-      const mainnet = shuffle([...config.defaultConfig.servers.mainnet]);
+      const mainnet = shuffleWithPinned([...config.defaultConfig.servers.mainnet]);
       const testnet = config.defaultConfig.servers.testnet;
       transaction.table("kvp").put({ mainnet, testnet }, "servers");
     });
 
     // Remove failing :50004 servers, keep only working :50022 servers
     this.version(8).upgrade(async (transaction) => {
-      const mainnet = shuffle([...config.defaultConfig.servers.mainnet]);
+      const mainnet = shuffleWithPinned([...config.defaultConfig.servers.mainnet]);
       const testnet = config.defaultConfig.servers.testnet;
       transaction.table("kvp").put({ mainnet, testnet }, "servers");
     });
@@ -115,7 +123,7 @@ export class Database extends Dexie {
 
       transaction
         .table("kvp")
-        .put({ mainnet: shuffle(mainnet), testnet }, "servers");
+        .put({ mainnet: shuffleWithPinned(mainnet), testnet }, "servers");
     });
 
     // Add vault table for Radiant Vault (CLTV timelocking)
@@ -233,7 +241,7 @@ const db = new Database();
 db.on("ready", async () => {
   const defaults = config.defaultConfig;
   const configKeys = Object.keys(defaults);
-  shuffle(config.defaultConfig.servers.mainnet);
+  shuffleWithPinned(config.defaultConfig.servers.mainnet);
   const missing = (await db.kvp.bulkGet(configKeys))
     .map((v, i) =>
       v
