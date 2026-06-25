@@ -241,21 +241,43 @@ const db = new Database();
 db.on("ready", async () => {
   const defaults = config.defaultConfig;
   const configKeys = Object.keys(defaults);
-  shuffleWithPinned(config.defaultConfig.servers.mainnet);
-  const missing = (await db.kvp.bulkGet(configKeys))
-    .map((v, i) =>
-      v
-        ? false
-        : [
-            configKeys[i],
-            (defaults as { [key: string]: unknown })[configKeys[i]],
-          ]
-    )
-    .filter(Boolean);
 
-  if (missing.length) {
-    const obj = Object.fromEntries(missing as []);
-    return db.kvp.bulkPut(Object.values(obj), Object.keys(obj));
+  // Fill any missing config defaults. A fresh `servers` value is pinned +
+  // shuffled (radiantcore first, the rest spread for load balancing).
+  const missingKeys = (await db.kvp.bulkGet(configKeys))
+    .map((v, i) => (v ? undefined : configKeys[i]))
+    .filter((k): k is string => k !== undefined);
+  if (missingKeys.length) {
+    const values = missingKeys.map((k) =>
+      k === "servers"
+        ? {
+            mainnet: shuffleWithPinned([
+              ...config.defaultConfig.servers.mainnet,
+            ]),
+            testnet: config.defaultConfig.servers.testnet,
+          }
+        : (defaults as { [key: string]: unknown })[k]
+    );
+    await db.kvp.bulkPut(values, missingKeys);
+  }
+
+  // Pin the primary :443 endpoint first on EVERY load. The connection worker
+  // tries servers[0] first, but the pinning migrations only re-order on a
+  // version bump — so an existing wallet keeps radiantcore wherever an older
+  // shuffle left it. Re-pin here (idempotent; preserves the order of the rest,
+  // and never re-adds the endpoint if the user removed it).
+  const servers = (await db.kvp.get("servers")) as
+    | { mainnet?: string[]; testnet?: string[] }
+    | undefined;
+  const mainnet = servers?.mainnet;
+  if (mainnet?.length && mainnet.includes(PINNED_SERVER) && mainnet[0] !== PINNED_SERVER) {
+    await db.kvp.put(
+      {
+        ...servers,
+        mainnet: [PINNED_SERVER, ...mainnet.filter((s) => s !== PINNED_SERVER)],
+      },
+      "servers"
+    );
   }
 });
 
