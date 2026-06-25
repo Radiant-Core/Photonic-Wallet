@@ -21,7 +21,11 @@ vi.mock("@app/electrum/Electrum", () => ({
 }));
 
 import rjs from "@radiant-core/radiantjs";
+import { mnemonicToSeedSync } from "@scure/bip39";
+import { HDKey } from "@scure/bip32";
 import Outpoint from "@lib/Outpoint";
+import { deriveAccountFromHdKey } from "@lib/wallet";
+import { SecretBytes } from "@app/secretBytes";
 import db from "@app/db";
 import { electrumStatus, wallet } from "@app/signals";
 import {
@@ -57,6 +61,9 @@ beforeEach(async () => {
     ...wallet.value,
     address: MAIN_ADDR,
     swapAddress: SWAP_ADDR,
+    net: "testnet" as any,
+    mnemonic: undefined, // locked by default; dual-coin-type test sets it
+    swapWif: undefined,
     locked: false,
   } as any;
   electrumStatus.value = ElectrumStatus.CONNECTED;
@@ -158,6 +165,52 @@ it("skips a UTXO already tracked by an existing db.swap row", async () => {
   expect(rows.length).toBe(1);
   expect(rows[0].tx).toBe("deadbeef"); // original untouched, not overwritten
   expect(rows[0].recovered).toBeUndefined();
+});
+
+it("scans BOTH coin-type swap addresses (unlocked) and records the holding address", async () => {
+  // Wallet is unlocked: its mnemonic lets recoverSwaps derive the swap address
+  // under each coin type. The NFT is stranded at coin type 0's swap address
+  // (the OTHER one) while the resolved swap address is coin type 512's.
+  const MNEMONIC =
+    "legal winner thank year wave sausage worth useful legal winner thank yellow";
+  const hd = HDKey.fromMasterSeed(mnemonicToSeedSync(MNEMONIC));
+  const swap0 = deriveAccountFromHdKey(hd, "testnet" as any, 0).swapAddress;
+  const swap512 = deriveAccountFromHdKey(hd, "testnet" as any, 512).swapAddress;
+  expect(swap0).not.toBe(swap512);
+
+  wallet.value = {
+    ...wallet.value,
+    address: MAIN_ADDR,
+    swapAddress: swap512, // resolved coin type
+    net: "testnet" as any,
+    mnemonic: SecretBytes.fromString(MNEMONIC),
+    locked: false,
+  } as any;
+
+  // findSwaps returns the reserve ONLY for the OTHER coin type's swap address.
+  findSwaps.mockImplementation(async (addr: string) =>
+    addr === swap0
+      ? [
+          {
+            contractType: ContractType.NFT,
+            utxo: { tx_hash: SWAP_TXID, tx_pos: 1, value: 1, height: 100, refs: [{ ref: REF_SHORT, type: "single" }] },
+          },
+        ]
+      : []
+  );
+  await db.glyph.put({ ref: REF_BE, name: "Stranded", tokenType: SmartTokenType.NFT, spent: 0 } as any);
+
+  await recoverSwaps();
+
+  // It scanned both addresses (resolved + both coin types -> {swap512, swap0}).
+  const scanned = findSwaps.mock.calls.map((c: any[]) => c[0]);
+  expect(scanned).toContain(swap0);
+  expect(scanned).toContain(swap512);
+
+  const swap = await db.swap.where({ txid: SWAP_TXID }).first();
+  expect(swap).toBeTruthy();
+  expect(swap!.swapAddress).toBe(swap0); // the address that actually holds it
+  expect(swap!.recovered).toBe(true);
 });
 
 it("does nothing when disconnected or without a swap address", async () => {

@@ -28,7 +28,7 @@ import TokenContent from "@app/components/TokenContent";
 import { TbQuestionMark } from "react-icons/tb";
 import Outpoint from "@lib/Outpoint";
 import Identifier from "@app/components/Identifier";
-import { cancelSwap } from "@app/swap";
+import { cancelSwap, swapScanAddresses } from "@app/swap";
 
 function SwapDetail({ utxo }: { utxo: ElectrumUtxo }) {
   const ref = utxo.refs?.[0];
@@ -83,35 +83,46 @@ export default function SwapMissing() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState<
-    { contractType: ContractType; utxo: ElectrumUtxo }[] | null
+    { contractType: ContractType; utxo: ElectrumUtxo; swapAddress: string }[] | null
   >(null);
 
   useEffect(() => {
     (async () => {
       if (electrumStatus.value !== ElectrumStatus.CONNECTED) return;
-      const result = await electrumWorker.value.findSwaps(
-        wallet.value.swapAddress
-      );
+      // Scan the resolved swap address AND (when unlocked) the swap address under
+      // each coin type, so a token stranded at the other coin type's swap address
+      // shows up here too. Tag each found UTXO with the address that holds it.
+      const tagged = (
+        await Promise.all(
+          swapScanAddresses().map(async (swapAddress) =>
+            (await electrumWorker.value.findSwaps(swapAddress)).map((value) => ({
+              ...value,
+              swapAddress,
+            }))
+          )
+        )
+      ).flat();
       const counts = await Promise.all(
-        result.map(async (value) => {
+        tagged.map(async (value) => {
           return [
             await db.swap.where({ txid: value.utxo.tx_hash }).count(),
             value,
-          ];
+          ] as const;
         })
       );
       const filtered = counts
         .filter(([count]) => count === 0)
-        .map(([, utxo]) => utxo) as {
-        contractType: ContractType;
-        utxo: ElectrumUtxo;
-      }[];
+        .map(([, value]) => value);
       setMissing(filtered);
       setLoading(false);
     })();
   }, [electrumStatus.value]);
 
-  const cancel = async (utxo: ElectrumUtxo, contractType: ContractType) => {
+  const cancel = async (
+    utxo: ElectrumUtxo,
+    contractType: ContractType,
+    swapAddress: string
+  ) => {
     if (wallet.value.locked) {
       openModal.value = {
         modal: "unlock",
@@ -126,7 +137,8 @@ export default function SwapMissing() {
         utxo.tx_hash,
         utxo.value,
         ref ? Outpoint.fromShortInput(ref).toString() : undefined,
-        utxo.tx_pos
+        utxo.tx_pos,
+        swapAddress
       );
     } catch (error) {
       console.debug(error);
@@ -172,9 +184,9 @@ export default function SwapMissing() {
             </Tr>
           </Thead>
           <Tbody fontFamily="mono">
-            {missing?.map(({ utxo, contractType }) => (
+            {missing?.map(({ utxo, contractType, swapAddress }) => (
               <Tr
-                key={utxo.tx_hash}
+                key={`${utxo.tx_hash}:${utxo.tx_pos}`}
                 borderBottomWidth="1px"
                 borderColor="border.subtle"
                 transition="background 0.12s"
@@ -196,7 +208,7 @@ export default function SwapMissing() {
                     // TODO this can be done a better way
                     <Button
                       size="sm"
-                      onClick={() => cancel(utxo, contractType)}
+                      onClick={() => cancel(utxo, contractType, swapAddress)}
                     >
                       Cancel
                     </Button>

@@ -703,7 +703,8 @@ function MyOffersPanel() {
         swap.txid,
         swap.fromValue,
         swap.fromGlyph || undefined,
-        swap.vout ?? 0
+        swap.vout ?? 0,
+        swap.swapAddress
       );
       await db.swap.update(swap.id, { status: SwapStatus.CANCEL });
       toast({ status: "success", title: "Swap cancelled" });

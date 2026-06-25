@@ -78,6 +78,11 @@ export interface TokenSwap {
   // swap-address UTXO that had no local db.swap row (lost/never-written). Such
   // a record has no pre-signed PSRT (`tx` is "") — only enough to Cancel.
   recovered?: boolean;
+  // The swap address actually holding the reserved UTXO. Normally the wallet's
+  // current swap address, but a token stranded at the OTHER coin type's swap
+  // address (a coin-type-resolution mismatch) records that address here so
+  // cancelSwap reclaims from the right script and signs with the matching key.
+  swapAddress?: string;
 }
 
 // On-chain covenant a token can rest in. These scriptPubKeys are NOT the plain

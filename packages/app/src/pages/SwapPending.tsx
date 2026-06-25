@@ -57,7 +57,8 @@ const Actions = ({ swap }: { swap: TokenSwap }) => {
         swap.txid,
         swap.fromValue,
         swap.fromGlyph || undefined,
-        swap.vout ?? 0
+        swap.vout ?? 0,
+        swap.swapAddress
       );
     } catch (error) {
       console.debug(error);
