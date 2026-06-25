@@ -198,7 +198,11 @@ export default function Electrum() {
       if (
         discoveryRanRef.current ||
         discoveryInFlightRef.current ||
-        !wallet.value.wif ||
+        // NOT gated on wif: covenant + swap recovery is address-only, so it runs
+        // even while locked — a token reserved in a covenant/swap then shows as
+        // listed (with a Cancel) instead of a sendable phantom, without waiting
+        // for an unlock or a manual Resync. Vault discovery still needs the wif
+        // and is skipped (then retried) while locked — see the latch below.
         !wallet.value.address ||
         electrumStatus.value !== ElectrumStatus.CONNECTED
       ) {
@@ -207,6 +211,9 @@ export default function Electrum() {
       discoveryInFlightRef.current = true;
       // Assume complete; any skipped tx or thrown error flips this false.
       let complete = true;
+      // Whether the wif-gated work (vault discovery) actually ran this pass; a
+      // locked pass does covenant + swap recovery only and must NOT latch.
+      let fullSweep = false;
 
       // An unlocked, connected wallet is a strong engagement signal — ask the
       // browser to move this origin into the persistent storage bucket so the
@@ -226,11 +233,14 @@ export default function Electrum() {
 
       console.debug("[Electrum] Starting discovery sweep");
       try {
-        // Vaults + covenant-held tokens + covenant reconcile. Shared with the
-        // manual "Resync Wallet" button so the two paths can't drift. A skipped
-        // vault scan flips `incomplete` so the latch retries on a later connect.
+        // Vaults + covenant-held tokens + covenant reconcile + swap recovery.
+        // Shared with the manual "Resync Wallet" button so the two paths can't
+        // drift. Vault discovery is skipped while locked (vaultsSkippedLocked);
+        // covenant + swap recovery run regardless. A skipped vault scan flips
+        // `incomplete` so the latch retries on a later connect.
         const result = await discoverAll();
         if (result.incomplete) complete = false;
+        fullSweep = !result.vaultsSkippedLocked;
         if (result.vaultsDiscovered > 0) {
           console.log(
             `[Electrum] Discovered ${result.vaultsDiscovered} vault(s)`
@@ -243,8 +253,11 @@ export default function Electrum() {
         console.warn("[Electrum] Discovery sweep failed:", error);
       } finally {
         discoveryInFlightRef.current = false;
-        // Latch only on a confirmed-complete scan (no skipped tx, no throw).
-        if (complete) discoveryRanRef.current = true;
+        // Latch only on a confirmed-complete FULL scan (vaults included). A
+        // locked pass (vaults skipped) does not latch, so unlocking re-fires the
+        // effect (wif dependency) and runs the vault scan; the address-only
+        // recovery re-running each connect is cheap + idempotent.
+        if (complete && fullSweep) discoveryRanRef.current = true;
       }
     };
 
