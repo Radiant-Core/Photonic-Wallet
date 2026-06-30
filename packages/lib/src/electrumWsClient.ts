@@ -440,7 +440,19 @@ export class ElectrumWS extends Observable {
     const key = subscriptionKey(method, params);
     this.subscriptions.set(key, callback);
     if (!this.connected) return;
-    callback(...params, await this.request(`${method}.subscribe`, ...params));
+    // The request rejection must propagate to the caller (the onOpen
+    // resubscribe loop's .catch() handler closes the socket on non-throttle
+    // errors). Only catch the callback's own rejection to prevent unhandled
+    // promise rejections from async callbacks (e.g. Vault's handler).
+    const result = await this.request(`${method}.subscribe`, ...params);
+    try {
+      const cbResult = callback(...params, result);
+      if (cbResult instanceof Promise) {
+        cbResult.catch((e) => console.warn("ElectrumWS subscribe callback error:", e));
+      }
+    } catch (e) {
+      console.warn("ElectrumWS subscribe callback error:", e);
+    }
   }
 
   async unsubscribe(
@@ -455,6 +467,19 @@ export class ElectrumWS extends Observable {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Check if a subscription for the given method+params already exists in the
+   * subscription map. Workers use this to skip register() when the onOpen
+   * resubscribe loop already handles re-subscription on reconnect, avoiding
+   * duplicate subscribe requests.
+   */
+  isSubscribed(
+    method: string,
+    ...params: (string | number)[]
+  ): boolean {
+    return this.subscriptions.has(subscriptionKey(method, params));
   }
 
   async close(reason: string): Promise<boolean> {
@@ -646,6 +671,13 @@ export class ElectrumWS extends Observable {
   }
 
   private onClose(event: unknown): void {
+    // Set connected = false BEFORE firing CLOSE so handlers see the correct
+    // state (electrum.connected() returns false) and can trigger server
+    // failover. Previously this was set at the end, causing the worker's
+    // close handler to see connected==true and ignore the close as "stale",
+    // trapping the wallet in a rapid reconnect cycle with a throttling server.
+    const wasConnected = this.connected;
+    this.connected = false;
     this.fire(ElectrumWSEvent.CLOSE, event);
     // Socket dropped before (or after) proving stable — cancel the pending
     // backoff reset so reconnectAttempts keeps climbing across a flap.
@@ -653,7 +685,7 @@ export class ElectrumWS extends Observable {
       clearTimeout(this.stabilityTimeout);
       this.stabilityTimeout = undefined;
     }
-    if (!this.connected) {
+    if (!wasConnected) {
       if (this.connectedTimeout) clearTimeout(this.connectedTimeout);
     } else {
       this.fire(ElectrumWSEvent.DISCONNECTED);
@@ -665,13 +697,12 @@ export class ElectrumWS extends Observable {
       request.reject(new Error("connection closed"));
     }
     this.drainSlotWaiters("connection closed");
-    if (this.options.reconnect && this.connected) {
+    if (this.options.reconnect && wasConnected) {
       this.fire(ElectrumWSEvent.RECONNECTING);
       this.reconnectionTimeout = setTimeout(
         () => this.connect(),
         this.nextReconnectDelay()
       );
     }
-    this.connected = false;
   }
 }

@@ -676,6 +676,13 @@ export class NFTWorker implements Subscription {
     this.scriptHash = nftScriptHash(address as string);
     this.address = address;
 
+    // If the onOpen resubscribe loop already re-subscribed us (reconnect
+    // with existing subscription), skip — avoids duplicate subscribe requests.
+    if (this.electrum.client?.isSubscribed("blockchain.scripthash", this.scriptHash)) {
+      console.debug("[NFT] Already subscribed, skipping register");
+      return;
+    }
+
     // If the server previously throttled our subscribe with "excessive
     // resource usage", don't retry it — go straight to manual sync.
     if (this.subscribeFailed) {
