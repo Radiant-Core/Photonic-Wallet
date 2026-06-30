@@ -109,7 +109,7 @@ import {
   validateTimelockState,
   type TimelockSectionState,
 } from "@app/timelockHelpers";
-import { saveReveal } from "@lib/timelock";
+import { saveReveal, wrapCEKForStorage } from "@lib/timelock";
 import { bytesToHex } from "@noble/hashes/utils";
 
 // IPFS uploading is currently disabled until an alternative to nft.storage can be found
@@ -1291,13 +1291,32 @@ export default function Mint({ tokenType }: { tokenType: TokenType }) {
           // Token ref convention used elsewhere in the wallet: <txid>:<vout>
           // Glyph v2 NFT output is at vout 0 of the reveal tx.
           const tokenRef = `${revealTxId}:0`;
+          const cekHex = bytesToHex(encryptionResult.cek);
+          const selfKeypair = wallet.value.mnemonic
+            ? deriveEncryptionKeypair(
+                wallet.value.mnemonic.toString(),
+                wallet.value.coinType
+              )
+            : undefined;
+          const wrapped = selfKeypair
+            ? wrapCEKForStorage(cekHex, selfKeypair)
+            : null;
           await saveReveal({
             tokenRef,
-            cek: bytesToHex(encryptionResult.cek),
+            cek: wrapped ? wrapped.cek : cekHex,
             cekHash: cekHashHex,
             mode: tl.mode,
             unlockAt: tl.unlock_at,
             createdAt: Math.floor(Date.now() / 1000),
+            ...(wrapped
+              ? {
+                  wrappedCek: wrapped.wrappedCek,
+                  ephemeralX25519: wrapped.ephemeralX25519,
+                  ...(wrapped.ephemeralMlkem
+                    ? { ephemeralMlkem: wrapped.ephemeralMlkem }
+                    : {}),
+                }
+              : {}),
           });
         }
 

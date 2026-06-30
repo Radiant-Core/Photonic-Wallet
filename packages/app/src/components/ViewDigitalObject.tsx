@@ -17,6 +17,7 @@ import {
   Tooltip,
   useClipboard,
   useDisclosure,
+  useToast,
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -43,6 +44,7 @@ import RoyaltyListModal from "./RoyaltyListModal";
 import TxSuccessModal from "./TxSuccessModal";
 import { SmartToken, TxO } from "../types";
 import { openModal, wallet } from "@app/signals";
+import { electrumWorker } from "@app/electrum/Electrum";
 import TokenDetails from "./TokenDetails";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { RiContractRightLine, RiExpandLeftLine } from "react-icons/ri";
@@ -118,6 +120,7 @@ export default function ViewDigitalObject({
   const size = collapsed ? "md" : "sm";
   const { search } = useLocation();
   const navigate = useNavigate();
+  const toast = useToast();
   const sendDisclosure = useDisclosure();
   const meltDisclosure = useDisclosure();
   const editDisclosure = useDisclosure();
@@ -126,17 +129,14 @@ export default function ViewDigitalObject({
   // No default result: `undefined` means the live query hasn't resolved yet
   // (loading), which we surface distinctly from a token that isn't in the
   // wallet (resolved but missing).
-  const result = useLiveQuery(
-    async () => {
-      const nft = await db.glyph.get({ ref: sref });
-      if (!nft?.lastTxoId) return [undefined, undefined];
-      const txo = await db.txo.get(nft.lastTxoId);
-      const a = nft?.author && (await db.glyph.get({ ref: nft.author }));
-      const c = nft?.container && (await db.glyph.get({ ref: nft.container }));
-      return [nft, txo, a, c] as [SmartToken, TxO, SmartToken?, SmartToken?];
-    },
-    [sref]
-  );
+  const result = useLiveQuery(async () => {
+    const nft = await db.glyph.get({ ref: sref });
+    if (!nft?.lastTxoId) return [undefined, undefined];
+    const txo = await db.txo.get(nft.lastTxoId);
+    const a = nft?.author && (await db.glyph.get({ ref: nft.author }));
+    const c = nft?.container && (await db.glyph.get({ ref: nft.container }));
+    return [nft, txo, a, c] as [SmartToken, TxO, SmartToken?, SmartToken?];
+  }, [sref]);
   const [nft, txo, author, container] = result ?? [];
   const txid = useRef("");
   const { onCopy: onLinkCopy } = useClipboard(nft?.remote?.u || "");
@@ -187,6 +187,33 @@ export default function ViewDigitalObject({
   const openSuccess = (id: string) => {
     txid.current = id;
     successDisclosure.onOpen();
+  };
+
+  // Plain swap listing for an NFT the wallet believes has no royalty. Before
+  // letting it through the royalty-free swap, re-decode the token from chain:
+  // a row synced by an older build (or a partially-synced secondary holder) can
+  // be missing its on-chain royalty, which would silently strip the creator's
+  // cut. fetchGlyph backfills royalty/policy onto the row; if a royalty surfaces
+  // we refuse the plain swap and the live query re-renders with the enforced-
+  // royalty button. A transient lookup failure falls through so listing isn't
+  // blocked offline.
+  const listForSale = async () => {
+    if (!nft) return;
+    try {
+      const refreshed = await electrumWorker.value.fetchGlyph(nft.ref);
+      if (refreshed?.royalty) {
+        toast({
+          status: "warning",
+          title: "This token has a creator royalty",
+          description:
+            "Use “List with enforced royalty” so the creator is paid on-chain. A plain swap would bypass it.",
+        });
+        return;
+      }
+    } catch (err) {
+      console.debug("[ViewDigitalObject] royalty pre-check failed", err);
+    }
+    navigate("/swap", { state: { offerGlyphRef: nft.ref } });
   };
 
   const isEncrypted = !!nft.p?.includes(GLYPH_ENCRYPTED);
@@ -432,11 +459,7 @@ export default function ViewDigitalObject({
                 <Button
                   disabled={nft.swapPending}
                   leftIcon={<ActionIcon as={MdSell} />}
-                  onClick={() =>
-                    navigate("/swap", {
-                      state: { offerGlyphRef: nft.ref },
-                    })
-                  }
+                  onClick={() => void listForSale()}
                   sx={{ gridColumn: "span 2 / span 2" }}
                 >
                   {"List for sale"}

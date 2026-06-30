@@ -49,6 +49,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { PromiseExtended } from "dexie";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { discoverAll } from "@app/walletSync";
+import { canShare, shareText } from "@app/platform";
 import {
   autoLockMs,
   clampAutoLockMs,
@@ -122,12 +123,14 @@ function PublicKeyField({
             >
               {qr.isOpen ? "Hide QR" : "Show QR"}
             </Button>
-            {typeof navigator.share === "function" && (
+            {canShare() && (
               <Button
                 size="xs"
                 variant="outline"
                 leftIcon={<Icon as={MdShare} />}
-                onClick={() => navigator.share({ title: shareTitle, text: value })}
+                onClick={() =>
+                  void shareText({ title: shareTitle, text: value })
+                }
               >
                 Share
               </Button>

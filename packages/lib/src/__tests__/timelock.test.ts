@@ -17,9 +17,11 @@ import {
   confirmReveal,
   deleteReveal,
   setTimelockRevealStore,
+  wrapCEKForStorage,
+  unwrapCEKForStorage,
   type TimelockReveal,
 } from "../timelock";
-import { buildEncryptedMetadata } from "../encryption";
+import { buildEncryptedMetadata, generateHybridKeyPair } from "../encryption";
 import { GLYPH_ENCRYPTED, GLYPH_TIMELOCK } from "../protocols";
 
 // ============================================================================
@@ -522,5 +524,130 @@ describe("Reveal persistence (pluggable store)", () => {
     expect(await getReveal("in-memory")).toBeDefined();
     // The localStorage backend should NOT have seen this write.
     expect(store["glyph_timelock_reveals"]).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// C2: CEK encryption at rest (wrapCEKForStorage / unwrapCEKForStorage)
+// ============================================================================
+
+describe("C2 — CEK encryption at rest", () => {
+  it("wrapCEKForStorage produces encrypted CEK with ephemeral keys", () => {
+    const cekHex = bytesToHex(makeCEK());
+    const keypair = generateHybridKeyPair(true);
+    const wrapped = wrapCEKForStorage(cekHex, keypair);
+
+    expect(wrapped.cek).not.toBe(cekHex);
+    expect(wrapped.wrappedCek).toBe(wrapped.cek);
+    expect(wrapped.ephemeralX25519).toHaveLength(64); // 32 bytes hex
+    expect(wrapped.ephemeralMlkem).toBeDefined();
+  });
+
+  it("unwrapCEKForStorage recovers the original CEK", () => {
+    const cekHex = bytesToHex(makeCEK());
+    const keypair = generateHybridKeyPair(true);
+    const wrapped = wrapCEKForStorage(cekHex, keypair);
+
+    const reveal: TimelockReveal = {
+      tokenRef: "txid:0",
+      cek: wrapped.cek,
+      cekHash: bytesToHex(sha256(makeCEK())),
+      mode: "time",
+      unlockAt: Math.floor(Date.now() / 1000) + 3600,
+      createdAt: Math.floor(Date.now() / 1000),
+      wrappedCek: wrapped.wrappedCek,
+      ephemeralX25519: wrapped.ephemeralX25519,
+      ephemeralMlkem: wrapped.ephemeralMlkem,
+    };
+
+    const unwrapped = unwrapCEKForStorage(reveal, keypair);
+    expect(unwrapped).toBe(cekHex);
+  });
+
+  it("unwrapCEKForStorage fails with wrong keypair", () => {
+    const cekHex = bytesToHex(makeCEK());
+    const mintKeypair = generateHybridKeyPair(true);
+    const wrongKeypair = generateHybridKeyPair(true);
+    const wrapped = wrapCEKForStorage(cekHex, mintKeypair);
+
+    const reveal: TimelockReveal = {
+      tokenRef: "txid:0",
+      cek: wrapped.cek,
+      cekHash: bytesToHex(sha256(makeCEK())),
+      mode: "time",
+      unlockAt: Math.floor(Date.now() / 1000) + 3600,
+      createdAt: Math.floor(Date.now() / 1000),
+      wrappedCek: wrapped.wrappedCek,
+      ephemeralX25519: wrapped.ephemeralX25519,
+      ephemeralMlkem: wrapped.ephemeralMlkem,
+    };
+
+    const unwrapped = unwrapCEKForStorage(reveal, wrongKeypair);
+    expect(unwrapped).toBeUndefined();
+  });
+
+  it("unwrapCEKForStorage falls back to plaintext for legacy records", () => {
+    const cekHex = bytesToHex(makeCEK());
+    const keypair = generateHybridKeyPair(true);
+
+    const legacyReveal: TimelockReveal = {
+      tokenRef: "txid:0",
+      cek: cekHex,
+      cekHash: bytesToHex(sha256(makeCEK())),
+      mode: "time",
+      unlockAt: Math.floor(Date.now() / 1000) + 3600,
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+
+    const unwrapped = unwrapCEKForStorage(legacyReveal, keypair);
+    expect(unwrapped).toBe(cekHex);
+  });
+
+  it("works with X25519-only keypair (no ML-KEM)", () => {
+    const cekHex = bytesToHex(makeCEK());
+    const keypair = generateHybridKeyPair(false);
+    const wrapped = wrapCEKForStorage(cekHex, keypair);
+
+    expect(wrapped.ephemeralMlkem).toBeUndefined();
+
+    const reveal: TimelockReveal = {
+      tokenRef: "txid:0",
+      cek: wrapped.cek,
+      cekHash: bytesToHex(sha256(makeCEK())),
+      mode: "time",
+      unlockAt: Math.floor(Date.now() / 1000) + 3600,
+      createdAt: Math.floor(Date.now() / 1000),
+      wrappedCek: wrapped.wrappedCek,
+      ephemeralX25519: wrapped.ephemeralX25519,
+    };
+
+    const unwrapped = unwrapCEKForStorage(reveal, keypair);
+    expect(unwrapped).toBe(cekHex);
+  });
+
+  it("full save/load round-trip through the pluggable store with wrapped CEK", async () => {
+    const cekHex = bytesToHex(makeCEK());
+    const keypair = generateHybridKeyPair(true);
+    const wrapped = wrapCEKForStorage(cekHex, keypair);
+
+    const reveal: TimelockReveal = {
+      tokenRef: "wrapped:0",
+      cek: wrapped.cek,
+      cekHash: bytesToHex(sha256(makeCEK())),
+      mode: "time",
+      unlockAt: Math.floor(Date.now() / 1000) + 3600,
+      createdAt: Math.floor(Date.now() / 1000),
+      wrappedCek: wrapped.wrappedCek,
+      ephemeralX25519: wrapped.ephemeralX25519,
+      ephemeralMlkem: wrapped.ephemeralMlkem,
+    };
+
+    await saveReveal(reveal);
+    const loaded = await getReveal("wrapped:0");
+    expect(loaded).toBeDefined();
+    expect(loaded!.ephemeralX25519).toBeDefined();
+
+    const unwrapped = unwrapCEKForStorage(loaded!, keypair);
+    expect(unwrapped).toBe(cekHex);
   });
 });

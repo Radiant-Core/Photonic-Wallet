@@ -44,6 +44,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Scanner } from "@yudiel/react-qr-scanner";
 import Card from "@app/components/Card";
 import { openModal, wallet } from "@app/signals";
+import { readText, canScanFromPhoto, scanQrFromPhoto } from "@app/platform";
 import { withWif } from "@app/wallet";
 import { signMessageWithWif } from "@lib/sign";
 import {
@@ -157,12 +158,8 @@ function InputPanel({
   onChange: (v: string) => void;
 }) {
   const pasteFromClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) onChange(text);
-    } catch {
-      /* clipboard unavailable — user can paste manually */
-    }
+    const text = await readText();
+    if (text) onChange(text);
   };
 
   return (
@@ -196,6 +193,17 @@ function InputPanel({
           <Button onClick={pasteFromClipboard} variant="ghost">
             Paste from clipboard
           </Button>
+          {canScanFromPhoto() && (
+            <Button
+              onClick={async () => {
+                const value = await scanQrFromPhoto();
+                if (value) onChange(value);
+              }}
+              variant="ghost"
+            >
+              Scan from photo
+            </Button>
+          )}
         </HStack>
       </Card>
 

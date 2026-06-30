@@ -23,6 +23,8 @@ import localizedFormat from "dayjs/plugin/localizedFormat";
 // localStorage. See packages/app/src/timelockStore.ts and R15 in
 // REMEDIATION_PLAN.md. Must come before any reveal-flow component renders.
 import "./timelockStore";
+// Native-shell init (status bar, splash, safe-area class). No-op on web/Tauri.
+import { initNative } from "./platform";
 import App from "./App";
 import Servers from "./pages/Servers";
 import WalletSettings from "./pages/WalletSettings";
@@ -711,3 +713,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </ChakraProvider>
   /*</React.StrictMode>*/
 );
+
+// Style the native status bar and dismiss the launch splash once the UI is up.
+void initNative();

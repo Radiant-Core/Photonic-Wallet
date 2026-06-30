@@ -78,6 +78,46 @@ export const CONTENT_SECURITY_POLICY = [
   `upgrade-insecure-requests`,
 ].join("; ");
 
+/**
+ * WebView-tuned CSP for the Capacitor native builds (iOS / Android).
+ *
+ * Injected as a `<meta http-equiv>` tag at build time when `CAP_BUILD=1`
+ * (see `vite.config.ts`) — native bundles have no HTTP server to set a real
+ * CSP header, so the meta tag is the only place to enforce one.
+ *
+ * Differences from the canonical web policy:
+ *   - Adds the Capacitor WebView origins (`capacitor://localhost` on iOS,
+ *     `http(s)://localhost` on Android) to `default-/connect-/img-src`.
+ *   - Adds `media-src ... mediastream:` so the live getUserMedia QR scanner's
+ *     `<video>` element is allowed.
+ *   - Widens `worker-src` to `'self' blob:` (some bundlers back workers with
+ *     blob: URLs inside the WebView).
+ *   - **Drops `upgrade-insecure-requests`**: Android serves the app from
+ *     `http://localhost`; upgrading those requests to `https` would fail to
+ *     resolve and white-screen the app. (iOS uses the secure `capacitor://`
+ *     scheme, so nothing is lost there either.)
+ *
+ * This constant is intentionally separate from the canonical policy and is NOT
+ * part of the `check-csp-parity.mjs` web-parity check.
+ */
+const CAPACITOR_ORIGINS = "capacitor://localhost https://localhost http://localhost";
+
+export const CAPACITOR_CSP = [
+  `default-src 'self' ${CAPACITOR_ORIGINS}`,
+  `script-src 'self'`,
+  `style-src 'self' 'unsafe-inline'`,
+  `connect-src ${CONNECT_HOSTS} ${CAPACITOR_ORIGINS}`,
+  `img-src ${IMG_HOSTS} ${CAPACITOR_ORIGINS}`,
+  `media-src 'self' blob: mediastream:`,
+  `font-src 'self' data:`,
+  `object-src 'none'`,
+  `frame-src 'none'`,
+  `frame-ancestors 'none'`,
+  `worker-src 'self' blob:`,
+  `base-uri 'self'`,
+  `form-action 'self'`,
+].join("; ");
+
 /** The full security-headers set applied by Vite dev/preview servers. */
 export const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",

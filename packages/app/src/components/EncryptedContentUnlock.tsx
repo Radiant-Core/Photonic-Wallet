@@ -48,6 +48,7 @@ import {
   formatTimeRemaining,
   getReveal,
   deleteReveal,
+  unwrapCEKForStorage,
   type TimelockReveal,
 } from "@lib/timelock";
 import { buildRevealTx } from "@lib/reveal";
@@ -736,7 +737,21 @@ export default function EncryptedContentUnlock({
         );
       }
 
-      const cekBytes = hexToBytes(savedReveal.cek);
+      // C2: Unwrap the CEK if it was encrypted at rest (ephemeralX25519 present).
+      // Legacy records without ephemeral keys fall back to plaintext.
+      let cekHex = savedReveal.cek;
+      if (savedReveal.ephemeralX25519 && walletMnemonic) {
+        const keypair = deriveEncryptionKeypair(
+          walletMnemonic.toString(),
+          wallet.value.coinType
+        );
+        const unwrapped = unwrapCEKForStorage(savedReveal, keypair);
+        if (!unwrapped) {
+          throw new Error("Failed to decrypt stored CEK — wallet key mismatch");
+        }
+        cekHex = unwrapped;
+      }
+      const cekBytes = hexToBytes(cekHex);
       const result = buildRevealTx(
         wallet.value.address,
         wallet.value.wif.toString(),

@@ -53,6 +53,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@app/components/Card";
 import NoContent from "@app/components/NoContent";
+import { copyText } from "@app/platform";
 import { TbInbox } from "react-icons/tb";
 import TokenContent from "@app/components/TokenContent";
 import { WaveExpiryBadge } from "@app/components/WaveAssetLabel";
@@ -269,7 +270,7 @@ function useCopyToClipboard() {
   return useCallback(
     async (text: string, label?: string) => {
       try {
-        await navigator.clipboard.writeText(text);
+        await copyText(text);
         toast({
           status: "success",
           title: "Copied",

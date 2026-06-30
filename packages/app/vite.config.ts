@@ -19,7 +19,33 @@ import path from "path";
  * These headers are only active during `vite dev` and `vite preview`.
  * They MUST also be set in the production web server config (Nginx/Caddy/etc.).
  */
-import { SECURITY_HEADERS } from "./src/config/csp";
+import { SECURITY_HEADERS, CAPACITOR_CSP } from "./src/config/csp";
+
+// Capacitor native build (set by the `build:mobile` script). When true we:
+//   1. Drop the PWA service worker — it caches stale assets and misbehaves
+//      under the capacitor:// (iOS) and http://localhost (Android) schemes.
+//   2. Inject a WebView-appropriate CSP <meta> tag (native bundles have no
+//      HTTP server to set a real Content-Security-Policy header).
+const isCapacitorBuild = process.env.CAP_BUILD === "1";
+
+// Injects the Capacitor CSP as a <meta http-equiv> into index.html at build.
+function capacitorCspPlugin() {
+  return {
+    name: "photonic-capacitor-csp",
+    transformIndexHtml() {
+      return [
+        {
+          tag: "meta",
+          attrs: {
+            "http-equiv": "Content-Security-Policy",
+            content: CAPACITOR_CSP,
+          },
+          injectTo: "head-prepend" as const,
+        },
+      ];
+    },
+  };
+}
 
 // When driving the dev server over HTTP (HTTP_DEV=1), drop the Content-
 // Security-Policy header entirely. The production CSP (canonical in
@@ -62,8 +88,13 @@ export default defineConfig({
       promiseImportName: (i) => `__tla_${i}`,
     }),
     lingui(),
-    VitePWA({
-      workbox: { globPatterns: ["**/*"] },
+    // Mobile build: inject the WebView CSP and skip the service worker.
+    // Web/Tauri build: keep the PWA service worker.
+    ...(isCapacitorBuild
+      ? [capacitorCspPlugin()]
+      : [
+          VitePWA({
+            workbox: { globPatterns: ["**/*"] },
       registerType: "prompt",
       includeAssets: ["**/*"],
       manifest: {
@@ -99,7 +130,8 @@ export default defineConfig({
           },
         ],
       },
-    }),
+          }),
+        ]),
     // basicSsl serves a self-signed cert so Safari (which force-upgrades
     // http://localhost) can load the preview server. Cert prompts once
     // per session; click "Show Details → Visit Website" to accept.
@@ -121,6 +153,20 @@ export default defineConfig({
     alias: {
       "@app": path.resolve(__dirname, "./src"),
       "@lib": path.resolve(__dirname, "../lib/src"),
+      // The Capacitor build disables VitePWA, so its virtual modules no longer
+      // exist. Point ReloadPrompt's imports at inert stubs instead.
+      ...(isCapacitorBuild
+        ? {
+            "virtual:pwa-register/react": path.resolve(
+              __dirname,
+              "./src/stubs/pwaRegister.ts",
+            ),
+            "virtual:pwa-info": path.resolve(
+              __dirname,
+              "./src/stubs/pwaInfo.ts",
+            ),
+          }
+        : {}),
     },
   },
   optimizeDeps: {

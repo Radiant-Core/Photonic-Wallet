@@ -152,6 +152,19 @@ body :not(:hover, :focus, :focus-within)::-webkit-scrollbar-thumb {
   }
 }
 
+/* Capacitor native shell: pad the app out of the iOS notch / home-indicator
+   and the Android status bar. Scoped to the `capacitor` class that
+   `initNative()` adds to <html>, so the web and Tauri builds are untouched.
+   `viewport-fit=cover` (set in index.html) is what makes the env() insets
+   resolve to non-zero on notched devices. */
+html.capacitor body {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  box-sizing: border-box;
+}
+
 /* days-one-latin-400-normal */
 @font-face {
   font-family: "Days One";

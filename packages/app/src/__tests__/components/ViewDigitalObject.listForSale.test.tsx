@@ -16,7 +16,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -25,8 +31,9 @@ import { MemoryRouter } from "react-router-dom";
 import ViewDigitalObject from "../../components/ViewDigitalObject";
 
 // Hoisted handles referenced inside the (hoisted) vi.mock factories below.
-const { mockNavigate, live } = vi.hoisted(() => ({
+const { mockNavigate, mockFetchGlyph, live } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
+  mockFetchGlyph: vi.fn(),
   live: { current: [undefined, undefined, undefined, undefined] as unknown[] },
 }));
 
@@ -45,6 +52,14 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("@app/signals", () => ({
   wallet: { value: { locked: false } },
   openModal: { value: null },
+}));
+
+// The plain "List for sale" handler re-decodes the token from chain before
+// allowing a royalty-free swap (belt-and-suspenders against a stale row that's
+// missing its on-chain royalty). Stub the worker so the pre-check is
+// controllable; importing the real Electrum module would spin up a Web Worker.
+vi.mock("@app/electrum/Electrum", () => ({
+  electrumWorker: { value: { fetchGlyph: mockFetchGlyph } },
 }));
 
 vi.mock("@app/layouts/ViewPanelLayout", () => ({
@@ -110,6 +125,23 @@ describe("ViewDigitalObject — List for sale", () => {
     i18n.load("en", {});
     i18n.activate("en");
     vi.clearAllMocks();
+    // Default: the on-chain re-decode confirms no royalty, so the plain swap is
+    // allowed through. Individual tests override to exercise the guard.
+    mockFetchGlyph.mockResolvedValue({ ref: "ref-plain-nft" });
+    // jsdom has no matchMedia; Chakra's toast (framer-motion) needs it.
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
   });
 
   afterEach(() => {
@@ -124,13 +156,50 @@ describe("ViewDigitalObject — List for sale", () => {
     expect(screen.queryByText("List with enforced royalty")).toBeNull();
   });
 
-  it("navigates to /swap with the token pre-selected when clicked", async () => {
+  it("navigates to /swap with the token pre-selected when clicked (chain confirms no royalty)", async () => {
     live.current = [plainNft, txo, undefined, undefined];
+    mockFetchGlyph.mockResolvedValue({ ref: "ref-plain-nft" }); // no royalty
     await renderObject(plainNft.ref);
 
-    fireEvent.click(screen.getByText("List for sale"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("List for sale"));
+    });
 
-    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockFetchGlyph).toHaveBeenCalledWith("ref-plain-nft");
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1));
+    expect(mockNavigate).toHaveBeenCalledWith("/swap", {
+      state: { offerGlyphRef: "ref-plain-nft" },
+    });
+  });
+
+  it("blocks the plain swap when the chain re-decode reveals a royalty", async () => {
+    live.current = [plainNft, txo, undefined, undefined];
+    // Stale row had no royalty, but the on-chain payload does — the guard must
+    // refuse the royalty-free swap so the creator isn't silently stripped.
+    mockFetchGlyph.mockResolvedValue({
+      ref: "ref-plain-nft",
+      royalty: { address: "1Royalty", bps: 500 },
+    });
+    await renderObject(plainNft.ref);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("List for sale"));
+    });
+
+    expect(mockFetchGlyph).toHaveBeenCalledWith("ref-plain-nft");
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("still allows the plain swap if the on-chain pre-check fails (don't block offline)", async () => {
+    live.current = [plainNft, txo, undefined, undefined];
+    mockFetchGlyph.mockRejectedValue(new Error("network down"));
+    await renderObject(plainNft.ref);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("List for sale"));
+    });
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1));
     expect(mockNavigate).toHaveBeenCalledWith("/swap", {
       state: { offerGlyphRef: "ref-plain-nft" },
     });

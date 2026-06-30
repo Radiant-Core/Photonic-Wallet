@@ -37,6 +37,7 @@ import {
 } from "@chakra-ui/react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
+import { copyText } from "@app/platform";
 import {
   SearchIcon,
   ExternalLinkIcon,
@@ -224,7 +225,7 @@ export default function WaveNames() {
   };
 
   const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
+    void copyText(text);
     toast({
       title: "Copied!",
       description: `${label} copied to clipboard`,

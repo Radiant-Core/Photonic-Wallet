@@ -45,6 +45,15 @@ import { SyncRetry } from "./syncRetry";
 // 512 KiB on-chain content limit (matches GLYPH_INSCRIPTION_MAX_SIZE / mintEmbedMaxBytes)
 const fileSizeLimit = 524_288;
 
+// Reveal-payload decode version. Stamped onto every glyph row `saveGlyph` writes
+// (`dv`). The sync re-decodes any owned NFT whose row predates the current
+// version exactly once, so fields added to the decoder later (here: the Glyph v2
+// `royalty`/`policy` covenant metadata) are backfilled onto rows minted/synced
+// by an older build. Without this, a stale row keeps `royalty === undefined`,
+// the wallet only offers a royalty-free swap, and the creator is never paid.
+// Bump this whenever `saveGlyph` starts persisting a new field existing rows need.
+export const GLYPH_DECODE_VERSION = 1;
+
 type TxIdHeight = {
   tx_hash: string;
   height: number;
@@ -158,9 +167,14 @@ export class NFTWorker implements Subscription {
         const ref = reverseRef(refLE);
         scriptRefMap[txo.script] = ref;
         const glyph = ref && (await db.glyph.get({ ref }));
-        if (glyph) {
+        if (glyph && (glyph.dv ?? 0) >= GLYPH_DECODE_VERSION) {
           existingRefs[ref] = glyph;
         } else {
+          // New token, OR a known row from a decoder that predates the current
+          // GLYPH_DECODE_VERSION — re-decode so v2 covenant metadata
+          // (royalty/policy) is backfilled. saveGlyph preserves the existing
+          // row's identity + ownership state, so re-decoding an owned token
+          // can't make it vanish. Runs at most once per row (then `dv` is set).
           newRefs[ref] = txo;
         }
       }
@@ -457,8 +471,8 @@ export class NFTWorker implements Subscription {
         height > 0
           ? height
           : existing?.height !== undefined
-            ? existing.height
-            : Infinity;
+          ? existing.height
+          : Infinity;
 
       let txoId: number;
       if (existing?.id !== undefined) {
@@ -953,6 +967,7 @@ export class NFTWorker implements Subscription {
         : undefined;
     const name = toString(payload.name).substring(0, 80);
     const record: SmartToken = {
+      dv: GLYPH_DECODE_VERSION,
       p: protocols,
       ref,
       tokenType,
@@ -987,6 +1002,25 @@ export class NFTWorker implements Subscription {
         : {}),
     };
 
+    // Merge onto any existing row instead of inserting a duplicate (the `&ref`
+    // unique index would otherwise reject a re-decode). This makes saveGlyph
+    // idempotent so the metadata backfill (and fetchGlyph refresh) can re-run
+    // over a known token. When the re-decode has no received txo — fetchGlyph
+    // passes `undefined` — preserve the prior row's ownership/visibility state
+    // so an owned NFT isn't regressed to spent/unowned and vanish from the grid.
+    const prior = await db.glyph.get({ ref }).catch(() => undefined);
+    if (prior?.id !== undefined) {
+      record.id = prior.id;
+      if (prior.swapPending !== undefined)
+        record.swapPending = prior.swapPending;
+      record.fresh = prior.fresh; // don't re-flash the "fresh mint" state
+      if (!receivedTxo) {
+        record.spent = prior.spent;
+        record.height = prior.height;
+        record.lastTxoId = prior.lastTxoId;
+        record.location = prior.location ?? record.location;
+      }
+    }
     record.id = (await db.glyph.put(record)) as number;
 
     return {

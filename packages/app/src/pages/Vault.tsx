@@ -55,6 +55,7 @@ import ContentContainer from "@app/components/ContentContainer";
 import NoContent from "@app/components/NoContent";
 import Photons from "@app/components/Photons";
 import VaultDetailModal from "@app/components/VaultDetailModal";
+import { saveFile } from "@app/platform";
 import { wallet, feeRate, openModal } from "@app/signals";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -1367,17 +1368,11 @@ export default function VaultPage() {
         address: wallet.value.address,
         vaults: all,
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `photonic-vaults-${new Date()
-        .toISOString()
-        .slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await saveFile(
+        `photonic-vaults-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(payload, null, 2),
+        "application/json",
+      );
       toast({
         title: t`Vault list exported`,
         description: t`${all.length} vault(s) saved. Keep this file with your recovery phrase.`,

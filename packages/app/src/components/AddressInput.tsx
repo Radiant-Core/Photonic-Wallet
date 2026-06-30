@@ -1,6 +1,7 @@
-import { PropsWithChildren } from "react";
+import { PropsWithChildren, useState } from "react";
 import { Scanner } from "@yudiel/react-qr-scanner";
-import { Box, Button, ModalBody, ModalFooter } from "@chakra-ui/react";
+import { Box, Button, HStack, ModalBody, ModalFooter } from "@chakra-ui/react";
+import { canScanFromPhoto, scanQrFromPhoto } from "@app/platform";
 
 export default function AddressInput({
   onScan,
@@ -12,6 +13,20 @@ export default function AddressInput({
   onScan: (value: string) => void;
   onClose: () => void;
 }>) {
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  // Native fallback: when the live camera scanner is denied/unavailable, let
+  // the user pick or snap a still photo of the QR and decode it (jsQR).
+  const scanFromPhoto = async () => {
+    setPhotoBusy(true);
+    try {
+      const value = await scanQrFromPhoto();
+      if (value) onScan(value);
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   return (
     <>
       {open && (
@@ -22,7 +37,14 @@ export default function AddressInput({
             </Box>
           </ModalBody>
           <ModalFooter>
-            <Button onClick={() => onClose()}>{"Close"}</Button>
+            <HStack spacing={3}>
+              {canScanFromPhoto() && (
+                <Button onClick={scanFromPhoto} isLoading={photoBusy}>
+                  {"Scan from photo"}
+                </Button>
+              )}
+              <Button onClick={() => onClose()}>{"Close"}</Button>
+            </HStack>
           </ModalFooter>
         </>
       )}

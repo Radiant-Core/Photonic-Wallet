@@ -1,4 +1,5 @@
 import { Button, ButtonProps } from "@chakra-ui/react";
+import { saveFile } from "@app/platform";
 
 export default function DownloadLink({
   children,
@@ -11,24 +12,15 @@ export default function DownloadLink({
   filename: string;
   mimeType: string;
 } & ButtonProps) {
-  const downloadUint8ArrayAsFile = () => {
-    const blob = new Blob([data as BlobPart], { type: mimeType });
-    const blobUrl = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.style.display = "none";
-    a.href = blobUrl;
-    a.download = filename;
-
-    document.body.appendChild(a);
-    a.click();
-
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
+  // saveFile handles the platform split: a Blob + `<a download>` on web/Tauri,
+  // and a Filesystem write + share sheet inside the Capacitor WebView (where
+  // `<a download>` is a no-op).
+  const download = () => {
+    void saveFile(filename, data, mimeType);
   };
 
   return (
-    <Button onClick={downloadUint8ArrayAsFile} {...rest}>
+    <Button onClick={download} {...rest}>
       {children || "Download"}
     </Button>
   );

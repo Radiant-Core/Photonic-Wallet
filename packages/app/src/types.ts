@@ -210,6 +210,13 @@ export interface SmartToken {
   // soulbound policy without re-decoding the reveal.
   royalty?: GlyphV2Royalty;
   policy?: GlyphV2Policy;
+  // Decode version of the reveal-payload parser that produced this row. Rows
+  // written before v2 covenant metadata (royalty/policy) was decoded carry no
+  // `dv` (treated as 0); the NFT sync re-decodes them once to backfill the
+  // missing fields so the enforced-royalty listing path becomes available.
+  // Bump GLYPH_DECODE_VERSION (electrum/worker/NFT.ts) whenever the decode adds
+  // a persisted field that existing rows need backfilled.
+  dv?: number;
 }
 
 export interface Subscription {
