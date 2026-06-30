@@ -89,6 +89,7 @@ function ActivityTab() {
         txid: b.txid,
         description: b.description,
         timestamp: b.date,
+        amount: b.amount,
       }))
       .filter((item) => {
         const meta = classifyActivity(item.description);

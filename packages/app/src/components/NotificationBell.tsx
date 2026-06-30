@@ -32,6 +32,8 @@ import db from "@app/db";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { classifyActivity, relativeTime, shortTxid } from "@app/activity";
 import { lastSeen, markAllSeen } from "@app/notifications";
+import { photonsToRXD } from "@lib/format";
+import { network } from "@app/signals";
 
 const MAX_ITEMS = 8;
 
@@ -138,6 +140,18 @@ export default function NotificationBell() {
                       {shortTxid(b.txid)} · {relativeTime(b.date)}
                     </Text>
                   </Box>
+                  {b.amount != null && b.amount > 0 && (
+                    <Text
+                      flexShrink={0}
+                      fontSize="xs"
+                      fontWeight="600"
+                      color={meta.direction === "in" ? "green.300" : "red.300"}
+                      sx={{ fontVariantNumeric: "tabular-nums" }}
+                    >
+                      {meta.direction === "in" ? "+" : "−"}
+                      {photonsToRXD(b.amount)} {network.value.ticker}
+                    </Text>
+                  )}
                   <Link
                     href={createExplorerUrl(b.txid)}
                     isExternal

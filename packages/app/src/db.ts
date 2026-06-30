@@ -280,6 +280,14 @@ export class Database extends Dexie {
       };
 
       const txos = (await txoTable.toArray()) as TxO[];
+
+      // Sum values per txid so multi-output receives show the total.
+      const amounts = new Map<string, number>();
+      for (const txo of txos) {
+        if (txo.change !== 0) continue;
+        amounts.set(txo.txid, (amounts.get(txo.txid) ?? 0) + txo.value);
+      }
+
       const recorded = new Set<string>();
       for (const txo of txos) {
         if (txo.change !== 0) continue;
@@ -295,7 +303,12 @@ export class Database extends Dexie {
         if (await broadcastTable.get(txo.txid)) continue;
 
         recorded.add(txo.txid);
-        await broadcastTable.put({ txid: txo.txid, description, date });
+        await broadcastTable.put({
+          txid: txo.txid,
+          description,
+          date,
+          amount: amounts.get(txo.txid),
+        });
       }
     });
   }

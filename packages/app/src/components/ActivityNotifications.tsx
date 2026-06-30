@@ -22,6 +22,8 @@ import db from "@app/db";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { ExternalLinkIcon } from "@chakra-ui/icons";
 import { classifyActivity, shortTxid } from "@app/activity";
+import { photonsToRXD } from "@lib/format";
+import { network } from "@app/signals";
 
 // Map an activity direction to a Chakra toast status.
 const toastStatus = (
@@ -88,6 +90,17 @@ export default function ActivityNotifications() {
               <Text fontWeight="600" fontSize="sm">
                 {meta.label}
               </Text>
+              {broadcast.amount != null && broadcast.amount > 0 && (
+                <Text
+                  fontSize="sm"
+                  fontWeight="600"
+                  color={meta.direction === "in" ? "green.300" : "red.300"}
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {meta.direction === "in" ? "+" : "−"}
+                  {photonsToRXD(broadcast.amount)} {network.value.ticker}
+                </Text>
+              )}
               <Link
                 href={createExplorerUrl(broadcast.txid)}
                 isExternal

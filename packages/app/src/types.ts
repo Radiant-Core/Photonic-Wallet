@@ -167,6 +167,7 @@ export interface BroadcastResult {
   txid: string;
   description: string;
   date: number;
+  amount?: number;
 }
 
 // Tokens that follow Radiant Smart Token standard

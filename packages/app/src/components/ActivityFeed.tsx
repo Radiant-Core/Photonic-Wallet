@@ -17,12 +17,15 @@ import {
   shortTxid,
 } from "@app/activity";
 import createExplorerUrl from "@app/network/createExplorerUrl";
+import { photonsToRXD } from "@lib/format";
+import { network } from "@app/signals";
 
 export interface ActivityRow {
   id: string;
   txid: string;
   description?: string;
   timestamp: number;
+  amount?: number;
 }
 
 function Row({ item }: { item: ActivityRow }) {
@@ -75,6 +78,19 @@ function Row({ item }: { item: ActivityRow }) {
           </Tooltip>
         </HStack>
       </Box>
+
+      {item.amount != null && item.amount > 0 && (
+        <Text
+          flexShrink={0}
+          fontSize="sm"
+          fontWeight="600"
+          color={meta.direction === "in" ? "green.300" : "red.300"}
+          sx={{ fontVariantNumeric: "tabular-nums" }}
+        >
+          {meta.direction === "in" ? "+" : "−"}
+          {photonsToRXD(item.amount)} {network.value.ticker}
+        </Text>
+      )}
 
       <Tooltip label="View on explorer" placement="top">
         <IconButton

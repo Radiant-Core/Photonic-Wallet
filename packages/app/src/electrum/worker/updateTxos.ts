@@ -346,6 +346,13 @@ async function recordReceivedActivity(
   const description = receiveDescription(contractType);
   if (!description) return;
 
+  // Sum values per txid so a multi-output receive shows the total received.
+  const amounts = new Map<string, number>();
+  for (const txo of added) {
+    if (txo.change !== 0) continue;
+    amounts.set(txo.txid, (amounts.get(txo.txid) ?? 0) + txo.value);
+  }
+
   const seen = new Set<string>();
   for (const txo of added) {
     if (txo.change !== 0) continue; // skip our own change outputs
@@ -370,7 +377,12 @@ async function recordReceivedActivity(
       }
     }
 
-    await db.broadcast.put({ txid: txo.txid, description, date });
+    await db.broadcast.put({
+      txid: txo.txid,
+      description,
+      date,
+      amount: amounts.get(txo.txid),
+    });
   }
 }
 

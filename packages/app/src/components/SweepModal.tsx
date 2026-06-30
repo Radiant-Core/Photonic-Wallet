@@ -260,7 +260,7 @@ export default function SweepModal({ disclosure, onSuccess }: Props) {
         pendingTx.rawTx
       );
       const txid = broadcastTxid || pendingTx.txid;
-      db.broadcast.put({ txid, date: Date.now(), description: "sweep" });
+      db.broadcast.put({ txid, date: Date.now(), description: "sweep", amount: pendingTx.rxdSwept });
 
       await updateAfterBatchTransfer({
         ownAddress: wallet.value.address,

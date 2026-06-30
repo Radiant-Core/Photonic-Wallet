@@ -250,7 +250,7 @@ export default function SendRXD({ onSuccess, disclosure }: Props) {
       // broadcast() returns "" when the server already has the tx in a block;
       // fall back to the locally computed txid so records stay correct.
       const txid = broadcastTxid || pendingTx.txid;
-      db.broadcast.put({ txid, date: Date.now(), description: "rxd_send" });
+      db.broadcast.put({ txid, date: Date.now(), description: "rxd_send", amount: pendingTx.amount });
       console.debug("Result", txid);
 
       // Mark the spent coins and record change now that the tx is on the
