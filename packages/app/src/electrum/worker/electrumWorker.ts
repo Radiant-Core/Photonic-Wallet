@@ -240,6 +240,7 @@ const worker = {
     if (electrum.endpoint !== endpoint || address !== _address) {
       this.ready = true;
       address = _address;
+      registeredAddress = "";
       clearTimers();
       workerLog(`[Worker] Connecting to: ${endpoint}`);
       db.kvp.put(
@@ -826,6 +827,8 @@ function tryNextServer() {
   worker.connect(address);
 }
 
+let registeredAddress = "";
+
 electrum.addEvent("connected", () => {
   workerLog("[Worker] CONNECTED event received");
   clearTimers();
@@ -841,11 +844,21 @@ electrum.addEvent("connected", () => {
     workerLog("[Worker] Header subscription failed:", err);
   });
   if (address) {
+    // Skip re-registration if the WS client's onOpen resubscribe loop already
+    // handles this address — firing register() again sends duplicate subscribe
+    // requests that contribute to "excessive resource usage" throttling.
+    if (registeredAddress === address) {
+      workerLog("[Worker] Already registered address, skipping re-register:", address);
+      return;
+    }
+    registeredAddress = address;
     workerLog("[Worker] Connected, registering address:", address);
+    // Stagger registrations to avoid a burst of simultaneous subscribe
+    // requests that triggers server-side "excessive resource usage" throttling.
     rxd.register(address);
-    nft.register(address);
-    ft.register(address);
-    vault.register(address);
+    setTimeout(() => nft.register(address), 300);
+    setTimeout(() => ft.register(address), 600);
+    setTimeout(() => vault.register(address), 900);
   }
 });
 

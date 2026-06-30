@@ -29,6 +29,11 @@ export class RXDWorker implements Subscription {
   // Backoff + circuit breaker so a persistent failure neither hammers the
   // server in a tight loop nor spins the UI "syncing" forever (see syncRetry).
   protected retry = new SyncRetry();
+  // Set when the server throttled our subscribe with "excessive resource
+  // usage". Once tripped, future register() calls skip subscribe and go
+  // straight to manual sync (listunspent polling) — retrying the same
+  // subscribe on every reconnect just re-triggers the throttle.
+  protected subscribeFailed = false;
 
   constructor(worker: Worker, electrum: ElectrumManager) {
     this.worker = worker;
@@ -147,6 +152,23 @@ export class RXDWorker implements Subscription {
     this.scriptHash = p2pkhScriptHash(address as string);
     this.address = address;
 
+    // If the server previously throttled our subscribe with "excessive
+    // resource usage", don't retry it — go straight to manual sync.
+    if (this.subscribeFailed) {
+      console.debug("[RXD] Subscribe previously throttled, using manual sync");
+      try {
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
+        console.debug("[RXD] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[RXD] Manual fallback also failed:", fallbackError);
+      }
+      return;
+    }
+
     try {
       await this.electrum.client?.subscribe(
         "blockchain.scripthash",
@@ -154,10 +176,28 @@ export class RXDWorker implements Subscription {
         this.scriptHash
       );
     } catch (error) {
-      console.warn(
-        "[RXD] Subscription failed, falling back to manual sync:",
-        error
-      );
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("excessive resource usage")) {
+        console.warn(
+          "[RXD] Subscription throttled (excessive resource usage), switching to manual sync"
+        );
+        this.subscribeFailed = true;
+        // Remove from the WS client's subscription map so onOpen won't
+        // re-attempt the subscribe on reconnect.
+        try {
+          await this.electrum.client?.unsubscribe(
+            "blockchain.scripthash",
+            this.scriptHash
+          );
+        } catch {
+          // unsubscribe may fail if the subscription was never accepted — ignore
+        }
+      } else {
+        console.warn(
+          "[RXD] Subscription failed, falling back to manual sync:",
+          error
+        );
+      }
       try {
         await this.onSubscriptionReceived(
           this.scriptHash,

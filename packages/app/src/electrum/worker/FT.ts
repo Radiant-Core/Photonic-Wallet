@@ -212,6 +212,23 @@ export class FTWorker extends NFTWorker {
     this.scriptHash = ftScriptHash(address as string);
     this.address = address;
 
+    // If the server previously throttled our subscribe with "excessive
+    // resource usage", don't retry it — go straight to manual sync.
+    if (this.subscribeFailed) {
+      console.debug("[FT] Subscribe previously throttled, using manual sync");
+      try {
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
+        console.debug("[FT] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[FT] Manual fallback also failed:", fallbackError);
+      }
+      return;
+    }
+
     try {
       await this.electrum.client?.subscribe(
         "blockchain.scripthash",
@@ -219,10 +236,26 @@ export class FTWorker extends NFTWorker {
         this.scriptHash
       );
     } catch (error) {
-      console.warn(
-        "[FT] Subscription failed, falling back to manual sync:",
-        error
-      );
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("excessive resource usage")) {
+        console.warn(
+          "[FT] Subscription throttled (excessive resource usage), switching to manual sync"
+        );
+        this.subscribeFailed = true;
+        try {
+          await this.electrum.client?.unsubscribe(
+            "blockchain.scripthash",
+            this.scriptHash
+          );
+        } catch {
+          // unsubscribe may fail if the subscription was never accepted — ignore
+        }
+      } else {
+        console.warn(
+          "[FT] Subscription failed, falling back to manual sync:",
+          error
+        );
+      }
       // Subscription may fail for large histories, but listunspent still works
       try {
         await this.onSubscriptionReceived(

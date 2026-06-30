@@ -80,6 +80,11 @@ export class NFTWorker implements Subscription {
   // Backoff + circuit breaker shared by NFT and FT (FTWorker extends this) so a
   // persistent failure neither hammers the server nor spins "syncing" forever.
   protected retry = new SyncRetry();
+  // Set when the server throttled our subscribe with "excessive resource
+  // usage". Once tripped, future register() calls skip subscribe and go
+  // straight to manual sync — retrying on every reconnect re-triggers the
+  // throttle.
+  protected subscribeFailed = false;
   protected scriptHash = "";
 
   constructor(worker: Worker, electrum: ElectrumManager) {
@@ -671,6 +676,23 @@ export class NFTWorker implements Subscription {
     this.scriptHash = nftScriptHash(address as string);
     this.address = address;
 
+    // If the server previously throttled our subscribe with "excessive
+    // resource usage", don't retry it — go straight to manual sync.
+    if (this.subscribeFailed) {
+      console.debug("[NFT] Subscribe previously throttled, using manual sync");
+      try {
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
+        console.debug("[NFT] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[NFT] Manual fallback also failed:", fallbackError);
+      }
+      return;
+    }
+
     try {
       await this.electrum.client?.subscribe(
         "blockchain.scripthash",
@@ -678,7 +700,33 @@ export class NFTWorker implements Subscription {
         this.scriptHash
       );
     } catch (error) {
-      console.warn("[NFT] Subscription failed:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("excessive resource usage")) {
+        console.warn(
+          "[NFT] Subscription throttled (excessive resource usage), switching to manual sync"
+        );
+        this.subscribeFailed = true;
+        try {
+          await this.electrum.client?.unsubscribe(
+            "blockchain.scripthash",
+            this.scriptHash
+          );
+        } catch {
+          // unsubscribe may fail if the subscription was never accepted — ignore
+        }
+      } else {
+        console.warn("[NFT] Subscription failed:", error);
+      }
+      try {
+        await this.onSubscriptionReceived(
+          this.scriptHash,
+          "manual-fallback",
+          true
+        );
+        console.debug("[NFT] Manual fallback sync completed");
+      } catch (fallbackError) {
+        console.warn("[NFT] Manual fallback also failed:", fallbackError);
+      }
     }
   }
 

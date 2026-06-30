@@ -537,6 +537,20 @@ export class ElectrumWS extends Observable {
           continue;
         }
         this.subscribe(method, callback, ...parts).catch((error: Error) => {
+          const msg = error.message || "";
+          // "excessive resource usage" is a server-side throttle, not a state
+          // loss. Tearing the socket down kills every other worker's in-flight
+          // request and triggers a reconnect storm. The affected worker's
+          // manual fallback (listunspent polling) handles the failed subscribe.
+          if (msg.includes("excessive resource usage")) {
+            if (this.verbose) {
+              console.warn(
+                "ElectrumWS resubscribe throttled, keeping socket alive:",
+                msg
+              );
+            }
+            return;
+          }
           // A resubscribe failure means the server lost state (or rejected
           // our auth). Tear the socket down so the reconnect logic — or the
           // caller listening on CLOSE — sees the failure, rather than
@@ -545,7 +559,7 @@ export class ElectrumWS extends Observable {
             this.ws.readyState === WS_CONNECTING ||
             this.ws.readyState === WS_OPEN
           ) {
-            this.ws.close(CLOSE_CODE, error.message);
+            this.ws.close(CLOSE_CODE, msg);
           }
         });
       }
