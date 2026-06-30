@@ -26,7 +26,7 @@ export default class ElectrumManager {
     this.endpoint = endpoint;
     try {
       console.debug("[ElectrumManager] Creating new ElectrumWS client");
-      this.client = new ElectrumWS(endpoint);
+      this.client = new ElectrumWS(endpoint, { reconnect: false });
       console.debug("[ElectrumManager] ElectrumWS client created successfully");
     } catch (error) {
       console.error(

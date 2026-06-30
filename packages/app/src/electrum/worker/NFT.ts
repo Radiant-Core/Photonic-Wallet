@@ -683,22 +683,10 @@ export class NFTWorker implements Subscription {
       return;
     }
 
-    // If the server previously throttled our subscribe with "excessive
-    // resource usage", don't retry it — go straight to manual sync.
-    if (this.subscribeFailed) {
-      console.debug("[NFT] Subscribe previously throttled, using manual sync");
-      try {
-        await this.onSubscriptionReceived(
-          this.scriptHash,
-          "manual-fallback",
-          true
-        );
-        console.debug("[NFT] Manual fallback sync completed");
-      } catch (fallbackError) {
-        console.warn("[NFT] Manual fallback also failed:", fallbackError);
-      }
-      return;
-    }
+    // Reset the throttle flag — we're on a new server (isSubscribed() returned
+    // false because the new ElectrumWS instance has an empty subscription map).
+    // The new server doesn't have accumulated per-IP cost, so try subscribing.
+    this.subscribeFailed = false;
 
     try {
       await this.electrum.client?.subscribe(
