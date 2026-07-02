@@ -635,7 +635,18 @@ export class ElectrumWS extends Observable {
         const params = (obj as RpcRequest).params || [];
         const key = subscriptionKey(method, params);
         const callback = this.subscriptions.get(key);
-        if (callback) callback(...params);
+        if (callback) {
+          try {
+            const cbResult = callback(...params);
+            if (cbResult instanceof Promise) {
+              cbResult.catch((e) =>
+                console.warn("ElectrumWS subscription notification error:", e)
+              );
+            }
+          } catch (e) {
+            console.warn("ElectrumWS subscription notification error:", e);
+          }
+        }
       }
     }
   }

@@ -846,10 +846,10 @@ electrum.addEvent("connected", () => {
     // requests that triggers server-side "excessive resource usage" throttling.
     // Each worker's register() checks isSubscribed() to skip if the onOpen
     // resubscribe loop already handled it (reconnect with existing sub).
-    rxd.register(address);
-    setTimeout(() => nft.register(address), 300);
-    setTimeout(() => ft.register(address), 600);
-    setTimeout(() => vault.register(address), 900);
+    rxd.register(address).catch((err) => workerLog("[Worker] RXD register failed:", err));
+    setTimeout(() => nft.register(address).catch((err) => workerLog("[Worker] NFT register failed:", err)), 300);
+    setTimeout(() => ft.register(address).catch((err) => workerLog("[Worker] FT register failed:", err)), 600);
+    setTimeout(() => vault.register(address).catch((err) => workerLog("[Worker] Vault register failed:", err)), 900);
   }
 });
 

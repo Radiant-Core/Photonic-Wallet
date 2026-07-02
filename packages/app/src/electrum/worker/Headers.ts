@@ -191,7 +191,7 @@ export class HeadersSubscription implements Subscription {
     // Get the latest block from the database, otherwise checkpoint will be used
     this.latestBlock = await this.getLatestBlock();
 
-    this.electrum.client?.subscribe("blockchain.headers", (response) => {
+    await this.electrum.client?.subscribe("blockchain.headers", (response) => {
       const raw = response as ElectrumHeaderResponse;
       const header = RadJSBlockHeader.fromString(raw.hex);
       const { height } = raw;
