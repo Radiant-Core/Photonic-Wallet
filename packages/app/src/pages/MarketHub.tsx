@@ -34,7 +34,7 @@ import {
   useToast,
   VStack,
 } from "@chakra-ui/react";
-import { MdRefresh, MdOutlineSwapHoriz } from "react-icons/md";
+import { MdRefresh, MdOutlineSwapHoriz, MdArrowUpward, MdArrowDownward } from "react-icons/md";
 import { TbTagOff } from "react-icons/tb";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -521,23 +521,64 @@ export default function MarketHub() {
     [tokenGlyphFor]
   );
 
+  // ── Column sorting ──
+  type SortKey = "item" | "price" | "amount" | "type";
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
   const visible: UnifiedListing[] = useMemo(() => {
     const all: UnifiedListing[] = [...royaltyListings, ...swapListings];
-    if (filter === "all") return all;
-    if (filter === "royalty") return all.filter((l) => l.kind === "royalty");
-    return all.filter((l) => {
-      if (l.kind === "royalty") {
-        const g = glyphByRef.get(l.ref);
-        if (filter === "names") return !!g && isWaveNameGlyph(g);
-        return filter === "nft"; // royalty listings are NFT sales
+    let filtered = all;
+    if (filter !== "all") {
+      if (filter === "royalty") {
+        filtered = all.filter((l) => l.kind === "royalty");
+      } else {
+        filtered = all.filter((l) => {
+          if (l.kind === "royalty") {
+            const g = glyphByRef.get(l.ref);
+            if (filter === "names") return !!g && isWaveNameGlyph(g);
+            return filter === "nft";
+          }
+          const kind = swapAssetKind(l);
+          if (filter === "ft") return kind === "ft";
+          if (filter === "nft") return kind === "nft";
+          if (filter === "names") return kind === "name";
+          return false;
+        });
       }
-      const kind = swapAssetKind(l);
-      if (filter === "ft") return kind === "ft";
-      if (filter === "nft") return kind === "nft";
-      if (filter === "names") return kind === "name";
-      return false;
+    }
+    if (!sortKey) return filtered;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "price") {
+        const pa = a.kind === "royalty" ? a.price : a.order.price;
+        const pb = b.kind === "royalty" ? b.price : b.order.price;
+        cmp = pa - pb;
+      } else if (sortKey === "amount") {
+        const aa = a.kind === "royalty" ? 1 : a.order.remaining_amount;
+        const ab = b.kind === "royalty" ? 1 : b.order.remaining_amount;
+        cmp = aa - ab;
+      } else if (sortKey === "type") {
+        const ta = a.kind === "royalty" ? 0 : a.side === "buy" ? 1 : 2;
+        const tb = b.kind === "royalty" ? 0 : b.side === "buy" ? 1 : 2;
+        cmp = ta - tb;
+      } else if (sortKey === "item") {
+        const na = a.kind === "royalty" ? (a.name || a.ref) : (a.order.base_ticker || a.baseRef || "");
+        const nb = b.kind === "royalty" ? (b.name || b.ref) : (b.order.base_ticker || b.baseRef || "");
+        cmp = na.localeCompare(nb);
+      }
+      return cmp * dir;
     });
-  }, [filter, royaltyListings, swapListings, swapAssetKind, glyphByRef]);
+  }, [filter, royaltyListings, swapListings, swapAssetKind, glyphByRef, sortKey, sortDir]);
 
   // ── Virtualized list ──
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -758,24 +799,67 @@ export default function MarketHub() {
                   color="text.muted"
                   textTransform="uppercase"
                   letterSpacing="0.05em"
-                  gap={3}
+                  gap={2}
                 >
-                  <Box flex={1} minW="100px">Item</Box>
-                  <Box flex={1} minW="100px">Price / For</Box>
-                  <Box
-                    flex="0 0 80px"
-                    display={{ base: "none", sm: "block" }}
+                  <Flex
+                    flex={1}
+                    minW="100px"
+                    align="center"
+                    cursor="pointer"
+                    userSelect="none"
+                    _hover={{ color: "text.primary" }}
+                    onClick={() => toggleSort("item")}
                   >
-                    Amount
-                  </Box>
-                  <Box
+                    Item
+                    {sortKey === "item" && (
+                      <Icon as={sortDir === "asc" ? MdArrowUpward : MdArrowDownward} boxSize={3} ml={1} />
+                    )}
+                  </Flex>
+                  <Flex
+                    flex={1}
+                    minW="100px"
+                    align="center"
+                    cursor="pointer"
+                    userSelect="none"
+                    _hover={{ color: "text.primary" }}
+                    onClick={() => toggleSort("price")}
+                  >
+                    Price / For
+                    {sortKey === "price" && (
+                      <Icon as={sortDir === "asc" ? MdArrowUpward : MdArrowDownward} boxSize={3} ml={1} />
+                    )}
+                  </Flex>
+                  <Flex
                     flex={1}
                     minW="80px"
-                    display={{ base: "none", md: "block" }}
+                    align="center"
+                    cursor="pointer"
+                    userSelect="none"
+                    _hover={{ color: "text.primary" }}
+                    onClick={() => toggleSort("amount")}
+                    display={{ base: "none", sm: "flex" }}
+                  >
+                    Amount
+                    {sortKey === "amount" && (
+                      <Icon as={sortDir === "asc" ? MdArrowUpward : MdArrowDownward} boxSize={3} ml={1} />
+                    )}
+                  </Flex>
+                  <Flex
+                    flex={1}
+                    minW="80px"
+                    align="center"
+                    cursor="pointer"
+                    userSelect="none"
+                    _hover={{ color: "text.primary" }}
+                    onClick={() => toggleSort("type")}
+                    display={{ base: "none", md: "flex" }}
                   >
                     Type
-                  </Box>
-                  <Box flex="0 0 90px" textAlign="right"></Box>
+                    {sortKey === "type" && (
+                      <Icon as={sortDir === "asc" ? MdArrowUpward : MdArrowDownward} boxSize={3} ml={1} />
+                    )}
+                  </Flex>
+                  <Box flex={1} minW="80px" textAlign="right"></Box>
                 </Flex>
 
                 {/* Virtualized scroll container */}
@@ -818,7 +902,7 @@ export default function MarketHub() {
                               py={2}
                               align="center"
                               height="100%"
-                              gap={3}
+                              gap={2}
                             >
                               <Box flex={1} minW="100px">
                                 <AssetLabel
@@ -846,7 +930,8 @@ export default function MarketHub() {
                                 </VStack>
                               </Box>
                               <Box
-                                flex="0 0 80px"
+                                flex={1}
+                                minW="80px"
                                 display={{ base: "none", sm: "block" }}
                               >
                                 <Text
@@ -863,7 +948,7 @@ export default function MarketHub() {
                               >
                                 <MechanismBadge mechanism="royalty" />
                               </Box>
-                              <Box flex="0 0 90px" textAlign="right">
+                              <Box flex={1} minW="80px" textAlign="right">
                                 {l.mine ? (
                                   <Badge colorScheme="gray">Yours</Badge>
                                 ) : (
@@ -901,7 +986,7 @@ export default function MarketHub() {
                                   py={2}
                                   align="center"
                                   height="100%"
-                                  gap={3}
+                                  gap={2}
                                 >
                                   <Box flex={1} minW="100px">
                                     {isBuy ? quoteCell : tokenCell}
@@ -918,7 +1003,8 @@ export default function MarketHub() {
                                     </HStack>
                                   </Box>
                                   <Box
-                                    flex="0 0 80px"
+                                    flex={1}
+                                    minW="80px"
                                     display={{ base: "none", sm: "block" }}
                                   >
                                     <VStack align="start" spacing={0}>
@@ -926,7 +1012,7 @@ export default function MarketHub() {
                                         fontSize="sm"
                                         sx={{ fontVariantNumeric: "tabular-nums" }}
                                       >
-                                        {isBuy
+                                        {l.baseRef === null
                                           ? `${photonsToRXD(l.order.remaining_amount)} RXD`
                                           : l.order.remaining_amount.toLocaleString()}
                                       </Text>
@@ -962,7 +1048,7 @@ export default function MarketHub() {
                                       </Badge>
                                     </HStack>
                                   </Box>
-                                  <Box flex="0 0 90px" textAlign="right">
+                                  <Box flex={1} minW="80px" textAlign="right">
                                     <Tooltip
                                       label={
                                         orderTokenId(l)
