@@ -27,22 +27,17 @@ import {
   Icon,
   Image,
   Skeleton,
-  Table,
-  Tbody,
-  Td,
   Text,
   Textarea,
-  Th,
-  Thead,
   Tooltip,
-  Tr,
   useClipboard,
   useToast,
   VStack,
 } from "@chakra-ui/react";
 import { MdRefresh, MdOutlineSwapHoriz } from "react-icons/md";
 import { TbTagOff } from "react-icons/tb";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import Card from "@app/components/Card";
@@ -278,6 +273,8 @@ export default function MarketHub() {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [hasMoreRoyalties, setHasMoreRoyalties] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [buyInput, setBuyInput] = useState("");
   const [buying, setBuying] = useState(false);
   const [buyingKey, setBuyingKey] = useState<string | null>(null);
@@ -391,17 +388,37 @@ export default function MarketHub() {
 
   // Cross-seller royalty listings from the indexer (royalty index, default OFF on
   // prod until deployed → returns [] and we fall back to local/descriptor only).
-  const fetchRoyalties = useCallback(async () => {
+  const fetchRoyalties = useCallback(async (offset: number) => {
     try {
-      setRoyaltyFeed(await electrumWorker.value.getRoyaltyListings(200, 0));
+      const page = await electrumWorker.value.getRoyaltyListings(
+        PAGE_SIZE,
+        offset
+      );
+      setRoyaltyFeed((prev) => {
+        const base = offset === 0 ? [] : prev;
+        const seen = new Set(
+          base.map((r) => `${r.txid}:${r.vout}`)
+        );
+        const merged = [...base];
+        for (const r of page) {
+          const k = `${r.txid}:${r.vout}`;
+          if (!seen.has(k)) {
+            seen.add(k);
+            merged.push(r);
+          }
+        }
+        return merged;
+      });
+      setHasMoreRoyalties(page.length >= PAGE_SIZE);
     } catch {
-      setRoyaltyFeed([]);
+      if (offset === 0) setRoyaltyFeed([]);
+      setHasMoreRoyalties(false);
     }
   }, []);
 
   const refreshAll = useCallback(() => {
     fetchPage(0);
-    fetchRoyalties();
+    fetchRoyalties(0);
   }, [fetchPage, fetchRoyalties]);
 
   useEffect(() => {
@@ -521,6 +538,45 @@ export default function MarketHub() {
       return false;
     });
   }, [filter, royaltyListings, swapListings, swapAssetKind, glyphByRef]);
+
+  // ── Virtualized list ──
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 56,
+    overscan: 8,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+  const lastVisibleIndex =
+    virtualItems.length > 0
+      ? virtualItems[virtualItems.length - 1].index
+      : 0;
+
+  // Infinite scroll: auto-load more data when the user nears the bottom.
+  useEffect(() => {
+    if (lastVisibleIndex < visible.length - 4) return;
+    if (loading || loadingMore) return;
+    if (hasMore) {
+      setLoadingMore(true);
+      fetchPage(orders.length).finally(() => setLoadingMore(false));
+    }
+    if (hasMoreRoyalties) {
+      setLoadingMore(true);
+      fetchRoyalties(royaltyFeed.length).finally(() => setLoadingMore(false));
+    }
+  }, [
+    lastVisibleIndex,
+    visible.length,
+    hasMore,
+    hasMoreRoyalties,
+    loading,
+    loadingMore,
+    fetchPage,
+    fetchRoyalties,
+    orders.length,
+    royaltyFeed.length,
+  ]);
 
   const openSwap = (l: UnifiedSwapListing) => {
     // Deep-link with the SWAP token-id (base_ref's 64-hex) — the per-token book's
@@ -691,168 +747,215 @@ export default function MarketHub() {
                 No active listings
               </NoContent>
             ) : (
-              <Box overflowX="auto">
-                <Table size="sm">
-                  <Thead bg="surface.sunken">
-                    <Tr>
-                      <Th textStyle="label">Item</Th>
-                      <Th textStyle="label">Price / For</Th>
-                      <Th
-                        textStyle="label"
-                        display={{ base: "none", md: "table-cell" }}
-                      >
-                        Type
-                      </Th>
-                      <Th></Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {visible.map((l) =>
-                      l.kind === "royalty" ? (
-                        <Tr
+              <Box>
+                {/* Header row */}
+                <Flex
+                  px={4}
+                  py={2}
+                  bg="surface.sunken"
+                  fontSize="xs"
+                  fontWeight="medium"
+                  color="text.muted"
+                  textTransform="uppercase"
+                  letterSpacing="0.05em"
+                >
+                  <Box flex={1} minW="120px">Item</Box>
+                  <Box flex={1} minW="120px">Price / For</Box>
+                  <Box
+                    flex={1}
+                    minW="100px"
+                    display={{ base: "none", md: "block" }}
+                  >
+                    Type
+                  </Box>
+                  <Box w="90px" textAlign="right"></Box>
+                </Flex>
+
+                {/* Virtualized scroll container */}
+                <Box
+                  ref={scrollRef}
+                  maxH="600px"
+                  overflowY="auto"
+                  sx={{
+                    "&::-webkit-scrollbar": { width: "8px" },
+                    "&::-webkit-scrollbar-thumb": {
+                      bg: "border.subtle",
+                      borderRadius: "4px",
+                    },
+                  }}
+                >
+                  <Box
+                    height={`${virtualizer.getTotalSize()}px`}
+                    position="relative"
+                    width="100%"
+                  >
+                    {virtualItems.map((virtualItem) => {
+                      const l = visible[virtualItem.index];
+                      if (!l) return null;
+                      return (
+                        <Box
                           key={l.key}
+                          position="absolute"
+                          top={0}
+                          left={0}
+                          width="100%"
+                          height={`${virtualItem.size}px`}
+                          transform={`translateY(${virtualItem.start}px)`}
                           borderTopWidth="1px"
                           borderColor="border.subtle"
                           _hover={{ bg: "bg.50" }}
                         >
-                          <Td>
-                            <AssetLabel
-                              displayRef={l.ref}
-                              glyph={glyphByRef.get(l.ref)}
-                            />
-                          </Td>
-                          <Td>
-                            <VStack align="start" spacing={0}>
-                              <Text
-                                fontWeight="medium"
-                                sx={{ fontVariantNumeric: "tabular-nums" }}
-                              >
-                                {photonsToRXD(l.price)} RXD
-                              </Text>
-                              {l.royaltyTotal > 0 && (
-                                <Text
-                                  fontSize="xs"
-                                  color="text.muted"
-                                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                                >
-                                  +{photonsToRXD(l.royaltyTotal)} royalty
-                                </Text>
-                              )}
-                            </VStack>
-                          </Td>
-                          <Td display={{ base: "none", md: "table-cell" }}>
-                            <MechanismBadge mechanism="royalty" />
-                          </Td>
-                          <Td textAlign="right">
-                            {l.mine ? (
-                              <Badge colorScheme="gray">Yours</Badge>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="subtle"
-                                onClick={() => buyRoyalty(l)}
-                                isLoading={buyingKey === l.key}
-                              >
-                                Buy
-                              </Button>
-                            )}
-                          </Td>
-                        </Tr>
-                      ) : (
-                        (() => {
-                          // The index normalises pair refs token-as-base: base_ref
-                          // is the token, quote is RXD. Side decides which column
-                          // the token sits in — a SELL offers the token (wants RXD),
-                          // a BUY offers RXD (wants the token).
-                          const isBuy = l.side === "buy";
-                          const tokenCell = (
-                            <AssetLabel
-                              displayRef={l.baseRef}
-                              ticker={l.order.base_ticker}
-                              glyph={tokenGlyphFor(l)}
-                            />
-                          );
-                          const quoteCell = (
-                            <AssetLabel
-                              displayRef={l.quoteRef}
-                              ticker={l.order.quote_ticker}
-                              glyph={quoteGlyphFor(l)}
-                            />
-                          );
-                          return (
-                            <Tr
-                              key={l.key}
-                              borderTopWidth="1px"
-                              borderColor="border.subtle"
-                              _hover={{ bg: "bg.50" }}
+                          {l.kind === "royalty" ? (
+                            <Flex
+                              px={4}
+                              py={2}
+                              align="center"
+                              height="100%"
+                              gap={3}
                             >
-                              <Td>{isBuy ? quoteCell : tokenCell}</Td>
-                              <Td>
-                                <HStack spacing={2} minW={0}>
-                                  <Icon
-                                    as={MdOutlineSwapHoriz}
-                                    boxSize={4}
-                                    color="text.muted"
-                                    display={{ base: "none", sm: "inline" }}
-                                  />
-                                  {isBuy ? tokenCell : quoteCell}
-                                </HStack>
-                              </Td>
-                              <Td display={{ base: "none", md: "table-cell" }}>
-                                <HStack spacing={1}>
-                                  <MechanismBadge mechanism="swap" />
-                                  <Badge
-                                    colorScheme={isBuy ? "green" : "orange"}
-                                    variant="subtle"
+                              <Box flex={1} minW="120px">
+                                <AssetLabel
+                                  displayRef={l.ref}
+                                  glyph={glyphByRef.get(l.ref)}
+                                />
+                              </Box>
+                              <Box flex={1} minW="120px">
+                                <VStack align="start" spacing={0}>
+                                  <Text
+                                    fontWeight="medium"
+                                    sx={{ fontVariantNumeric: "tabular-nums" }}
                                   >
-                                    {isBuy ? "Buy" : "Sell"}
-                                  </Badge>
-                                  <Badge
-                                    colorScheme={statusColor(l.status)}
-                                    variant="subtle"
-                                  >
-                                    {l.status}
-                                  </Badge>
-                                </HStack>
-                              </Td>
-                              <Td textAlign="right">
-                                <Tooltip
-                                  label={
-                                    orderTokenId(l)
-                                      ? "Open this token's order book to view exact terms and buy"
-                                      : "RXD-only order"
-                                  }
-                                >
+                                    {photonsToRXD(l.price)} RXD
+                                  </Text>
+                                  {l.royaltyTotal > 0 && (
+                                    <Text
+                                      fontSize="xs"
+                                      color="text.muted"
+                                      sx={{ fontVariantNumeric: "tabular-nums" }}
+                                    >
+                                      +{photonsToRXD(l.royaltyTotal)} royalty
+                                    </Text>
+                                  )}
+                                </VStack>
+                              </Box>
+                              <Box
+                                flex={1}
+                                minW="100px"
+                                display={{ base: "none", md: "block" }}
+                              >
+                                <MechanismBadge mechanism="royalty" />
+                              </Box>
+                              <Box w="90px" textAlign="right">
+                                {l.mine ? (
+                                  <Badge colorScheme="gray">Yours</Badge>
+                                ) : (
                                   <Button
                                     size="sm"
-                                    variant="outline"
-                                    isDisabled={!orderTokenId(l)}
-                                    onClick={() => openSwap(l)}
+                                    variant="subtle"
+                                    onClick={() => buyRoyalty(l)}
+                                    isLoading={buyingKey === l.key}
                                   >
-                                    View / Buy
+                                    Buy
                                   </Button>
-                                </Tooltip>
-                              </Td>
-                            </Tr>
-                          );
-                        })()
-                      )
-                    )}
-                  </Tbody>
-                </Table>
-              </Box>
-            )}
+                                )}
+                              </Box>
+                            </Flex>
+                          ) : (
+                            (() => {
+                              const isBuy = l.side === "buy";
+                              const tokenCell = (
+                                <AssetLabel
+                                  displayRef={l.baseRef}
+                                  ticker={l.order.base_ticker}
+                                  glyph={tokenGlyphFor(l)}
+                                />
+                              );
+                              const quoteCell = (
+                                <AssetLabel
+                                  displayRef={l.quoteRef}
+                                  ticker={l.order.quote_ticker}
+                                  glyph={quoteGlyphFor(l)}
+                                />
+                              );
+                              return (
+                                <Flex
+                                  px={4}
+                                  py={2}
+                                  align="center"
+                                  height="100%"
+                                  gap={3}
+                                >
+                                  <Box flex={1} minW="120px">
+                                    {isBuy ? quoteCell : tokenCell}
+                                  </Box>
+                                  <Box flex={1} minW="120px">
+                                    <HStack spacing={2} minW={0}>
+                                      <Icon
+                                        as={MdOutlineSwapHoriz}
+                                        boxSize={4}
+                                        color="text.muted"
+                                        display={{ base: "none", sm: "inline" }}
+                                      />
+                                      {isBuy ? tokenCell : quoteCell}
+                                    </HStack>
+                                  </Box>
+                                  <Box
+                                    flex={1}
+                                    minW="100px"
+                                    display={{ base: "none", md: "block" }}
+                                  >
+                                    <HStack spacing={1}>
+                                      <MechanismBadge mechanism="swap" />
+                                      <Badge
+                                        colorScheme={isBuy ? "green" : "orange"}
+                                        variant="subtle"
+                                      >
+                                        {isBuy ? "Buy" : "Sell"}
+                                      </Badge>
+                                      <Badge
+                                        colorScheme={statusColor(l.status)}
+                                        variant="subtle"
+                                      >
+                                        {l.status}
+                                      </Badge>
+                                    </HStack>
+                                  </Box>
+                                  <Box w="90px" textAlign="right">
+                                    <Tooltip
+                                      label={
+                                        orderTokenId(l)
+                                          ? "Open this token's order book to view exact terms and buy"
+                                          : "RXD-only order"
+                                      }
+                                    >
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        isDisabled={!orderTokenId(l)}
+                                        onClick={() => openSwap(l)}
+                                      >
+                                        View / Buy
+                                      </Button>
+                                    </Tooltip>
+                                  </Box>
+                                </Flex>
+                              );
+                            })()
+                          )}
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
 
-            {hasMore && !empty && (
-              <Box p={4} textAlign="center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => fetchPage(orders.length)}
-                  isLoading={loading && orders.length > 0}
-                >
-                  Load More
-                </Button>
+                {/* Loading indicator for infinite scroll */}
+                {(loadingMore || (loading && visible.length > 0)) && (
+                  <Box p={4} textAlign="center">
+                    <Text fontSize="sm" color="text.muted">
+                      Loading more…
+                    </Text>
+                  </Box>
+                )}
               </Box>
             )}
           </Card>
