@@ -762,6 +762,13 @@ export default function MarketHub() {
                   <Box flex={1} minW="120px">Item</Box>
                   <Box flex={1} minW="120px">Price / For</Box>
                   <Box
+                    flex="0 0 90px"
+                    minW="70px"
+                    display={{ base: "none", sm: "block" }}
+                  >
+                    Amount
+                  </Box>
+                  <Box
                     flex={1}
                     minW="100px"
                     display={{ base: "none", md: "block" }}
@@ -839,6 +846,18 @@ export default function MarketHub() {
                                 </VStack>
                               </Box>
                               <Box
+                                flex="0 0 90px"
+                                minW="70px"
+                                display={{ base: "none", sm: "block" }}
+                              >
+                                <Text
+                                  fontSize="sm"
+                                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                                >
+                                  1
+                                </Text>
+                              </Box>
+                              <Box
                                 flex={1}
                                 minW="100px"
                                 display={{ base: "none", md: "block" }}
@@ -898,6 +917,29 @@ export default function MarketHub() {
                                       />
                                       {isBuy ? tokenCell : quoteCell}
                                     </HStack>
+                                  </Box>
+                                  <Box
+                                    flex="0 0 90px"
+                                    minW="70px"
+                                    display={{ base: "none", sm: "block" }}
+                                  >
+                                    <VStack align="start" spacing={0}>
+                                      <Text
+                                        fontSize="sm"
+                                        sx={{ fontVariantNumeric: "tabular-nums" }}
+                                      >
+                                        {l.order.remaining_amount.toLocaleString()}
+                                      </Text>
+                                      {l.order.filled_amount > 0 && (
+                                        <Text
+                                          fontSize="xs"
+                                          color="text.muted"
+                                          sx={{ fontVariantNumeric: "tabular-nums" }}
+                                        >
+                                          {l.order.percent_filled}% filled
+                                        </Text>
+                                      )}
+                                    </VStack>
                                   </Box>
                                   <Box
                                     flex={1}
