@@ -758,24 +758,24 @@ export default function MarketHub() {
                   color="text.muted"
                   textTransform="uppercase"
                   letterSpacing="0.05em"
+                  gap={3}
                 >
-                  <Box flex={1} minW="120px">Item</Box>
-                  <Box flex={1} minW="120px">Price / For</Box>
+                  <Box flex={1} minW="100px">Item</Box>
+                  <Box flex={1} minW="100px">Price / For</Box>
                   <Box
-                    flex="0 0 90px"
-                    minW="70px"
+                    flex="0 0 80px"
                     display={{ base: "none", sm: "block" }}
                   >
                     Amount
                   </Box>
                   <Box
                     flex={1}
-                    minW="100px"
+                    minW="80px"
                     display={{ base: "none", md: "block" }}
                   >
                     Type
                   </Box>
-                  <Box w="90px" textAlign="right"></Box>
+                  <Box flex="0 0 90px" textAlign="right"></Box>
                 </Flex>
 
                 {/* Virtualized scroll container */}
@@ -820,13 +820,13 @@ export default function MarketHub() {
                               height="100%"
                               gap={3}
                             >
-                              <Box flex={1} minW="120px">
+                              <Box flex={1} minW="100px">
                                 <AssetLabel
                                   displayRef={l.ref}
                                   glyph={glyphByRef.get(l.ref)}
                                 />
                               </Box>
-                              <Box flex={1} minW="120px">
+                              <Box flex={1} minW="100px">
                                 <VStack align="start" spacing={0}>
                                   <Text
                                     fontWeight="medium"
@@ -846,8 +846,7 @@ export default function MarketHub() {
                                 </VStack>
                               </Box>
                               <Box
-                                flex="0 0 90px"
-                                minW="70px"
+                                flex="0 0 80px"
                                 display={{ base: "none", sm: "block" }}
                               >
                                 <Text
@@ -859,12 +858,12 @@ export default function MarketHub() {
                               </Box>
                               <Box
                                 flex={1}
-                                minW="100px"
+                                minW="80px"
                                 display={{ base: "none", md: "block" }}
                               >
                                 <MechanismBadge mechanism="royalty" />
                               </Box>
-                              <Box w="90px" textAlign="right">
+                              <Box flex="0 0 90px" textAlign="right">
                                 {l.mine ? (
                                   <Badge colorScheme="gray">Yours</Badge>
                                 ) : (
@@ -904,10 +903,10 @@ export default function MarketHub() {
                                   height="100%"
                                   gap={3}
                                 >
-                                  <Box flex={1} minW="120px">
+                                  <Box flex={1} minW="100px">
                                     {isBuy ? quoteCell : tokenCell}
                                   </Box>
-                                  <Box flex={1} minW="120px">
+                                  <Box flex={1} minW="100px">
                                     <HStack spacing={2} minW={0}>
                                       <Icon
                                         as={MdOutlineSwapHoriz}
@@ -919,8 +918,7 @@ export default function MarketHub() {
                                     </HStack>
                                   </Box>
                                   <Box
-                                    flex="0 0 90px"
-                                    minW="70px"
+                                    flex="0 0 80px"
                                     display={{ base: "none", sm: "block" }}
                                   >
                                     <VStack align="start" spacing={0}>
@@ -928,7 +926,9 @@ export default function MarketHub() {
                                         fontSize="sm"
                                         sx={{ fontVariantNumeric: "tabular-nums" }}
                                       >
-                                        {l.order.remaining_amount.toLocaleString()}
+                                        {isBuy
+                                          ? `${photonsToRXD(l.order.remaining_amount)} RXD`
+                                          : l.order.remaining_amount.toLocaleString()}
                                       </Text>
                                       {l.order.filled_amount > 0 && (
                                         <Text
@@ -943,7 +943,7 @@ export default function MarketHub() {
                                   </Box>
                                   <Box
                                     flex={1}
-                                    minW="100px"
+                                    minW="80px"
                                     display={{ base: "none", md: "block" }}
                                   >
                                     <HStack spacing={1}>
@@ -962,7 +962,7 @@ export default function MarketHub() {
                                       </Badge>
                                     </HStack>
                                   </Box>
-                                  <Box w="90px" textAlign="right">
+                                  <Box flex="0 0 90px" textAlign="right">
                                     <Tooltip
                                       label={
                                         orderTokenId(l)
