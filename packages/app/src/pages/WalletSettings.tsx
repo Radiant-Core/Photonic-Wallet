@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Center,
@@ -49,7 +49,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { PromiseExtended } from "dexie";
 import { electrumWorker } from "@app/electrum/Electrum";
 import { discoverAll } from "@app/walletSync";
-import { canShare, shareText } from "@app/platform";
+import { canShare, shareText, copyText, readTextOrNull } from "@app/platform";
 import {
   autoLockMs,
   clampAutoLockMs,
@@ -167,13 +167,123 @@ function PublicKeyField({
   );
 }
 
+const WIF_CLIPBOARD_CLEAR_MS = 45000;
+const COPIED_FLASH_MS = 1500;
+
+function WifField({ heading, value }: { heading: string; value: string }) {
+  const qr = useDisclosure();
+  const [hasCopied, setHasCopied] = useState(false);
+  const [cleared, setCleared] = useState(false);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
+  const handleCopy = () => {
+    void copyText(value)
+      .then(() => {
+        setHasCopied(true);
+        if (copiedTimer.current) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(
+          () => setHasCopied(false),
+          COPIED_FLASH_MS
+        );
+      })
+      .catch(() => {});
+
+    setCleared(false);
+    if (clearTimer.current) clearTimeout(clearTimer.current);
+    clearTimer.current = setTimeout(() => {
+      void (async () => {
+        const current = await readTextOrNull();
+        if (current === null || current === value) {
+          await copyText("").catch(() => {});
+        }
+        setCleared(true);
+      })();
+    }, WIF_CLIPBOARD_CLEAR_MS);
+  };
+
+  return (
+    <FormSection>
+      <Heading textStyle="h3">{heading}</Heading>
+      <VStack align="stretch" spacing={3} mt={3}>
+        <Code
+          p={2}
+          borderRadius="md"
+          fontSize="xs"
+          fontFamily="mono"
+          whiteSpace="pre-wrap"
+          wordBreak="break-all"
+          display="block"
+          bg="surface.sunken"
+        >
+          {value}
+        </Code>
+        <HStack spacing={2}>
+          <Button
+            size="xs"
+            variant="outline"
+            leftIcon={<Icon as={hasCopied ? MdCheck : MdContentCopy} />}
+            onClick={handleCopy}
+          >
+            {hasCopied ? "Copied!" : "Copy"}
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            leftIcon={<Icon as={MdQrCode} />}
+            onClick={qr.onToggle}
+          >
+            {qr.isOpen ? "Hide QR" : "Show QR"}
+          </Button>
+        </HStack>
+        {hasCopied && (
+          <Text fontSize="xs" color="orange.300" px={1}>
+            {cleared
+              ? "Clipboard cleared."
+              : `WIF copied to clipboard. It will be cleared automatically in about ${Math.round(
+                  WIF_CLIPBOARD_CLEAR_MS / 1000
+                )} seconds — paste it somewhere safe now.`}
+          </Text>
+        )}
+        <Collapse in={qr.isOpen} animateOpacity>
+          <Box
+            display="inline-flex"
+            p={3}
+            bg="white"
+            borderRadius="md"
+            borderWidth={1}
+            borderColor="whiteAlpha.300"
+          >
+            <QRCodeSVG value={value} size={160} level="M" includeMargin={false} />
+          </Box>
+        </Collapse>
+      </VStack>
+    </FormSection>
+  );
+}
+
 export default function WalletSettings() {
   const disclosure = useDisclosure();
   const sweepDisclosure = useDisclosure();
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [mnemonic, setMnemonic] = useState("");
-  const passwordSuccess = (walletMnemonic: string) => {
+  const [wif, setWif] = useState("");
+  const [swapWif, setSwapWif] = useState("");
+  const passwordSuccess = (
+    walletMnemonic: string,
+    walletWif: string,
+    walletSwapWif: string
+  ) => {
     setMnemonic(walletMnemonic as string);
+    setWif(walletWif);
+    setSwapWif(walletSwapWif);
     setShowMnemonic(true);
     disclosure.onClose();
   };
@@ -340,6 +450,24 @@ export default function WalletSettings() {
           onClose={disclosure.onClose}
         />
       </FormSection>
+
+      {showMnemonic && (wif || swapWif) && (
+        <FormSection>
+          <Heading textStyle="h3" mb={4}>
+            Private Keys (WIF)
+          </Heading>
+          <Text pt={2} pb={4} textStyle="small">
+            Your Wallet Import Format keys allow full control of the linked
+            address. Never share them with anyone.
+          </Text>
+          {wif && (
+            <WifField heading="Main WIF" value={wif} />
+          )}
+          {swapWif && (
+            <WifField heading="Swap WIF" value={swapWif} />
+          )}
+        </FormSection>
+      )}
 
       <FormSection>
         <Heading textStyle="h3">Manual Sync</Heading>
