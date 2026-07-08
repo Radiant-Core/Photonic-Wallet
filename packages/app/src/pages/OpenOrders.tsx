@@ -73,7 +73,7 @@ import db from "@app/db";
 import opfs from "@app/opfs";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { cancelSwap } from "@app/swap";
-import { photonsToRXD } from "@lib/format";
+import { photonsToRXD, formatAmountCompact } from "@lib/format";
 import {
   SwapOffer,
   assetToSwapTokenId,
@@ -219,6 +219,7 @@ interface ParsedOrder {
   offer: SwapOffer;
   offeredGlyph?: SmartToken;
   wantGlyph?: SmartToken;
+  offeredValue?: number;
   wantValue?: number;
   wantScript?: string;
   wantOutputs?: { script: string; value: number }[];
@@ -243,21 +244,44 @@ function formatCompactRxd(satoshis: number): string {
 function getPriceRatio(order: ParsedOrder): string | null {
   if (!order.wantValue || order.wantValue === 0) return null;
   if (order.offeredGlyph && !order.wantGlyph) {
-    // Token for RXD
+    // Token for RXD (sell order)
+    if (order.offeredValue && order.offeredValue > 0) {
+      if (order.offeredGlyph.tokenType === SmartTokenType.FT) {
+        const rxdPerToken = order.wantValue / order.offeredValue;
+        return `1 ${
+          order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
+        } = ${rxdPerToken.toFixed(8)} RXD`;
+      }
+    }
+    // NFT or unknown offered amount — show total price for 1 unit
     const rxdPerToken = order.wantValue / 100000000;
     return `1 ${
       order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
     } = ${rxdPerToken.toFixed(4)} RXD`;
   }
   if (!order.offeredGlyph && order.wantGlyph) {
-    // RXD for Token
-    const tokensPerRxd = 100000000 / order.wantValue;
-    return `1 RXD = ${tokensPerRxd.toFixed(4)} ${
+    // RXD for Token (buy order)
+    if (order.wantGlyph.tokenType === SmartTokenType.FT && order.wantValue > 0) {
+      if (order.offeredValue && order.offeredValue > 0) {
+        const tokensPerRxd = order.offeredValue / order.wantValue;
+        return `1 RXD = ${tokensPerRxd.toFixed(8)} ${
+          order.wantGlyph.ticker || order.wantGlyph.name || "Token"
+        }`;
+      }
+      // Fallback: assume 1 RXD offered if UTXO value not yet resolved
+      const tokensPerRxd = 100000000 / order.wantValue;
+      return `1 RXD = ${tokensPerRxd.toFixed(8)} ${
+        order.wantGlyph.ticker || order.wantGlyph.name || "Token"
+      }`;
+    }
+    // NFT
+    const rxdPrice = order.wantValue / 100000000;
+    return `${rxdPrice.toFixed(4)} RXD per ${
       order.wantGlyph.ticker || order.wantGlyph.name || "Token"
     }`;
   }
   if (order.offeredGlyph && order.wantGlyph) {
-    // Token for Token — actual amounts not yet available for FT
+    // Token for Token
     return `1 ${order.offeredGlyph.ticker || "Token"} ↔ ${
       order.wantGlyph.ticker || "Token"
     }`;
@@ -338,6 +362,30 @@ function TokenIcon({ glyph, size = 6 }: { glyph?: SmartToken; size?: number }) {
   );
 }
 
+function formatOfferedAmount(order: ParsedOrder): string {
+  const { offeredGlyph, offeredValue } = order;
+  if (!offeredValue) return "";
+  if (!offeredGlyph) {
+    return formatCompactRxd(offeredValue);
+  }
+  if (offeredGlyph.tokenType === SmartTokenType.FT) {
+    return `${formatAmountCompact(offeredValue)} ${offeredGlyph.ticker || offeredGlyph.name || "tokens"}`;
+  }
+  return offeredGlyph.name || "NFT";
+}
+
+function formatWantAmount(order: ParsedOrder): string {
+  const { wantGlyph, wantValue } = order;
+  if (!wantValue) return "";
+  if (!wantGlyph) {
+    return formatCompactRxd(wantValue);
+  }
+  if (wantGlyph.tokenType === SmartTokenType.FT) {
+    return `${formatAmountCompact(wantValue)} ${wantGlyph.ticker || wantGlyph.name || "tokens"}`;
+  }
+  return wantGlyph.name || "NFT";
+}
+
 function OrderCard({
   order,
   onAccept,
@@ -353,6 +401,8 @@ function OrderCard({
   const priceRatio = getPriceRatio(order);
   const expired = isOfferStale(offer.block_height, currentHeight);
   const ageLabel = offerAgeLabel(offer.block_height, currentHeight);
+  const offeredAmt = formatOfferedAmount(order);
+  const wantAmt = formatWantAmount(order);
 
   return (
     <Card p={4}>
@@ -376,11 +426,11 @@ function OrderCard({
           </HStack>
         </Flex>
 
-        {/* Token names */}
+        {/* Token names and amounts */}
         <Box>
           <HStack spacing={2}>
             <Text fontWeight="bold" fontSize="md">
-              {offeredGlyph?.name || "RXD"}
+              {offeredAmt || offeredGlyph?.name || "RXD"}
               {offeredGlyph?.ticker && (
                 <Text as="span" fontSize="sm" color="gray.500" ml={2}>
                   ${offeredGlyph.ticker}
@@ -392,7 +442,7 @@ function OrderCard({
           <Text fontSize="sm" color="gray.400">
             for{" "}
             <Text as="span" fontWeight="medium" color="gray.300">
-              {wantGlyph?.name || formatCompactRxd(wantValue || 0)}
+              {wantAmt || wantGlyph?.name || formatCompactRxd(wantValue || 0)}
             </Text>
             {wantGlyph?.ticker && (
               <Text as="span" color="gray.500" ml={1}>
@@ -464,6 +514,8 @@ function OrderRow({
   const { offer, offeredGlyph, wantGlyph, wantValue } = order;
   const priceRatio = getPriceRatio(order);
   const expired = isOfferStale(offer.block_height, currentHeight);
+  const offeredAmt = formatOfferedAmount(order);
+  const wantAmt = formatWantAmount(order);
 
   return (
     <Tr>
@@ -478,7 +530,7 @@ function OrderRow({
         <VStack align="start" spacing={0}>
           <HStack spacing={1}>
             <Text fontSize="sm" fontWeight="medium">
-              {offeredGlyph?.name || "RXD"}
+              {offeredAmt || offeredGlyph?.name || "RXD"}
             </Text>
             {onCopy && offeredGlyph && (
               <IconButton
@@ -506,7 +558,7 @@ function OrderRow({
       <Td>
         <VStack align="start" spacing={0}>
           <Text fontSize="sm" fontWeight="medium">
-            {wantGlyph?.name || formatCompactRxd(wantValue || 0)}
+            {wantAmt || wantGlyph?.name || formatCompactRxd(wantValue || 0)}
           </Text>
           <WaveExpiryBadge glyph={wantGlyph} />
           {wantValue && !wantGlyph && (
@@ -557,10 +609,10 @@ function describeAsset(
     return `${photonsToRXD(value)} RXD`;
   }
   if (!glyph) {
-    return contractType === ContractType.FT ? `${value} tokens` : "NFT";
+    return contractType === ContractType.FT ? `${formatAmountCompact(value)} tokens` : "NFT";
   }
   if (glyph.tokenType === SmartTokenType.FT) {
-    return `${value} ${glyph.ticker || glyph.name || "tokens"}`;
+    return `${formatAmountCompact(value)} ${glyph.ticker || glyph.name || "tokens"}`;
   }
   return glyph.name || "NFT";
 }
@@ -780,6 +832,12 @@ export default function OpenOrders({
   const [resolvedGlyphs, setResolvedGlyphs] = useState<
     Map<string, SmartToken | null>
   >(new Map());
+  // Offered UTXO values resolved by fetching the prevout transaction. Keyed by
+  // `${txid}:${vout}`. Needed for FT price-per-token calculation (the swap index
+  // amount/price fields carry the quote-side total, not the offered token amount).
+  const [offeredValues, setOfferedValues] = useState<
+    Map<string, number | null>
+  >(new Map());
   const [searchRef, setSearchRef] = useState("");
   const [indexAvailable, setIndexAvailable] = useState<boolean | null>(null);
   const [rpcUrl, setRpcUrl] = useState(getSwapRpcConfig().url);
@@ -967,24 +1025,73 @@ export default function OpenOrders({
   const offerKey = (o: ParsedOrder) =>
     `${o.offer.utxo.txid}:${o.offer.utxo.vout}`;
 
-  // Merge any prevout-resolved glyphs into the orders so display and the
-  // "names" filter can see offered NFTs (incl. WAVE names) the wallet doesn't
-  // own locally.
+  const RESOLVE_CAP = 30;
+
+  // Merge any prevout-resolved glyphs AND offered UTXO values into the orders so
+  // display and the "names" filter can see offered NFTs (incl. WAVE names) the
+  // wallet doesn't own locally, and price-per-token ratios use the real offered
+  // amount (the swap index amount/price fields carry the quote-side total only).
   const mergedOrders = useMemo(() => {
-    if (resolvedGlyphs.size === 0) return orders;
+    if (resolvedGlyphs.size === 0 && offeredValues.size === 0) return orders;
     return orders.map((order) => {
-      if (order.offeredGlyph) return order;
-      const resolved = resolvedGlyphs.get(offerKey(order));
-      return resolved ? { ...order, offeredGlyph: resolved } : order;
+      let patched = order;
+      if (!order.offeredGlyph) {
+        const resolved = resolvedGlyphs.get(offerKey(order));
+        if (resolved) patched = { ...patched, offeredGlyph: resolved };
+      }
+      if (order.offeredValue === undefined) {
+        const val = offeredValues.get(offerKey(order));
+        if (val !== undefined && val !== null) {
+          patched = { ...patched, offeredValue: val };
+        }
+      }
+      return patched;
     });
-  }, [orders, resolvedGlyphs]);
+  }, [orders, resolvedGlyphs, offeredValues]);
+
+  // Resolve offered UTXO values by fetching each prevout transaction. The swap
+  // index does not carry the offered amount — only the quote-side payout total
+  // (amount/price/remaining_amount). For FT sell orders we need the offered
+  // token quantity (the UTXO value in base units) to compute a correct
+  // per-unit price ratio. Bounded per round to avoid excessive network calls.
+  useEffect(() => {
+    const pending = orders.filter(
+      (o) => o.offeredValue === undefined && !offeredValues.has(offerKey(o))
+    );
+    if (pending.length === 0) return;
+    const batch = pending.slice(0, RESOLVE_CAP);
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        batch.map(async (o) => {
+          const hex = await electrumWorker.value.getTransaction(
+            o.offer.utxo.txid
+          );
+          if (!hex) return [offerKey(o), null] as const;
+          const prevTx = new Transaction(hex);
+          const out = prevTx.outputs[o.offer.utxo.vout];
+          if (!out) return [offerKey(o), null] as const;
+          return [offerKey(o), out.satoshis] as const;
+        })
+      );
+      if (cancelled) return;
+      setOfferedValues((prev) => {
+        const next = new Map(prev);
+        for (const o of batch) if (!next.has(offerKey(o))) next.set(offerKey(o), null);
+        for (const r of results) {
+          if (r.status === "fulfilled") next.set(r.value[0], r.value[1]);
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [orders, offeredValues]);
 
   // Resolve offered NFTs not in local db so the names market can identify and
   // display them. Only runs for the "names" filter to avoid extra network
   // calls elsewhere. The swap index has no "is-a-WAVE-name" predicate, so this
   // resolution is client-side and bounded per round — names beyond the cap
   // surface as you Load More or search by ref.
-  const RESOLVE_CAP = 30;
   useEffect(() => {
     if (filterType !== "names") return;
     const pending = orders.filter(

@@ -1012,7 +1012,7 @@ export default function MarketHub() {
                                         fontSize="sm"
                                         sx={{ fontVariantNumeric: "tabular-nums" }}
                                       >
-                                        {`${formatAmountCompact(l.order.remaining_amount)} ${l.baseRef === null ? "RXD" : (l.order.base_ticker || "tokens")}`}
+                                        {`${formatAmountCompact(l.order.remaining_amount)} ${l.quoteRef === null ? "RXD" : (l.order.quote_ticker || "tokens")}`}
                                       </Text>
                                       {l.order.filled_amount > 0 && (
                                         <Text
