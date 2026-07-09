@@ -62,7 +62,7 @@ import {
   SmartTokenType,
 } from "@app/types";
 import { isWaveNameGlyph, getWaveDisplay } from "@lib/wave";
-import { photonsToRXD, formatAmountCompact } from "@lib/format";
+import { photonsToRXD, formatAmountCompact, formatTokenAmount } from "@lib/format";
 import { assetToSwapTokenId } from "@app/swapBroadcast";
 import { parseNftScript, parseFtScript } from "@lib/script";
 import { reverseRef } from "@lib/Outpoint";
@@ -1012,7 +1012,7 @@ export default function MarketHub() {
                                         fontSize="sm"
                                         sx={{ fontVariantNumeric: "tabular-nums" }}
                                       >
-                                        {`${formatAmountCompact(l.order.remaining_amount)} ${l.quoteRef === null ? "RXD" : (l.order.quote_ticker || "tokens")}`}
+                                        {`${l.quoteRef === null ? formatAmountCompact(l.order.remaining_amount) : formatTokenAmount(l.order.remaining_amount)} ${l.quoteRef === null ? "RXD" : (l.order.quote_ticker || "tokens")}`}
                                       </Text>
                                       {l.order.filled_amount > 0 && (
                                         <Text

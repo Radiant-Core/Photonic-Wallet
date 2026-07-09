@@ -73,7 +73,7 @@ import db from "@app/db";
 import opfs from "@app/opfs";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { cancelSwap } from "@app/swap";
-import { photonsToRXD, formatAmountCompact } from "@lib/format";
+import { photonsToRXD, formatAmountCompact, formatTokenAmount } from "@lib/format";
 import {
   SwapOffer,
   assetToSwapTokenId,
@@ -247,13 +247,19 @@ function getPriceRatio(order: ParsedOrder): string | null {
     // Token for RXD (sell order)
     if (order.offeredValue && order.offeredValue > 0) {
       if (order.offeredGlyph.tokenType === SmartTokenType.FT) {
-        const rxdPerToken = order.wantValue / order.offeredValue;
-        return `1 ${
-          order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
-        } = ${rxdPerToken.toFixed(8)} RXD`;
+        const offDecimals = order.offeredGlyph.decimals ?? 8;
+        const offDivisor = Math.pow(10, 8 - offDecimals);
+        const tokenAmount = order.offeredValue / offDivisor;
+        const rxdAmount = order.wantValue / 100000000;
+        if (tokenAmount > 0) {
+          const rxdPerToken = rxdAmount / tokenAmount;
+          return `1 ${
+            order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
+          } = ${rxdPerToken.toFixed(8)} RXD`;
+        }
       }
     }
-    // NFT or unknown offered amount — show total price for 1 unit
+    // NFT or unknown offered amount — show total RXD price
     const rxdPerToken = order.wantValue / 100000000;
     return `1 ${
       order.offeredGlyph.ticker || order.offeredGlyph.name || "Token"
@@ -262,17 +268,25 @@ function getPriceRatio(order: ParsedOrder): string | null {
   if (!order.offeredGlyph && order.wantGlyph) {
     // RXD for Token (buy order)
     if (order.wantGlyph.tokenType === SmartTokenType.FT && order.wantValue > 0) {
+      const wantDecimals = order.wantGlyph.decimals ?? 8;
+      const wantDivisor = Math.pow(10, 8 - wantDecimals);
+      const tokenAmount = order.wantValue / wantDivisor;
       if (order.offeredValue && order.offeredValue > 0) {
-        const tokensPerRxd = order.offeredValue / order.wantValue;
+        const rxdAmount = order.offeredValue / 100000000;
+        if (tokenAmount > 0) {
+          const tokensPerRxd = tokenAmount / rxdAmount;
+          return `1 RXD = ${tokensPerRxd.toFixed(8)} ${
+            order.wantGlyph.ticker || order.wantGlyph.name || "Token"
+          }`;
+        }
+      }
+      // Fallback: assume 1 RXD offered if UTXO value not yet resolved
+      if (tokenAmount > 0) {
+        const tokensPerRxd = tokenAmount; // per 1 RXD = 100M photons
         return `1 RXD = ${tokensPerRxd.toFixed(8)} ${
           order.wantGlyph.ticker || order.wantGlyph.name || "Token"
         }`;
       }
-      // Fallback: assume 1 RXD offered if UTXO value not yet resolved
-      const tokensPerRxd = 100000000 / order.wantValue;
-      return `1 RXD = ${tokensPerRxd.toFixed(8)} ${
-        order.wantGlyph.ticker || order.wantGlyph.name || "Token"
-      }`;
     }
     // NFT
     const rxdPrice = order.wantValue / 100000000;
@@ -369,7 +383,7 @@ function formatOfferedAmount(order: ParsedOrder): string {
     return formatCompactRxd(offeredValue);
   }
   if (offeredGlyph.tokenType === SmartTokenType.FT) {
-    return `${formatAmountCompact(offeredValue)} ${offeredGlyph.ticker || offeredGlyph.name || "tokens"}`;
+    return `${formatTokenAmount(offeredValue, offeredGlyph.decimals ?? 8)} ${offeredGlyph.ticker || offeredGlyph.name || "tokens"}`;
   }
   return offeredGlyph.name || "NFT";
 }
@@ -381,7 +395,7 @@ function formatWantAmount(order: ParsedOrder): string {
     return formatCompactRxd(wantValue);
   }
   if (wantGlyph.tokenType === SmartTokenType.FT) {
-    return `${formatAmountCompact(wantValue)} ${wantGlyph.ticker || wantGlyph.name || "tokens"}`;
+    return `${formatTokenAmount(wantValue, wantGlyph.decimals ?? 8)} ${wantGlyph.ticker || wantGlyph.name || "tokens"}`;
   }
   return wantGlyph.name || "NFT";
 }
@@ -612,7 +626,7 @@ function describeAsset(
     return contractType === ContractType.FT ? `${formatAmountCompact(value)} tokens` : "NFT";
   }
   if (glyph.tokenType === SmartTokenType.FT) {
-    return `${formatAmountCompact(value)} ${glyph.ticker || glyph.name || "tokens"}`;
+    return `${formatTokenAmount(value, glyph.decimals ?? 8)} ${glyph.ticker || glyph.name || "tokens"}`;
   }
   return glyph.name || "NFT";
 }

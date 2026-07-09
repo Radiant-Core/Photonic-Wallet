@@ -1033,6 +1033,10 @@ export class NFTWorker implements Subscription {
       // Encrypted NFT fields — persisted so decryption UI can retrieve them
       ...(payload.crypto !== undefined ? { crypto: payload.crypto } : {}),
       ...(payload.main !== undefined ? { main: payload.main } : {}),
+      // FT decimals (Glyph v2 §9.4): default 8 (1 photon = 1 token unit).
+      ...((payload as { decimals?: number }).decimals !== undefined
+        ? { decimals: (payload as { decimals?: number }).decimals }
+        : {}),
       // Glyph v2 covenant metadata — persisted so the royalty-listing flow can
       // recover the creator's recorded terms and badges reflect enforced
       // royalty / soulbound policy. (Cast: SmartTokenPayload allows arbitrary

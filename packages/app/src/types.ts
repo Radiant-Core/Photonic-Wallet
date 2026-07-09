@@ -208,6 +208,10 @@ export interface SmartToken {
   // royalty-listing flow can recover the creator's recorded terms
   // (royaltyTermsFromMetadata) and badges can reflect enforced royalty /
   // soulbound policy without re-decoding the reveal.
+  // FT token decimals (0-8, default 8 per Glyph v2 standard).
+  // Determines photon:token ratio: display = on_chain_photons / 10^(8 - decimals).
+  // decimals=8 means 1 photon = 1 token (no division); decimals=0 means 100M photons = 1 token.
+  decimals?: number;
   royalty?: GlyphV2Royalty;
   policy?: GlyphV2Policy;
   // Decode version of the reveal-payload parser that produced this row. Rows
