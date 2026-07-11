@@ -26,12 +26,14 @@ import {
   buildDisputeTimeout,
   minBondFor,
   marketStateFromScript,
+  catStateFromScript,
   NO_PROPOSER,
   buildSellOrder,
   fillSellOrder,
   buildBuyOrder,
   fillBuyOrder,
   buildShareTransfer,
+  buildShareTranches,
   findMarketBeacon,
   verifyMarketBeacon,
   encodeRef,
@@ -74,6 +76,22 @@ import db from "@app/db";
 import { wallet, feeRate } from "@app/signals";
 import { electrumWorker } from "@app/electrum/Electrum";
 import type { IndexedMarket } from "@app/electrum/worker/electrumWorker";
+import {
+  splitLadder,
+  rungsForProb,
+  slopedRungs,
+  rampProbs,
+  priceSatsForProb,
+  probForPriceSats,
+} from "./ladder";
+export {
+  splitLadder,
+  rungsForProb,
+  slopedRungs,
+  rampProbs,
+  priceSatsForProb,
+  probForPriceSats,
+};
 
 const { Script, Transaction, Address, PrivateKey } = rjs;
 
@@ -111,6 +129,10 @@ export interface TrackedMarket {
    *  `optimistic` bond/liveness terms aren't loaded yet (they're re-anchored from chain on open). Lets
    *  the trust badge classify a discovered optimistic market without fabricating bond/liveness. */
   optimisticHint?: boolean;
+  /** Creator-supplied off-chain reference market (e.g. a Polymarket slug or URL), carried in the
+   *  RMKT beacon. Advisory only — resolves to a reference YES% shown when the on-chain book is empty
+   *  (see predict/referenceOdds.ts). UNTRUSTED (any creator can set it); never a source of truth. */
+  oddsRef?: string;
 }
 
 /** True for an optimistic (MarketOpt) binary market — its singleton carries a 74-byte state and
@@ -158,6 +180,9 @@ export interface LiveMarket {
    *  current PROPOSED_* singleton), or null when not in a proposal / unconfirmed. Drives the
    *  challenge-window countdown: a finalize needs `height − proposalHeight + 1 >= liveness`. */
   proposalHeight: number | null;
+  /** True when the singleton was deployed under an older RadiantSwap covenant this build can read
+   *  but not spend. The UI shows the market read-only (no split/merge/trade/redeem/resolve). */
+  legacyVersion: boolean;
 }
 
 export const statusLabel: Record<Status, string> = {
@@ -217,6 +242,7 @@ function indexedToTracked(im: IndexedMarket): TrackedMarket {
     addedAt: 0,
     kind: "binary",
     optimisticHint: im.optimistic,
+    oddsRef: im.odds_ref || undefined,
   };
 }
 
@@ -342,6 +368,8 @@ export async function openMarketByCreateTxid(
     optimistic: v.state.optimistic
       ? { bond: v.state.optimistic.bond, liveness: v.state.optimistic.liveness }
       : undefined,
+    // Advisory reference market from the beacon (untrusted) — drives the reference-odds chip.
+    oddsRef: v.oddsRef,
     addedAt: Date.now(),
   };
 }
@@ -459,7 +487,23 @@ export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
       ? locateOptimisticSingleton(t, scripts, refs)
       : locateBinarySingleton(t, scripts, refs),
   ]);
-  const { market, state, proposalHeight } = located;
+  const { market, state, proposalHeight, legacy } = located;
+
+  // A legacy-covenant market is read-only: its ShareToken (YES/NO) code drifted too, so the
+  // anchor/position scripthashes wouldn't match anyway — skip those reads entirely.
+  if (legacy) {
+    return {
+      state,
+      market,
+      yesAnchor: null,
+      noAnchor: null,
+      myYes: [],
+      myNo: [],
+      height,
+      proposalHeight,
+      legacyVersion: true,
+    };
+  }
 
   // Share anchors and the wallet's positions are read the same way for both variants — the
   // ShareToken (YES/NO) code is identical whether the market is classic or optimistic.
@@ -480,6 +524,7 @@ export async function fetchLiveMarket(t: TrackedMarket): Promise<LiveMarket> {
     myNo,
     height,
     proposalHeight,
+    legacyVersion: false,
   };
 }
 
@@ -487,6 +532,102 @@ interface LocatedSingleton {
   market: Utxo;
   state: MarketState;
   proposalHeight: number | null;
+  /** True when the singleton was deployed under a DIFFERENT (older) RadiantSwap covenant than this
+   *  build generates: the wallet can still read its state (the state layout is version-stable) but
+   *  cannot build spends against it, so the market is read-only. Fast-path (scripthash) hits are
+   *  never legacy — they matched the current covenant by construction. */
+  legacy: boolean;
+}
+
+/** Read the market singleton directly from its ref's current on-chain location, decoding the state
+ *  from the ACTUAL script rather than reconstructing the lock. Covenant-version-agnostic: it works
+ *  even when this build can't rebuild the lock (e.g. the market predates a covenant change), because
+ *  status/expiry/grace/oracle sit at stable offsets. Returns null when the ref has no location or no
+ *  output binds to this market. `decode` extracts the state (binary/optimistic vs categorical). */
+async function readSingletonByRef<
+  S extends { expiry: number; grace: number; oracle: Buffer }
+>(
+  t: TrackedMarket,
+  decode: (script: Buffer) => S | null
+): Promise<{ market: Utxo; state: S; height: number | null } | null> {
+  const refResp = await electrumWorker.value.getRef(displayRef(t.marketRef));
+  const locs = Array.isArray(refResp) ? refResp : [];
+  const latest = locs[locs.length - 1];
+  if (!latest?.tx_hash) return null;
+  const raw = await electrumWorker.value.getTransaction(latest.tx_hash);
+  if (!raw) return null;
+  const { scripts, values } = outputScripts(raw);
+  for (let i = 0; i < scripts.length; i++) {
+    let decoded: S | null = null;
+    try {
+      decoded = decode(scripts[i]);
+    } catch {
+      decoded = null;
+    }
+    // Bind the decoded output to THIS market: same immutable resolution params. The marketRef is
+    // unique, so the output on the ref's own tx carrying a matching market state IS the singleton.
+    if (
+      decoded &&
+      Buffer.from(decoded.oracle).toString("hex") === t.oracle &&
+      decoded.expiry === t.expiry &&
+      decoded.grace === t.grace
+    ) {
+      return {
+        market: {
+          txid: latest.tx_hash,
+          vout: i,
+          satoshis: values[i],
+          script: scripts[i].toString("hex"),
+        },
+        state: decoded,
+        height: latest.height || null,
+      };
+    }
+  }
+  return null;
+}
+
+/** True when the CURRENT covenant + this decoded state reproduces the exact on-chain singleton
+ *  script byte-for-byte. False ⇒ the singleton was deployed under a different covenant version
+ *  (read-only in this build). */
+function rebuildsCurrentBinary(
+  onChainScriptHex: string,
+  state: MarketState,
+  refs: MarketRefs
+): boolean {
+  try {
+    const scripts = buildMarketScripts(refs, { optimistic: !!state.optimistic });
+    const rebuilt = buildStatefulOutput(encodeState(state), scripts.marketCode);
+    return rebuilt.toString("hex") === onChainScriptHex;
+  } catch {
+    return false;
+  }
+}
+
+/** Categorical/scalar analogue of {@link rebuildsCurrentBinary}. */
+function rebuildsCurrentCat(
+  onChainScriptHex: string,
+  state: CatState,
+  refs: CatRefs
+): boolean {
+  try {
+    const scripts = buildCategoricalScripts(refs);
+    const rebuilt = buildStatefulOutput(encodeCatState(state), scripts.marketCode);
+    return rebuilt.toString("hex") === onChainScriptHex;
+  } catch {
+    return false;
+  }
+}
+
+/** Binary/optimistic singleton in a PROPOSED or DISPUTED state: its liveness/dispute countdown
+ *  counts from the singleton's current tx, so callers record that height. */
+function isLiveProposal(status: number): boolean {
+  return (
+    status === Status.PROPOSED_YES ||
+    status === Status.PROPOSED_NO ||
+    status === Status.DISPUTED_YES ||
+    status === Status.DISPUTED_NO
+  );
 }
 
 /** Classic binary market: the lock bytes are constant per status (expiry/grace/oracle never change,
@@ -531,8 +672,21 @@ async function locateBinarySingleton(
         market: byStatus[i][0],
         state: { status: statuses[i], ...baseState },
         proposalHeight: null,
+        legacy: false,
       };
     }
+  }
+  // Reconstruction found nothing. Before failing, read the singleton straight from its ref: a
+  // market deployed under an older covenant is invisible to the scripthash probes above (its lock
+  // bytes differ) but is still on chain and decodable. If found, it's read-only (legacy).
+  const read = await readSingletonByRef(t, (s) => marketStateFromScript(s));
+  if (read) {
+    return {
+      market: read.market,
+      state: read.state,
+      proposalHeight: isLiveProposal(read.state.status) ? read.height : null,
+      legacy: !rebuildsCurrentBinary(read.market.script, read.state, refs),
+    };
   }
   throw new Error("Market singleton not found on chain");
 }
@@ -566,7 +720,12 @@ async function locateOptimisticSingleton(
     refs.marketRef
   );
   if (openUtxos.length > 0) {
-    return { market: openUtxos[0], state: openState, proposalHeight: null };
+    return {
+      market: openUtxos[0],
+      state: openState,
+      proposalHeight: null,
+      legacy: false,
+    };
   }
 
   // Past OPEN: ref.get -> latest tx -> decode the singleton output's state.
@@ -599,15 +758,13 @@ async function locateOptimisticSingleton(
       };
       // PROPOSED drives the finalize countdown; DISPUTED drives the dispute-timeout countdown — both
       // count `liveness` blocks from the singleton's current tx, so record its height for either.
-      const live =
-        decoded.status === Status.PROPOSED_YES ||
-        decoded.status === Status.PROPOSED_NO ||
-        decoded.status === Status.DISPUTED_YES ||
-        decoded.status === Status.DISPUTED_NO;
       return {
         market,
         state: decoded,
-        proposalHeight: live ? latest.height || null : null,
+        proposalHeight: isLiveProposal(decoded.status)
+          ? latest.height || null
+          : null,
+        legacy: !rebuildsCurrentBinary(market.script, decoded, refs),
       };
     }
   }
@@ -621,6 +778,8 @@ export interface MarketStatusInfo {
   resolved: boolean; // terminal: settled or reverted — no further trading
   pending: boolean; // optimistic PROPOSED_* — in the challenge window, still Active
   label: string;
+  /** Deployed under an older covenant this build can read but not trade — read-only. */
+  legacy?: boolean;
 }
 
 /** Lightweight live-status probe for the Markets list: locates the singleton the same way
@@ -639,16 +798,13 @@ export async function fetchMarketStatus(
         ? await locateOptimisticSingleton(t, scripts, refs)
         : await locateBinarySingleton(t, scripts, refs);
       const s = located.state.status;
-      const pending =
-        s === Status.PROPOSED_YES ||
-        s === Status.PROPOSED_NO ||
-        s === Status.DISPUTED_YES ||
-        s === Status.DISPUTED_NO;
+      const pending = isLiveProposal(s);
       return {
         status: s,
         resolved: s !== Status.OPEN && !pending,
         pending,
         label: statusLabel[s as Status] ?? "Unknown",
+        legacy: located.legacy,
       };
     }
     // Categorical / scalar: probe the K+2 status variants (terminal-first, see fetchLiveCatMarket).
@@ -686,6 +842,18 @@ export async function fetchMarketStatus(
           label: catStatusLabel(t, s),
         };
       }
+    }
+    // Reconstruction found nothing — read the singleton straight from its ref (older covenant).
+    const read = await readSingletonByRef(t, (s) => catStateFromScript(s));
+    if (read) {
+      const s = read.state.status;
+      return {
+        status: s,
+        resolved: s !== CAT_OPEN,
+        pending: false,
+        label: catStatusLabel(t, s),
+        legacy: !rebuildsCurrentCat(read.market.script, read.state, refs),
+      };
     }
     return null;
   } catch {
@@ -774,6 +942,9 @@ export async function createMarketAction(p: {
    *  locking `bond` photons; the committee can override (slashing the bond) within `liveness` blocks,
    *  after which anyone may finalize and the bond returns to the proposer. */
   optimistic?: { bond: number; liveness: number };
+  /** Optional off-chain reference market (Polymarket slug/URL) to embed in the RMKT beacon so
+   *  viewers see a reference YES% when the on-chain book is empty. Advisory only. */
+  oddsRef?: string;
 }): Promise<TrackedMarket> {
   const { address, wif } = requireWallet();
   const priv = PrivateKey.fromWIF(wif);
@@ -830,6 +1001,7 @@ export async function createMarketAction(p: {
       changeAddress: address,
       question: p.question,
       optimistic: p.optimistic,
+      oddsRef: p.oddsRef?.trim() || undefined,
       feeSats,
     })
   );
@@ -852,6 +1024,7 @@ export async function createMarketAction(p: {
           liveness: created.state.optimistic.liveness,
         }
       : undefined,
+    oddsRef: p.oddsRef?.trim() || undefined,
     addedAt: Date.now(),
   };
   await trackMarket(tracked);
@@ -1199,6 +1372,8 @@ export interface LiveCatMarket {
   myShares: Utxo[][]; // wallet positions per outcome (index 0 = outcome 1)
   height: number;
   outcomes: number; // K
+  /** Deployed under an older covenant this build can read but not trade — read-only. */
+  legacyVersion: boolean;
 }
 
 export function catRefsOf(t: TrackedMarket): CatRefs {
@@ -1266,7 +1441,24 @@ export async function fetchLiveCatMarket(
       break;
     }
   }
-  if (!market || !state) throw new Error("Market singleton not found on chain");
+  // Reconstruction found nothing — a market under an older covenant is invisible to the scripthash
+  // probes but still readable from its ref. If found, it's read-only (legacy): the outcome-share
+  // codes drifted too, so skip the anchor/position reads.
+  if (!market || !state) {
+    const read = await readSingletonByRef(t, (s) => catStateFromScript(s));
+    if (read) {
+      return {
+        state: read.state,
+        market: read.market,
+        anchors: refs.outcomeRefs.map(() => null),
+        myShares: refs.outcomeRefs.map(() => []),
+        height,
+        outcomes: K,
+        legacyVersion: !rebuildsCurrentCat(read.market.script, read.state, refs),
+      };
+    }
+    throw new Error("Market singleton not found on chain");
+  }
 
   const pkh = walletPkh();
   const perOutcome = await Promise.all(
@@ -1284,7 +1476,15 @@ export async function fetchLiveCatMarket(
     anchors.push(perOutcome[2 * i][0] || null);
     myShares.push(perOutcome[2 * i + 1]);
   }
-  return { state, market, anchors, myShares, height, outcomes: K };
+  return {
+    state,
+    market,
+    anchors,
+    myShares,
+    height,
+    outcomes: K,
+    legacyVersion: false,
+  };
 }
 
 /** Committee for a categorical create/resolve: this wallet's key as 1-of-1, or supplied members. */
@@ -1643,6 +1843,259 @@ export async function postOrderAction(
   };
   await saveMyOrder(posted);
   return posted;
+}
+
+/** Dust floor for a share tranche and for an RXD payment output (standard-relay minimum). */
+const SHARE_DUST = 546;
+
+/** Build + sign an RSWP-advertisement tx (OP_RETURN(0) + change) funded by ONE coin, returning the
+ *  change output so it can fund the next tx in a ladder. Two-pass fee sizing exposes the exact
+ *  change value (the sighash commits input amounts, so the chained coin's value must be exact). */
+function buildAdTx(
+  adScriptHex: string,
+  funding: KeyedUtxo,
+  changeAddress: string
+): { hex: string; txid: string; change: KeyedUtxo } {
+  const p2pkhHex = Script.buildPublicKeyHashOut(
+    Address.fromString(changeAddress)
+  ).toHex() as string;
+  const make = (feeSats: number) => {
+    const change = funding.satoshis - feeSats;
+    if (change < SHARE_DUST) {
+      throw new Error("ran out of funding for the order ladder — consolidate coins and retry");
+    }
+    const tx = new Transaction();
+    tx.from({
+      txId: funding.txid,
+      outputIndex: funding.vout,
+      script: funding.script,
+      satoshis: funding.satoshis,
+    });
+    tx.addOutput(
+      new Transaction.Output({ script: Script.fromHex(adScriptHex), satoshis: 0 })
+    );
+    tx.to(changeAddress, change); // change at vout 1
+    tx.sign(PrivateKey.fromWIF(funding.wif));
+    tx.seal();
+    return { hex: tx.toString() as string, txid: tx.id as string, change };
+  };
+  const draft = make(1_000_000);
+  const fee = Math.ceil((draft.hex.length / 2) * feeRate.value * 1.05);
+  const final = make(fee);
+  return {
+    hex: final.hex,
+    txid: final.txid,
+    change: {
+      txid: final.txid,
+      vout: 1,
+      satoshis: final.change,
+      script: p2pkhHex,
+      wif: funding.wif,
+    },
+  };
+}
+
+function validateRungs(
+  share: Utxo,
+  rungs: { amount: number; priceSats: number }[]
+): void {
+  const total = rungs.reduce((a, r) => a + r.amount, 0);
+  if (total !== share.satoshis) {
+    throw new Error(
+      `ladder rungs must sum to the position (${share.satoshis}), got ${total}`
+    );
+  }
+  if (rungs.some((r) => !Number.isSafeInteger(r.amount) || r.amount < SHARE_DUST)) {
+    throw new Error(`every rung must be ≥ ${SHARE_DUST} share sats — use fewer rungs`);
+  }
+  if (rungs.some((r) => !Number.isSafeInteger(r.priceSats) || r.priceSats < SHARE_DUST)) {
+    throw new Error(
+      `every rung's price must be ≥ ${SHARE_DUST} photons — use fewer rungs or a higher price`
+    );
+  }
+}
+
+/** Core of the ladder: fan `share` into `rungs.length` tranches (one transfer, funded by `funding`),
+ *  then advertise one sell order per tranche, chaining the change coin through every ad tx. Returns
+ *  the posted orders AND the final change coin so a caller (e.g. seedLiquidityAction) can keep
+ *  chaining. Persists each order locally. No db.txo re-reads → no cross-tx double-spend races. */
+async function fanAndAdvertise(
+  t: TrackedMarket,
+  side: "yes" | "no",
+  share: Utxo,
+  rungs: { amount: number; priceSats: number }[],
+  funding: KeyedUtxo
+): Promise<{ orders: PostedOrder[]; change: KeyedUtxo }> {
+  const { address, wif } = requireWallet();
+  validateRungs(share, rungs);
+  const ref = side === "yes" ? refsOf(t).yesRef : refsOf(t).noRef;
+
+  // Fan the position. Two-pass sizing exposes the exact fee → the exact change value at vout k.
+  const makeFan = (feeSats: number) =>
+    buildShareTranches({
+      share,
+      shareWif: wif,
+      amounts: rungs.map((r) => r.amount),
+      recipientPkh: walletPkh(),
+      funding,
+      changeAddress: address,
+      feeSats,
+    });
+  const fanDraft = makeFan(1_000_000);
+  const fanFee = Math.ceil((fanDraft.hex.length / 2) * feeRate.value * 1.05);
+  const fan = makeFan(fanFee);
+  await broadcast(fan.hex);
+
+  const p2pkhHex = Script.buildPublicKeyHashOut(
+    Address.fromString(address)
+  ).toHex() as string;
+  // The fan's change output sits right after the k tranche outputs (vout k) and funds the ad chain.
+  let coin: KeyedUtxo = {
+    txid: fan.txid,
+    vout: rungs.length,
+    satoshis: funding.satoshis - fanFee,
+    script: p2pkhHex,
+    wif,
+  };
+
+  const orders: PostedOrder[] = [];
+  for (let i = 0; i < rungs.length; i++) {
+    const order = buildSellOrder({
+      side,
+      share: fan.tranches[i],
+      makerWif: wif,
+      price: rungs[i].priceSats,
+      paymentScriptHex: p2pkhHex,
+    });
+    const adScript = rswp.buildAdvertisementScript(order, ref);
+    let built: { hex: string; txid: string; change: KeyedUtxo };
+    try {
+      built = buildAdTx(adScript.toString("hex"), coin, address);
+      await broadcast(built.hex);
+    } catch (e) {
+      throw new Error(
+        `posted ${orders.length}/${rungs.length} ${side} orders; order ${
+          i + 1
+        } failed: ${(e as Error).message}`
+      );
+    }
+    const posted_i: PostedOrder = {
+      adTxid: built.txid,
+      marketCreateTxid: t.createTxid,
+      kind: "ask",
+      side,
+      amount: fan.tranches[i].satoshis,
+      priceSats: rungs[i].priceSats,
+      order,
+      createdAt: Date.now(),
+    };
+    await saveMyOrder(posted_i);
+    orders.push(posted_i);
+    coin = built.change;
+  }
+  return { orders, change: coin };
+}
+
+/** Post a LADDER of sell orders: fan `share` into `rungs.length` tranches in ONE transfer, then
+ *  advertise one sell order per tranche. Each order stays atomic all-or-nothing, but the ladder as a
+ *  whole fills PARTIALLY — a taker can buy any subset of rungs (this is the partial-position
+ *  primitive). Every tx after the fan is funded by chaining the previous tx's change, so no db.txo
+ *  re-read races between broadcasts. Validates fully before broadcasting anything; if a broadcast
+ *  fails mid-ladder the already-posted rungs stay live and the error names the failed rung. */
+export async function postLadderAction(
+  t: TrackedMarket,
+  side: "yes" | "no",
+  share: Utxo,
+  rungs: { amount: number; priceSats: number }[]
+): Promise<PostedOrder[]> {
+  if (rungs.length < 2) throw new Error("A ladder needs at least 2 rungs");
+  // Fund generously: the fan tx embeds a full ShareToken lock per output (multi-KB), plus headroom
+  // for every chained ad tx, since one coin funds the whole chain.
+  const funding = await selectFunding(feeHeadroom() + rungs.length * 200_000);
+  const { orders } = await fanAndAdvertise(t, side, share, rungs, funding);
+  return orders;
+}
+
+/** Seed a market with two-sided liquidity so it shows live odds and is tradeable in chunks. Mints
+ *  `sets` complete sets (locking `sets` collateral → `sets` YES + `sets` NO), then posts a YES ask
+ *  ladder and a NO ask ladder — each starting `spread` off the centre and stepping out by `step` per
+ *  rung — so the book's implied P(YES) sits at `yesProb` with realistic depth on both sides. `step`
+ *  0 gives a flat book. All funding (mint + both fans + every ad) chains from ONE coin, so it never
+ *  double-spends. Returns every posted order. */
+export async function seedLiquidityAction(
+  t: TrackedMarket,
+  live: LiveMarket,
+  p: {
+    sets: number;
+    yesProb: number;
+    spread: number;
+    rungs: number;
+    step?: number;
+  }
+): Promise<PostedOrder[]> {
+  const { address, wif } = requireWallet();
+  if (!live.yesAnchor || !live.noAnchor) {
+    throw new Error("Share anchors not found on chain");
+  }
+  if (live.state.status !== Status.OPEN) {
+    throw new Error("Can only seed an OPEN market");
+  }
+  const N = Math.floor(p.sets);
+  const rungs = Math.max(1, Math.floor(p.rungs));
+  const step = Math.max(0, p.step ?? 0);
+  // Both sides ramp OUTWARD from their best (centre ± spread) price by `step` per rung: the YES ask
+  // ladder deepens above yesProb, the NO ask ladder deepens above (1−yesProb) — which reflects to
+  // YES bids deepening below yesProb. Net: a symmetric book centred on yesProb.
+  const yesStart = p.yesProb + p.spread;
+  const noStart = 1 - p.yesProb + p.spread;
+  const yesRungs = slopedRungs(
+    N,
+    rampProbs(yesStart, yesStart + step * (rungs - 1), rungs)
+  );
+  const noRungs = slopedRungs(
+    N,
+    rampProbs(noStart, noStart + step * (rungs - 1), rungs)
+  );
+  validateRungs({ ...live.yesAnchor, satoshis: N } as Utxo, yesRungs);
+  validateRungs({ ...live.noAnchor, satoshis: N } as Utxo, noRungs);
+
+  // One coin funds everything: the 3N mint collateral + the mint fee + both fans + every ad.
+  const funding = await selectFunding(
+    3 * N + feeHeadroom() + 2 * rungs * 200_000
+  );
+  const makeSplit = (feeSats: number) =>
+    buildSplit({
+      scripts: scriptsOf(t),
+      market: live.market,
+      yesAnchor: live.yesAnchor!,
+      noAnchor: live.noAnchor!,
+      funding,
+      amount: N,
+      recipientPkh: walletPkh(),
+      changeAddress: address,
+      feeSats,
+    });
+  const splitDraft = makeSplit(1_000_000);
+  const splitFee = Math.ceil((splitDraft.hex.length / 2) * feeRate.value * 1.05);
+  const sp = makeSplit(splitFee);
+  await broadcast(sp.hex);
+
+  const p2pkhHex = Script.buildPublicKeyHashOut(
+    Address.fromString(address)
+  ).toHex() as string;
+  // buildSplit outputs: 0 market, 1 yesAnchor, 2 noAnchor, 3 YES(N), 4 NO(N), 5 change.
+  const changeCoin: KeyedUtxo = {
+    txid: sp.txid,
+    vout: 5,
+    satoshis: funding.satoshis - 3 * N - splitFee,
+    script: p2pkhHex,
+    wif,
+  };
+
+  // Chain the split's change through the YES ladder, then the NO ladder.
+  const yes = await fanAndAdvertise(t, "yes", sp.yes, yesRungs, changeCoin);
+  const no = await fanAndAdvertise(t, "no", sp.no, noRungs, yes.change);
+  return [...yes.orders, ...no.orders];
 }
 
 /** Offer `priceSats` RXD for `amount` shares: prepare an exact-value coin (its whole value is the

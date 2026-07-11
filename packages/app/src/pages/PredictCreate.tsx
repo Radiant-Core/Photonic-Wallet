@@ -49,6 +49,8 @@ export default function PredictCreate() {
   const [useOptimistic, setUseOptimistic] = useState(false);
   const [bondRxd, setBondRxd] = useState("0.1");
   const [liveness, setLiveness] = useState("36");
+  // Optional off-chain reference market (Polymarket) — binary markets only
+  const [oddsRef, setOddsRef] = useState("");
   // categorical
   const [outcomeCount, setOutcomeCount] = useState(String(supportedOutcomeCounts[0] ?? 3));
   const [outcomeLabels, setOutcomeLabels] = useState("");
@@ -187,6 +189,7 @@ export default function PredictCreate() {
           grace: g,
           committee,
           optimistic,
+          oddsRef: oddsRef.trim() || undefined,
         });
         createdTxid = t.createTxid;
       } else if (kind === "categorical") {
@@ -290,6 +293,23 @@ export default function PredictCreate() {
             : "A numeric question; the range below is split into buckets."}
         </FormHelperText>
       </FormControl>
+
+      {kind === "binary" && (
+        <FormControl mb={4}>
+          <FormLabel>Reference market (optional)</FormLabel>
+          <Input
+            placeholder="Polymarket link or slug, e.g. poly:will-rxd-reach-1-dollar"
+            value={oddsRef}
+            onChange={(e) => setOddsRef(e.target.value)}
+          />
+          <FormHelperText>
+            Link an equivalent Polymarket market. Its implied YES% is shown as an
+            off-chain <b>reference</b> when your on-chain order book is empty — it
+            is not the tradeable price. Stored in the market's on-chain beacon so
+            everyone who opens the market sees it.
+          </FormHelperText>
+        </FormControl>
+      )}
 
       {kind === "categorical" && (
         <>

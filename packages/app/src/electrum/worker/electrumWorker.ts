@@ -199,6 +199,9 @@ export interface IndexedMarket {
   beacon_params_match: boolean;
   create_txid: string; // display (big-endian) txid hex
   create_height: number;
+  /** Optional creator-supplied off-chain reference market from the beacon (advisory). Present only
+   *  once the indexer parses the beacon's optional oddsRef push; undefined on older indexers. */
+  odds_ref?: string | null;
 }
 
 const worker = {
@@ -826,6 +829,29 @@ function tryNextServer() {
   worker.connect(address);
 }
 
+/** Detect whether the connected server carries the RXinDexer glyph/swap/predict indexes. Only some
+ *  Radiant servers run RXinDexer; a plain ElectrumX server answers `blockchain.*` but not
+ *  `market.*`/`swap.*`, so market discovery and live odds silently come back empty there. We probe
+ *  `server.features` (which advertises `rxindexer_version` on indexed servers) once per connection
+ *  and stash the result so the UI can tell "no indexer on this server" apart from "no data yet". */
+async function probeIndexerFeatures(): Promise<void> {
+  let available = false;
+  let version: string | null = null;
+  try {
+    const features = (await electrum.client?.request("server.features")) as
+      | { rxindexer_version?: string | null }
+      | undefined;
+    version = features?.rxindexer_version ?? null;
+    available = !!version;
+  } catch {
+    available = false;
+  }
+  await db.kvp.put(
+    { available, probed: true, server: electrum.endpoint, rxindexerVersion: version },
+    "indexerFeatures"
+  );
+}
+
 electrum.addEvent("connected", () => {
   workerLog("[Worker] CONNECTED event received");
   clearTimers();
@@ -835,6 +861,18 @@ electrum.addEvent("connected", () => {
     { status: ElectrumStatus.CONNECTED, server: electrum.endpoint },
     "electrumStatus"
   );
+  // Unknown until probed — clear any stale reading from a prior server so the UI doesn't show the
+  // previous server's indexer availability (or flash a warning) against this one.
+  db.kvp.put(
+    { available: false, probed: false, server: electrum.endpoint, rxindexerVersion: null },
+    "indexerFeatures"
+  );
+  // Deferred so it doesn't add to the initial subscribe burst that trips "excessive resource usage".
+  setTimeout(() => {
+    probeIndexerFeatures().catch((err) =>
+      workerLog("[Worker] indexer feature probe failed:", err)
+    );
+  }, 1200);
   // Start header-chain sync independently of the wallet address — SPV needs
   // headers regardless of which account is loaded.
   headers.register().catch((err) => {

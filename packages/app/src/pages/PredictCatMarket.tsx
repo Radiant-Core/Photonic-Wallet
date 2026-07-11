@@ -122,6 +122,16 @@ export default function PredictCatMarket() {
   const isScalar = tracked ? marketKind(tracked) === "scalar" : false;
 
   const run = async (label: string, fn: () => Promise<string>) => {
+    // Legacy-covenant markets are read-only (this build can't spend their older covenant).
+    if (live?.legacyVersion) {
+      toast({
+        title: "Read-only market",
+        description:
+          "This market was created with an older RadiantSwap covenant and can't be traded in this build.",
+        status: "warning",
+      });
+      return;
+    }
     setBusy(label);
     try {
       const txid = await fn();
@@ -168,6 +178,14 @@ export default function PredictCatMarket() {
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
+      {live?.legacyVersion && (
+        <Alert status="warning" mb={4} borderRadius="md">
+          <AlertIcon />
+          This market was created with an older RadiantSwap covenant. This build
+          can read its state but can't build trades or resolutions against it, so
+          it's shown read-only.
+        </Alert>
+      )}
       <MarketHeroFrame question={tracked.question} headerMb={4} mb={4}>
         <Text
           fontSize="xs"

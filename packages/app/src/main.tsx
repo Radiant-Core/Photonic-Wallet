@@ -604,6 +604,9 @@ const router = createHashRouter([
             ],
           },
           {
+            // Scoped error boundary: a render throw in any predict page is caught here and shown
+            // inside the app shell, rather than bubbling to the root and blanking the whole app.
+            errorElement: <ErrorPage />,
             lazy: async () => ({
               Component: (await import("./layouts/PredictLayout")).default,
             }),

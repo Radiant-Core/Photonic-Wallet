@@ -26,6 +26,9 @@ const CONNECT_HOSTS = [
   "https://testnet.radiantexplorer.com",
   // First-party swap relay
   "https://swap.radiantcore.org",
+  // Off-chain reference odds for prediction markets (Polymarket Gamma API, CORS-enabled).
+  // Read-only, host-scoped; only a creator-supplied market slug is sent (see predict/referenceOdds.ts).
+  "https://gamma-api.polymarket.com",
   // IPFS pinning gateway
   "https://*.ipfs.nftstorage.link",
   // ElectrumX websocket endpoints (community-run, allow-listed).

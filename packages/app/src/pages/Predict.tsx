@@ -42,6 +42,23 @@ import { HeroCard, NeonSplitBar, NEON } from "@app/predict/ui";
 import { OracleTrustBadge } from "@app/predict/trust";
 import { blockEta } from "@app/predict/time";
 import Photons from "@app/components/Photons";
+import db from "@app/db";
+
+/** Indexer-feature reading the worker stashes on connect (see probeIndexerFeatures). */
+interface IndexerFeatures {
+  available: boolean;
+  probed: boolean;
+  server?: string;
+}
+
+/** Host portion of a wss:// endpoint for display, tolerant of a bare host. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 /** A market shown on the list: the market plus whether it's in the local watchlist (controls the
  *  untrack button) and whether the indexer discovered it. */
@@ -67,6 +84,16 @@ export default function Predict() {
   const toast = useToast();
   const [txid, setTxid] = useState("");
   const [importing, setImporting] = useState(false);
+
+  // Whether the connected server actually carries the market indexer. Discovery + odds silently
+  // return empty on a plain ElectrumX server, so surface that explicitly rather than showing an
+  // ambiguous "no markets" state.
+  const indexer = useLiveQuery(
+    () => db.kvp.get("indexerFeatures") as Promise<IndexerFeatures | undefined>,
+    [],
+    undefined
+  );
+  const noIndexer = indexer?.probed === true && indexer.available === false;
 
   // Locally tracked markets (watchlist + the only source for categorical/scalar, which carry no
   // beacon) and indexer-discovered binary markets (newest-first). Merged + deduped for display.
@@ -320,6 +347,11 @@ export default function Predict() {
                 {status.label}
               </Badge>
             )}
+            {status?.legacy && (
+              <Badge colorScheme="gray" variant="outline">
+                Legacy · read-only
+              </Badge>
+            )}
             {tracked && (
               <Badge variant="outline" colorScheme="teal">
                 Watchlist
@@ -415,6 +447,16 @@ export default function Predict() {
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
+      {noIndexer && (
+        <Alert status="warning" mb={4} borderRadius="md">
+          <AlertIcon />
+          The connected server
+          {indexer?.server ? ` (${hostOf(indexer.server)})` : ""} has no market
+          indexer, so markets and live odds can't be discovered here. Locally
+          tracked markets still work. Switch to an indexed server such as
+          electrumx.radiantcore.org from the connection status bar.
+        </Alert>
+      )}
       <Alert status="info" mb={4} borderRadius="md">
         <AlertIcon />
         Fully-collateralized prediction markets on-chain. Binary (YES/NO)

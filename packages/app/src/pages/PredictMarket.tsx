@@ -14,6 +14,7 @@ import {
   Input,
   InputGroup,
   InputRightAddon,
+  Link,
   Select,
   Spinner,
   Textarea,
@@ -55,7 +56,13 @@ import {
   postBidAction,
   postedKind,
   postedOrderIsOpen,
+  postLadderAction,
   postOrderAction,
+  priceSatsForProb,
+  rungsForProb,
+  slopedRungs,
+  rampProbs,
+  seedLiquidityAction,
   proposalConfirmations,
   proposeAction,
   redeemAction,
@@ -87,6 +94,10 @@ import {
   TrustPanel,
 } from "@app/predict/trust";
 import { blockEta, blocksToDuration } from "@app/predict/time";
+import {
+  fetchReferenceOdds,
+  type ReferenceOdds,
+} from "@app/predict/referenceOdds";
 
 const RXD = 100_000_000;
 
@@ -114,6 +125,7 @@ function OrdersPanel({
   run,
   book,
   reloadBook,
+  refOdds,
 }: {
   tracked: TrackedMarket;
   live: LiveMarket;
@@ -121,6 +133,7 @@ function OrdersPanel({
   run: (label: string, fn: () => Promise<string>) => Promise<void>;
   book: { available: boolean; asks: IndexedAsk[] } | null;
   reloadBook: () => void;
+  refOdds: ReferenceOdds | null;
 }) {
   const toast = useToast();
   const positions = [
@@ -128,10 +141,29 @@ function OrdersPanel({
     ...live.myNo.map((u) => ({ u, side: "no" as const })),
   ];
   const [posIdx, setPosIdx] = useState("0");
-  const [priceRxd, setPriceRxd] = useState("");
+  // Order prices are entered as a PROBABILITY in ¢ (1–99), not raw RXD — a share of `amount`
+  // photons carries `amount` and pays 2·`amount` if it wins, so price = amount·(1+prob).
+  const [sellCents, setSellCents] = useState("");
+  // Optional upper price for a SLOPED ladder — rungs ramp from sellCents to sellToCents. Blank = flat.
+  const [sellToCents, setSellToCents] = useState("");
+  // Split the sell into N tranches so takers can buy partial amounts (1 = one order).
+  const [sellRungs, setSellRungs] = useState("1");
   const [bidSide, setBidSide] = useState<"yes" | "no">("yes");
   const [bidAmountRxd, setBidAmountRxd] = useState("1");
-  const [bidTotalRxd, setBidTotalRxd] = useState("");
+  const [bidCents, setBidCents] = useState("");
+  // Seed-liquidity panel (shown when the book is empty): mint sets + post YES/NO ladders.
+  const [seedSetsRxd, setSeedSetsRxd] = useState("10");
+  const [seedProbCents, setSeedProbCents] = useState("");
+  const [seedSpreadCents, setSeedSpreadCents] = useState("3");
+  const [seedStepCents, setSeedStepCents] = useState("2");
+  const [seedRungs, setSeedRungs] = useState("3");
+  // Prefill the seed probability from the reference market (Polymarket) when available.
+  useEffect(() => {
+    if (refOdds && seedProbCents === "") {
+      setSeedProbCents(String(Math.round(refOdds.yesProb * 100)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refOdds]);
   const [adTxid, setAdTxid] = useState("");
   const [preview, setPreview] = useState<AdTrade | null>(null);
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
@@ -157,13 +189,43 @@ function OrdersPanel({
 
   const post = () => {
     const pos = positions[parseInt(posIdx, 10)];
-    const price = Math.round(parseFloat(priceRxd) * 100_000_000);
+    const cents = Number(sellCents);
+    const rungs = Math.max(1, Math.floor(Number(sellRungs) || 1));
     if (!pos) {
       toast({ title: "Pick a position to sell", status: "warning" });
       return;
     }
-    if (!Number.isFinite(price) || price <= 0) {
-      toast({ title: "Enter an asking price in RXD", status: "warning" });
+    if (!Number.isFinite(cents) || cents < 1 || cents > 99) {
+      toast({
+        title: "Enter a price from 1–99¢",
+        description: "The price is the probability of this side — 60¢ = 60%.",
+        status: "warning",
+      });
+      return;
+    }
+    const prob = cents / 100;
+    const price = priceSatsForProb(pos.u.satoshis, prob);
+    // A "to" price makes a SLOPED ladder (rungs ramp from `cents` to `toCents`); blank = flat.
+    const toCents = Number(sellToCents);
+    const sloped = sellToCents.trim() !== "" && toCents >= 1 && toCents <= 99;
+    if (rungs > 1) {
+      // Each tranche's shares must clear the 546-sat dust floor (its price always does, since
+      // price = shares·(1+prob) ≥ shares).
+      if (rungs > Math.floor(pos.u.satoshis / 546)) {
+        toast({
+          title: "Too many orders",
+          description: "Each order needs ≥ 546 shares — reduce the split.",
+          status: "warning",
+        });
+        return;
+      }
+      run(`Post ${rungs} orders`, async () => {
+        const ladder = sloped
+          ? slopedRungs(pos.u.satoshis, rampProbs(prob, toCents / 100, rungs))
+          : rungsForProb(pos.u.satoshis, prob, rungs);
+        const posted = await postLadderAction(tracked, pos.side, pos.u, ladder);
+        return posted[0].adTxid;
+      });
       return;
     }
     run("Post order", async () => {
@@ -200,23 +262,150 @@ function OrdersPanel({
 
   const postBid = () => {
     const amount = Math.round(parseFloat(bidAmountRxd) * 100_000_000);
-    const total = Math.round(parseFloat(bidTotalRxd) * 100_000_000);
+    const cents = Number(bidCents);
     if (!Number.isFinite(amount) || amount < 546) {
       toast({ title: "Enter a share amount ≥ 546 photons", status: "warning" });
       return;
     }
-    if (!Number.isFinite(total) || total <= 0) {
-      toast({ title: "Enter the RXD you are offering", status: "warning" });
+    if (!Number.isFinite(cents) || cents < 1 || cents > 99) {
+      toast({ title: "Enter a bid price from 1–99¢", status: "warning" });
       return;
     }
+    const total = priceSatsForProb(amount, cents / 100);
     run("Post bid", async () => {
       const posted = await postBidAction(tracked, bidSide, amount, total);
       return posted.adTxid;
     });
   };
 
+  // Seed the empty book with two-sided liquidity so the market shows live odds and is chunk-buyable.
+  const seed = () => {
+    const sets = Math.round(parseFloat(seedSetsRxd) * 100_000_000);
+    const probCents = Number(seedProbCents);
+    const spreadCents = Number(seedSpreadCents);
+    const rungs = Math.max(1, Math.floor(Number(seedRungs) || 1));
+    if (!Number.isFinite(sets) || sets < 546 * rungs) {
+      toast({
+        title: "Provide more RXD",
+        description: `Need at least ${rungs} × 546 photons of collateral for ${rungs} orders per side.`,
+        status: "warning",
+      });
+      return;
+    }
+    if (!Number.isFinite(probCents) || probCents < 1 || probCents > 99) {
+      toast({ title: "Enter a starting probability from 1–99¢", status: "warning" });
+      return;
+    }
+    const stepCents = Number(seedStepCents);
+    run(`Seed ${rungs * 2} orders`, async () => {
+      const posted = await seedLiquidityAction(tracked, live, {
+        sets,
+        yesProb: probCents / 100,
+        spread: (Number.isFinite(spreadCents) ? spreadCents : 0) / 100,
+        step: (Number.isFinite(stepCents) ? Math.max(0, stepCents) : 0) / 100,
+        rungs,
+      });
+      return posted[0].adTxid;
+    });
+  };
+
+  const bookEmpty = !book?.asks?.length;
+
   return (
     <Box mb={6}>
+      {live.state.status === Status.OPEN && bookEmpty && (
+        <Box
+          mb={5}
+          p={4}
+          borderRadius="lg"
+          borderWidth="1px"
+          borderColor="whiteAlpha.200"
+          bg="whiteAlpha.50"
+        >
+          <Heading size="sm" mb={1}>
+            Seed liquidity
+          </Heading>
+          <Text fontSize="sm" color="text.muted" mb={3}>
+            This market has no orders yet, so it shows no odds. Provide some RXD as
+            collateral and this posts YES + NO orders around a starting probability —
+            the market goes live and others can trade partial amounts.
+            {refOdds
+              ? ` Prefilled from the Polymarket reference (${Math.round(
+                  refOdds.yesProb * 100
+                )}%).`
+              : ""}
+          </Text>
+          <Flex gap={2} mb={2} wrap="wrap" align="center">
+            <InputGroup maxW="40">
+              <Input
+                type="number"
+                min={1}
+                placeholder="10"
+                value={seedSetsRxd}
+                onChange={(e) => setSeedSetsRxd(e.target.value)}
+              />
+              <InputRightAddon>RXD</InputRightAddon>
+            </InputGroup>
+            <InputGroup maxW="36">
+              <Input
+                type="number"
+                min={1}
+                max={99}
+                placeholder="prob"
+                value={seedProbCents}
+                onChange={(e) => setSeedProbCents(e.target.value)}
+                title="Starting probability of YES — 60¢ means 60%"
+              />
+              <InputRightAddon>¢ YES</InputRightAddon>
+            </InputGroup>
+            <InputGroup maxW="32">
+              <Input
+                type="number"
+                min={0}
+                placeholder="3"
+                value={seedSpreadCents}
+                onChange={(e) => setSeedSpreadCents(e.target.value)}
+                title="Edge to the best price either side of the starting probability"
+              />
+              <InputRightAddon>¢ spread</InputRightAddon>
+            </InputGroup>
+            <InputGroup maxW="28">
+              <Input
+                type="number"
+                min={0}
+                placeholder="2"
+                value={seedStepCents}
+                onChange={(e) => setSeedStepCents(e.target.value)}
+                title="Price gap between rungs — 0 = flat, higher = deeper book"
+              />
+              <InputRightAddon>¢ step</InputRightAddon>
+            </InputGroup>
+            <InputGroup maxW="28">
+              <Input
+                type="number"
+                min={1}
+                placeholder="3"
+                value={seedRungs}
+                onChange={(e) => setSeedRungs(e.target.value)}
+                title="Orders per side (more = buyers can take smaller chunks)"
+              />
+              <InputRightAddon>×2 orders</InputRightAddon>
+            </InputGroup>
+            <Button
+              variant="primary"
+              isLoading={busy.startsWith("Seed")}
+              onClick={seed}
+            >
+              Seed market
+            </Button>
+          </Flex>
+          <Text fontSize="xs" color="text.muted">
+            Locks {seedSetsRxd || 0} RXD of collateral (reclaimable by merging unsold
+            YES+NO). You keep the spread if both sides fill.
+          </Text>
+        </Box>
+      )}
+
       <Heading size="sm" mb={2}>
         Orders
       </Heading>
@@ -236,19 +425,75 @@ function OrdersPanel({
               </option>
             ))}
           </Select>
-          <InputGroup maxW="56">
+          <InputGroup maxW="40">
             <Input
               type="number"
-              placeholder="ask price"
-              value={priceRxd}
-              onChange={(e) => setPriceRxd(e.target.value)}
+              min={1}
+              max={99}
+              placeholder="price"
+              value={sellCents}
+              onChange={(e) => setSellCents(e.target.value)}
+              title="The probability of this side — 60¢ means 60%"
             />
-            <InputRightAddon>RXD</InputRightAddon>
+            <InputRightAddon>¢</InputRightAddon>
           </InputGroup>
-          <Button minW="28" isLoading={busy === "Post order"} onClick={post}>
-            Post sell order
+          {Math.floor(Number(sellRungs) || 1) > 1 && (
+            <InputGroup maxW="36">
+              <Input
+                type="number"
+                min={1}
+                max={99}
+                placeholder="to"
+                value={sellToCents}
+                onChange={(e) => setSellToCents(e.target.value)}
+                title="Optional: ramp the ladder up to this price for depth at several levels"
+              />
+              <InputRightAddon>¢</InputRightAddon>
+            </InputGroup>
+          )}
+          <InputGroup maxW="32">
+            <Input
+              type="number"
+              min={1}
+              placeholder="1"
+              value={sellRungs}
+              onChange={(e) => setSellRungs(e.target.value)}
+              title="Split into N orders so buyers can take partial amounts"
+            />
+            <InputRightAddon>orders</InputRightAddon>
+          </InputGroup>
+          <Button
+            minW="28"
+            isLoading={busy.startsWith("Post ") && busy.includes("order")}
+            onClick={post}
+          >
+            {Math.floor(Number(sellRungs) || 1) > 1
+              ? "Post ladder"
+              : "Post sell order"}
           </Button>
         </Flex>
+      )}
+      {positions.length > 0 && live.state.status === Status.OPEN && (
+        <Text fontSize="xs" color="text.muted" mt={-1} mb={3}>
+          Price is this side's probability (60¢ = 60%).
+          {(() => {
+            const pos = positions[parseInt(posIdx, 10)];
+            const c = Number(sellCents);
+            if (!pos || !(c >= 1 && c <= 99)) return null;
+            const rxd = priceSatsForProb(pos.u.satoshis, c / 100) / RXD;
+            return ` You'd receive ≈ ${rxd.toLocaleString(undefined, {
+              maximumFractionDigits: 4,
+            })} RXD if fully filled.`;
+          })()}
+          {Math.floor(Number(sellRungs) || 1) > 1 &&
+            (sellToCents.trim() !== ""
+              ? ` Ramps ${Math.floor(Number(sellRungs))} orders from ${
+                  sellCents || "?"
+                }¢ to ${sellToCents}¢ for depth.`
+              : ` Split into ${Math.floor(
+                  Number(sellRungs)
+                )} orders so buyers can take partial amounts.`)}
+        </Text>
       )}
 
       {live.state.status === Status.OPEN && (
@@ -270,14 +515,17 @@ function OrdersPanel({
             />
             <InputRightAddon>shares</InputRightAddon>
           </InputGroup>
-          <InputGroup maxW="48">
+          <InputGroup maxW="36">
             <Input
               type="number"
-              placeholder="offering"
-              value={bidTotalRxd}
-              onChange={(e) => setBidTotalRxd(e.target.value)}
+              min={1}
+              max={99}
+              placeholder="price"
+              value={bidCents}
+              onChange={(e) => setBidCents(e.target.value)}
+              title="The probability you're bidding — 60¢ means 60%"
             />
-            <InputRightAddon>RXD</InputRightAddon>
+            <InputRightAddon>¢</InputRightAddon>
           </InputGroup>
           <Button minW="28" isLoading={busy === "Post bid"} onClick={postBid}>
             Post buy order
@@ -684,6 +932,19 @@ export default function PredictMarket() {
     available: boolean;
     asks: IndexedAsk[];
   } | null>(null);
+  // Off-chain reference odds (creator-linked external market), shown only when the on-chain book
+  // has no price. Best-effort — null when there's no reference or the fetch fails.
+  const [refOdds, setRefOdds] = useState<ReferenceOdds | null>(null);
+
+  useEffect(() => {
+    setRefOdds(null);
+    if (!tracked?.oddsRef) return;
+    const ctrl = new AbortController();
+    fetchReferenceOdds(tracked.oddsRef, ctrl.signal)
+      .then((r) => setRefOdds(r))
+      .catch(() => setRefOdds(null));
+    return () => ctrl.abort();
+  }, [tracked?.oddsRef]);
 
   useEffect(() => {
     let cancelled = false;
@@ -798,6 +1059,17 @@ export default function PredictMarket() {
   );
 
   const run = async (label: string, fn: () => Promise<string>) => {
+    // A legacy-covenant market is read-only — this build can't build spends against its older
+    // covenant, so refuse every mutating action here rather than broadcasting a doomed tx.
+    if (live?.legacyVersion) {
+      toast({
+        title: "Read-only market",
+        description:
+          "This market was created with an older RadiantSwap covenant and can't be traded in this build.",
+        status: "warning",
+      });
+      return;
+    }
     setBusy(label);
     try {
       const txid = await fn();
@@ -919,6 +1191,14 @@ export default function PredictMarket() {
 
   return (
     <Box mx={{ base: 2, md: 4 }}>
+      {live?.legacyVersion && (
+        <Alert status="warning" mb={4} borderRadius="md">
+          <AlertIcon />
+          This market was created with an older RadiantSwap covenant. This build
+          can read its state but can't build trades or resolutions against it, so
+          it's shown read-only.
+        </Alert>
+      )}
       {/* Neon market hero — dark glass card with the question, RadiantSwap badge, live
           YES/NO odds, split probability bar, and one-click buy buttons. */}
       <MarketHeroFrame
@@ -981,6 +1261,51 @@ export default function PredictMarket() {
             </Flex>
             <NeonSplitBar yesPct={odds.yesProb * 100} />
           </>
+        ) : refOdds ? (
+          <Box>
+            <Flex align="center" gap={2} mb={1.5} flexWrap="wrap">
+              <Text
+                fontFamily="mono"
+                color={NEON.yes}
+                fontWeight="bold"
+                fontSize="lg"
+              >
+                {Math.round(refOdds.yesProb * 100)}%{" "}
+                <Text as="span" fontSize="xs">
+                  YES
+                </Text>
+              </Text>
+              <Badge colorScheme="purple" variant="outline">
+                Reference · Polymarket
+              </Badge>
+              {refOdds.closed && (
+                <Badge colorScheme="orange" variant="subtle">
+                  closed
+                </Badge>
+              )}
+            </Flex>
+            <NeonSplitBar yesPct={refOdds.yesProb * 100} />
+            <Text
+              fontSize="xs"
+              color="whiteAlpha.500"
+              fontFamily="mono"
+              mt={1.5}
+            >
+              Off-chain reference from{" "}
+              <Link
+                href={refOdds.url}
+                isExternal
+                color="whiteAlpha.700"
+                textDecoration="underline"
+              >
+                Polymarket
+              </Link>{" "}
+              — not the on-chain price.
+              {open
+                ? " Post or fill an order below to set the on-chain price."
+                : ""}
+            </Text>
+          </Box>
         ) : (
           <Text fontSize="sm" color="whiteAlpha.500" fontFamily="mono">
             {open
@@ -1208,6 +1533,7 @@ export default function PredictMarket() {
             run={run}
             book={book}
             reloadBook={loadBook}
+            refOdds={refOdds}
           />
 
           <Heading size="sm" mb={2}>
