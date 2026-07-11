@@ -141,7 +141,7 @@ function OrdersPanel({
     ...live.myNo.map((u) => ({ u, side: "no" as const })),
   ];
   const [posIdx, setPosIdx] = useState("0");
-  // Order prices are entered as a PROBABILITY in ¢ (1–99), not raw RXD — a share of `amount`
+  // Order prices are entered as a PROBABILITY in % (1–99), not raw RXD — a share of `amount`
   // photons carries `amount` and pays 2·`amount` if it wins, so price = amount·(1+prob).
   const [sellCents, setSellCents] = useState("");
   // Optional upper price for a SLOPED ladder — rungs ramp from sellCents to sellToCents. Blank = flat.
@@ -197,8 +197,8 @@ function OrdersPanel({
     }
     if (!Number.isFinite(cents) || cents < 1 || cents > 99) {
       toast({
-        title: "Enter a price from 1–99¢",
-        description: "The price is the probability of this side — 60¢ = 60%.",
+        title: "Enter a price from 1–99%",
+        description: "The price is this side's probability of winning.",
         status: "warning",
       });
       return;
@@ -268,7 +268,7 @@ function OrdersPanel({
       return;
     }
     if (!Number.isFinite(cents) || cents < 1 || cents > 99) {
-      toast({ title: "Enter a bid price from 1–99¢", status: "warning" });
+      toast({ title: "Enter a bid price from 1–99%", status: "warning" });
       return;
     }
     const total = priceSatsForProb(amount, cents / 100);
@@ -293,7 +293,7 @@ function OrdersPanel({
       return;
     }
     if (!Number.isFinite(probCents) || probCents < 1 || probCents > 99) {
-      toast({ title: "Enter a starting probability from 1–99¢", status: "warning" });
+      toast({ title: "Enter a starting probability from 1–99%", status: "warning" });
       return;
     }
     const stepCents = Number(seedStepCents);
@@ -354,9 +354,9 @@ function OrdersPanel({
                 placeholder="prob"
                 value={seedProbCents}
                 onChange={(e) => setSeedProbCents(e.target.value)}
-                title="Starting probability of YES — 60¢ means 60%"
+                title="Starting probability of YES winning (0–100%)"
               />
-              <InputRightAddon>¢ YES</InputRightAddon>
+              <InputRightAddon>% YES</InputRightAddon>
             </InputGroup>
             <InputGroup maxW="32">
               <Input
@@ -367,7 +367,7 @@ function OrdersPanel({
                 onChange={(e) => setSeedSpreadCents(e.target.value)}
                 title="Edge to the best price either side of the starting probability"
               />
-              <InputRightAddon>¢ spread</InputRightAddon>
+              <InputRightAddon>% spread</InputRightAddon>
             </InputGroup>
             <InputGroup maxW="28">
               <Input
@@ -378,7 +378,7 @@ function OrdersPanel({
                 onChange={(e) => setSeedStepCents(e.target.value)}
                 title="Price gap between rungs — 0 = flat, higher = deeper book"
               />
-              <InputRightAddon>¢ step</InputRightAddon>
+              <InputRightAddon>% step</InputRightAddon>
             </InputGroup>
             <InputGroup maxW="28">
               <Input
@@ -433,9 +433,9 @@ function OrdersPanel({
               placeholder="price"
               value={sellCents}
               onChange={(e) => setSellCents(e.target.value)}
-              title="The probability of this side — 60¢ means 60%"
+              title="The probability of this side winning (0–100%)"
             />
-            <InputRightAddon>¢</InputRightAddon>
+            <InputRightAddon>%</InputRightAddon>
           </InputGroup>
           {Math.floor(Number(sellRungs) || 1) > 1 && (
             <InputGroup maxW="36">
@@ -448,7 +448,7 @@ function OrdersPanel({
                 onChange={(e) => setSellToCents(e.target.value)}
                 title="Optional: ramp the ladder up to this price for depth at several levels"
               />
-              <InputRightAddon>¢</InputRightAddon>
+              <InputRightAddon>%</InputRightAddon>
             </InputGroup>
           )}
           <InputGroup maxW="32">
@@ -475,7 +475,7 @@ function OrdersPanel({
       )}
       {positions.length > 0 && live.state.status === Status.OPEN && (
         <Text fontSize="xs" color="text.muted" mt={-1} mb={3}>
-          Price is this side's probability (60¢ = 60%).
+          Price is this side's probability of winning (0–100%).
           {(() => {
             const pos = positions[parseInt(posIdx, 10)];
             const c = Number(sellCents);
@@ -489,7 +489,7 @@ function OrdersPanel({
             (sellToCents.trim() !== ""
               ? ` Ramps ${Math.floor(Number(sellRungs))} orders from ${
                   sellCents || "?"
-                }¢ to ${sellToCents}¢ for depth.`
+                }% to ${sellToCents}% for depth.`
               : ` Split into ${Math.floor(
                   Number(sellRungs)
                 )} orders so buyers can take partial amounts.`)}
@@ -523,9 +523,9 @@ function OrdersPanel({
               placeholder="price"
               value={bidCents}
               onChange={(e) => setBidCents(e.target.value)}
-              title="The probability you're bidding — 60¢ means 60%"
+              title="The probability you're bidding (0–100%)"
             />
-            <InputRightAddon>¢</InputRightAddon>
+            <InputRightAddon>%</InputRightAddon>
           </InputGroup>
           <Button minW="28" isLoading={busy === "Post bid"} onClick={postBid}>
             Post buy order

@@ -15,7 +15,7 @@ export const clampProb = (p: number): number => Math.max(0, Math.min(1, p));
  * and pays an EXTRA `shares` photons of collateral only if it wins — so it trades in
  * [shares, 2·shares], and the market's implied probability is `(price − shares) / shares`
  * (see odds.ts). These two helpers convert between that carrier-inclusive price and a plain
- * probability so the UI can quote in ¢/probability instead of raw RXD.
+ * probability so the UI can quote in %/probability instead of raw RXD.
  */
 export function priceSatsForProb(shares: number, prob: number): number {
   return Math.round(shares * (1 + clampProb(prob)));
