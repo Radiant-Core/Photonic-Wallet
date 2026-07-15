@@ -126,11 +126,33 @@ export function feeCheck(tx: rjs.Transaction, referenceFeeRate: number) {
   }
 }
 
+/**
+ * Result of `findTokenOutput`: a discriminated union so the type system forces
+ * callers to guard. `vout` and `output` are always both present or both
+ * undefined — reading `output` without narrowing is a type error.
+ *
+ * Note `vout` can legitimately be 0, so callers must test `vout === undefined`,
+ * NOT `!vout` — the latter treats a token at output index 0 as not-found.
+ */
+export type FoundTokenOutput =
+  | { vout: number; output: rjs.Transaction["outputs"][number] }
+  | { vout: undefined; output: undefined };
+
+/**
+ * Locate the output in `tx` holding the token identified by `refLE`.
+ *
+ * Previously this returned `{ vout, output }` on success but
+ * `{ index: undefined, output: undefined }` on failure — two different shapes,
+ * and the failure one named the index `index` rather than `vout`. Every caller
+ * happened to survive that only because destructuring the absent `vout` key
+ * yields `undefined` anyway. Normalised to a single shape so the next caller
+ * isn't trapped by it.
+ */
 export function findTokenOutput(
   tx: rjs.Transaction,
   refLE: string,
   parseFn: (script: string) => Partial<{ ref: string }> = parseNftScript
-) {
+): FoundTokenOutput {
   const vout = tx.outputs.findIndex(
     (output: { script: { toHex: () => string } }) => {
       const { ref } = parseFn(output.script.toHex());
@@ -142,5 +164,5 @@ export function findTokenOutput(
     return { vout, output: tx.outputs[vout] };
   }
 
-  return { index: undefined, output: undefined };
+  return { vout: undefined, output: undefined };
 }

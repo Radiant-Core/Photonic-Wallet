@@ -17,9 +17,26 @@
  *              maker's SIGHASH_SINGLE signature no longer matches output[0].
  *              (Proves the pre-fix reorder really broke NFT-for-RXD swaps.)
  *
+ * The canonical layout is built by the REAL `buildSwapCompletionOutputs` from
+ * ../swapOutputs — the same function pages/SwapLoad.tsx and pages/OpenOrders.tsx
+ * call — so the node itself is what proves that function's ordering. The
+ * negative layout is hand-built on purpose: it is the anti-pattern, and nothing
+ * in production should be able to produce it.
+ *
  * Requires the local regtest stack (radiantd RPC 127.0.0.1:17443). Enable with:
  *   REGTEST_E2E=1 pnpm --filter @photonic/lib exec vitest run \
  *     src/__tests__/swap-load-flow.regtest.test.ts --testTimeout=600000
+ *
+ * Connection is overridable for a node on another port / with other credentials
+ * (wallet RPCs need the `/wallet/<name>` uri-path, else "Wallet file not
+ * specified"):
+ *   REGTEST_RPC_URL=http://127.0.0.1:17643/wallet/rt \
+ *   REGTEST_RPC_USER=... REGTEST_RPC_PASS=...
+ *
+ * Running MORE THAN ONE regtest file in one vitest invocation needs
+ * `--no-file-parallelism`. radiantd permits only one `scantxoutset` at a time,
+ * so parallel test files collide with "Scan already in progress" — a harness
+ * artifact that looks exactly like a real consensus failure.
  */
 import { it, expect } from "vitest";
 import rjs from "@radiant-core/radiantjs";
@@ -29,6 +46,7 @@ import { buildTx } from "../tx";
 import { fundTx, SelectableInput } from "../coinSelect";
 import { nftScript, p2pkhScript, parseNftScript } from "../script";
 import { createWaveNameMetadata } from "../wave";
+import { buildSwapCompletionOutputs } from "../swapOutputs";
 import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "../types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,9 +54,10 @@ import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "../types";
 // cast as any for the regtest harness (runtime is correct — see test output).
 const { PrivateKey, Networks, Transaction } = rjs as any;
 
-const RPC_URL = "http://127.0.0.1:17443/";
-const RPC_USER = "radiantrpc";
-const RPC_PASS = "613c41227c677d8bc90f5729f93604a7";
+const RPC_URL = process.env.REGTEST_RPC_URL || "http://127.0.0.1:17443/";
+const RPC_USER = process.env.REGTEST_RPC_USER || "radiantrpc";
+const RPC_PASS =
+  process.env.REGTEST_RPC_PASS || "613c41227c677d8bc90f5729f93604a7";
 const FEE_RATE = 10_000;
 const PHOTONS = 100_000_000;
 
@@ -171,8 +190,13 @@ it.skipIf(process.env.REGTEST_E2E !== "1")(
       { script: p2pkhScript(royB.address), value: ROY_B },
     ];
 
-    // Canonical SwapLoad layout: [payment, nft, ...royalties], change appended.
-    const canonicalOutputs = [payOut, nftToB, ...royaltyOuts];
+    // Canonical layout from the REAL production function — the node below is
+    // what proves it: [payment, nft, ...royalties], change appended after fund.
+    const canonicalOutputs = buildSwapCompletionOutputs({
+      makerPayment: payOut,
+      assetToTaker: nftToB,
+      royaltyOutputs: royaltyOuts,
+    });
     const bFund = fundTx(
       B.address,
       await rxdCoins(B.address),
@@ -211,7 +235,9 @@ it.skipIf(process.env.REGTEST_E2E !== "1")(
 
     // ===================== POSITIVE (fixed canonical layout) ================
     const aBefore = await addrBalance(A.address);
-    const swapOutputs = [payOut, nftToB, ...royaltyOuts, ...bFund.change];
+    // Exactly what buildSwapCompletionOutputs produced, plus fundTx's change —
+    // i.e. the bytes the production path would broadcast.
+    const swapOutputs = [...canonicalOutputs, ...bFund.change];
     const swapTx = buildTx(
       B.address,
       B.wif,

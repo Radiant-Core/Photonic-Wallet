@@ -28,6 +28,26 @@ export const LEGACY_MIN_RELAY_FEE_RATE = 1_000;
  * Any transaction built with an effective rate below this will be rejected
  * with "min relay fee not met" by mainnet nodes. The wallet clamps caller-
  * provided rates up to this value at every action boundary.
+ *
+ * DELIBERATELY A MAINNET-ONLY SCALAR, NOT NETWORK-DERIVED. Testnet and regtest
+ * floors are 10x lower (LEGACY_MIN_RELAY_FEE_RATE), so on those networks the
+ * wallet overpays 10x. That is a considered trade, not an oversight:
+ *
+ *  - The error is one-directional and safe. Overpaying is always accepted;
+ *    UNDERpaying is what gets a transaction rejected. Deriving the floor from a
+ *    network value adds a way to underpay on MAINNET if that value is ever
+ *    unset, stale, or resolved late — trading a harmless overpay on worthless
+ *    coins for a real failure on real money.
+ *  - The cost is only paid where money is not. Mainnet, the only network with
+ *    value at stake, is exactly the network this constant is correct for.
+ *  - Threading a network through `normalizeFeeRate` would mean threading it
+ *    through `fundTx` and `buildTx` too — every signature on the swap fill
+ *    path, whose guards are load-bearing and regtest-proven.
+ *
+ * Revisit if the wallet ever needs to build fee-sensitive transactions on a
+ * non-mainnet network (e.g. a testnet faucet under fee pressure). Xetch's
+ * swap/feePolicy is network-aware because its test gate RUNS on regtest, where
+ * a 10x overpay would distort what the gate proves; Photonic's does not.
  */
 export const MIN_RELAY_FEE_RATE = 10_000;
 

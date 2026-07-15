@@ -52,7 +52,8 @@ export default function EditTokenTest({
       parseMutableScript
     );
 
-    if (!vout) {
+    // `vout === undefined`, not `!vout`: index 0 is a valid output.
+    if (vout === undefined || !output) {
       return;
     }
 

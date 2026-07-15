@@ -56,7 +56,9 @@ import { UnfinalizedOutput, Utxo } from "@lib/types";
 import { TransferError } from "@lib/transfer";
 import { SwapPrepareError } from "./Swap";
 import { buildTx } from "@lib/tx";
+import { buildSwapCompletionOutputs } from "@lib/swapOutputs";
 import createExplorerUrl from "@app/network/createExplorerUrl";
+import { broadcastSwapCompletion } from "@app/swapActivity";
 import opfs from "@app/opfs";
 import { decodeGlyph } from "@lib/token";
 
@@ -404,16 +406,19 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
       },
     ];
 
-    const outputs: UnfinalizedOutput[] = [
-      {
-        script: swapParams.tx.outputs[0].script.toString(),
-        value: swapParams.tx.outputs[0].satoshis,
-      },
-      {
-        script: outputScript,
-        value: swapParams.from.value,
-      },
-    ];
+    // The maker's pre-signed payment (their SIGHASH_SINGLE commits to this)
+    // and the asset delivered to us. Ordering is applied by
+    // `buildSwapCompletionOutputs` below — see @lib/swapOutputs.
+    const makerPayment: UnfinalizedOutput = {
+      script: swapParams.tx.outputs[0].script.toString(),
+      value: swapParams.tx.outputs[0].satoshis,
+    };
+    const assetToTaker: UnfinalizedOutput = {
+      script: outputScript,
+      value: swapParams.from.value,
+    };
+    const royaltyOutputs: UnfinalizedOutput[] = [];
+    const fundingOutputs: UnfinalizedOutput[] = [];
 
     // Royalty handling for the PSRT (maker-signed) swap path.
     //
@@ -427,14 +432,9 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
     // proven on regtest in
     // packages/lib/src/__tests__/royaltyCovenant.regtest.test.ts.
     //
-    // Canonical ordering: vout0 = seller payment (the maker pre-signed this
-    // with SIGHASH_SINGLE bound to its input at index 0), vout1 = NFT to buyer,
-    // vout2.. = royalty outputs, funding/change after. Do NOT reorder: the
-    // maker's reused scriptSig at input index 0 commits to output[0], so the
-    // payment must stay at index 0 or the maker signature becomes invalid.
-    // This matches the working regtest construction in
-    // packages/lib/src/__tests__/wave-swap-regtest.test.ts
-    // (swapOutputs = [payOut, nftToB, ...]).
+    // This block only computes royalty AMOUNTS; their position (index 2+, never
+    // displacing the maker payment at index 0) is fixed by
+    // `buildSwapCompletionOutputs`.
     if (
       swapParams.from.contractType === ContractType.NFT &&
       swapParams.to.contractType === ContractType.RXD &&
@@ -452,7 +452,6 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
           );
 
           if (totalRoyalty > 0) {
-            const royaltyOutputs: UnfinalizedOutput[] = [];
             if (royalty.splits.length > 0) {
               let remaining = totalRoyalty;
               for (let i = 0; i < royalty.splits.length; i++) {
@@ -477,10 +476,6 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
               }
               royaltyOutputs.push({ script, value: totalRoyalty });
             }
-
-            if (royaltyOutputs.length > 0) {
-              outputs.splice(2, 0, ...royaltyOutputs);
-            }
           }
         }
       }
@@ -493,13 +488,21 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
         if (swapParams.to.contractType === ContractType.FT) {
           const prepared = await fundFungible(toRefLE, swapParams.to.value);
           inputs.push(...prepared.inputs);
-          outputs.push(...prepared.outputs);
+          fundingOutputs.push(...prepared.outputs);
         } else {
           const prepared = await fundNonFungible(toRefLE);
           inputs.push(...prepared.inputs);
-          outputs.push(...prepared.outputs);
+          fundingOutputs.push(...prepared.outputs);
         }
       }
+
+      // [makerPayment(0), assetToTaker(1), ...royalties, ...funding].
+      const outputs = buildSwapCompletionOutputs({
+        makerPayment,
+        assetToTaker,
+        royaltyOutputs,
+        fundingOutputs,
+      });
 
       const changeScript = p2pkhScript(wallet.value.address);
       const fund = fundTx(
@@ -550,12 +553,7 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
     }
 
     try {
-      const txid = await electrumWorker.value.broadcast(signed);
-      await db.broadcast.put({
-        txid,
-        date: Date.now(),
-        description: "rxd_swap_cancel",
-      });
+      const txid = await broadcastSwapCompletion(signed);
 
       setComplete(true);
       setTxid(txid);

@@ -15,12 +15,18 @@
  * default (network-dependent); enable with the REGTEST_E2E env var:
  *   REGTEST_E2E=1 pnpm --filter @photonic/lib exec vitest run \
  *     src/__tests__/wave-swap-regtest.test.ts --testTimeout=600000
+ *
+ * Connection is overridable via REGTEST_RPC_URL / REGTEST_RPC_USER /
+ * REGTEST_RPC_PASS (wallet RPCs need the `/wallet/<name>` uri-path). Running
+ * more than one regtest file per vitest invocation needs
+ * `--no-file-parallelism`: radiantd allows only one `scantxoutset` at a time.
  */
 import { it, expect } from "vitest";
 import rjs from "@radiant-core/radiantjs";
 import { mintToken } from "../mint";
 import { transferNonFungible, partiallySigned } from "../transfer";
 import { buildTx } from "../tx";
+import { buildSwapCompletionOutputs } from "../swapOutputs";
 import { fundTx, SelectableInput } from "../coinSelect";
 import {
   nftScript,
@@ -39,9 +45,13 @@ import { Utxo, UnfinalizedInput, SmartTokenPayload } from "../types";
 // cast as any for the regtest harness (runtime is correct — see test output).
 const { PrivateKey, Networks, Transaction } = rjs as any;
 
-const RPC_URL = "http://127.0.0.1:17443/";
-const RPC_USER = "radiantrpc";
-const RPC_PASS = "613c41227c677d8bc90f5729f93604a7";
+// Overridable for a node on another port / with other credentials (wallet RPCs
+// need the `/wallet/<name>` uri-path, else "Wallet file not specified"):
+//   REGTEST_RPC_URL=http://127.0.0.1:17643/wallet/rt REGTEST_RPC_USER=... REGTEST_RPC_PASS=...
+const RPC_URL = process.env.REGTEST_RPC_URL || "http://127.0.0.1:17443/";
+const RPC_USER = process.env.REGTEST_RPC_USER || "radiantrpc";
+const RPC_PASS =
+  process.env.REGTEST_RPC_PASS || "613c41227c677d8bc90f5729f93604a7";
 const FEE_RATE = 10_000;
 const PHOTONS = 100_000_000;
 
@@ -222,18 +232,25 @@ it.skipIf(process.env.REGTEST_E2E !== "1")(
       script: nftScript(B.address, refLE),
       value: nftAtSwap!.value,
     };
+    // Canonical ordering from the REAL production function (../swapOutputs),
+    // the same one pages/SwapLoad.tsx and pages/OpenOrders.tsx call — so this
+    // confirmed transaction is the node's verdict on that function.
+    const canonicalOutputs = buildSwapCompletionOutputs({
+      makerPayment: payOut,
+      assetToTaker: nftToB,
+    });
     const bFund = fundTx(
       B.address,
       await rxdCoins(B.address),
       [makerInput],
-      [payOut, nftToB],
+      canonicalOutputs,
       p2pkhScript(B.address),
       FEE_RATE
     );
     expect(bFund.funded).toBe(true);
     // fundTx.funding excludes required inputs — prepend the maker NFT input.
     const swapInputs = [makerInput, ...bFund.funding];
-    const swapOutputs = [payOut, nftToB, ...bFund.change];
+    const swapOutputs = [...canonicalOutputs, ...bFund.change];
     const swapTx = buildTx(
       B.address,
       B.wif,

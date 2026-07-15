@@ -415,7 +415,41 @@ function encodeCompactSize(value: number): Uint8Array {
   throw new Error("CompactSize value too large");
 }
 
+/**
+ * Read an 8-byte little-endian output value as a JS number.
+ *
+ * Photon amounts are `number` throughout the wallet. A number holds integers
+ * exactly only below 2^53 (= 90,071,992.547 RXD), while the wire format is a
+ * full 8-byte unsigned integer, so a large enough encoded value SILENTLY ROUNDS
+ * — 2^53+1 decodes as 2^53, and 2^64-1 decodes ~385 photons high. Throwing
+ * beats rounding: `price_terms` is authored by the maker (i.e. attacker-
+ * controllable), and a rounded value would be spent into output[0], which is
+ * exactly what the maker's SIGHASH_SINGLE signature commits to — the node would
+ * reject the completed transaction with an opaque script-verify failure. This
+ * turns that into a clear, early rejection.
+ *
+ * Not reachable for realistic prices: funding a swap that trips this bound
+ * requires >90M RXD (~0.4% of max supply), and `fundTx` would fail first. This
+ * is a correctness boundary, not a live exploit.
+ */
+function readValueLE8(bytes: Uint8Array, offset: number): number {
+  let value = 0;
+  for (let j = 7; j >= 0; j--) {
+    value = value * 256 + bytes[offset + j];
+  }
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(
+      "Output value exceeds the maximum photon amount this wallet can represent exactly"
+    );
+  }
+  return value;
+}
+
 function encodeOutput(script: string, value: number) {
+  // Refuse to encode what we cannot represent exactly (see readValueLE8).
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Cannot encode a non-integer or out-of-range output value");
+  }
   const valueBytes = new Uint8Array(8);
   let remaining = value;
   for (let i = 0; i < 8; i++) {
@@ -455,10 +489,7 @@ export function parsePriceTerms(priceTermsHex: string): {
           throw new Error("Invalid output value");
         }
 
-        let value = 0;
-        for (let j = 7; j >= 0; j--) {
-          value = value * 256 + bytes[offset + j];
-        }
+        const value = readValueLE8(bytes, offset);
         offset += 8;
 
         const scriptLen = readCompactSize(bytes, offset);
@@ -483,10 +514,10 @@ export function parsePriceTerms(priceTermsHex: string): {
         return null;
       }
 
-      let value = 0;
-      for (let i = 7; i >= 0; i--) {
-        value = value * 256 + bytes[i];
-      }
+      // Legacy single-output form. An unrepresentable value throws out to the
+      // outer catch, so parsePriceTerms returns null and callers reject the
+      // offer as having invalid price terms — never a silently rounded price.
+      const value = readValueLE8(bytes, 0);
 
       const script = bytesToHex(bytes.slice(8));
       outputs = [{ script, value }];

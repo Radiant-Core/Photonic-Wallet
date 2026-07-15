@@ -18,6 +18,7 @@ import { electrumWorker } from "./electrum/Electrum";
 import { wallet, feeRate, electrumStatus } from "./signals";
 import { withMnemonic } from "./wallet";
 import { materializeCovenantUtxo } from "./covenant";
+import { broadcastSwapCancellation } from "./swapActivity";
 
 // Supported HD coin types (newest default first). The swap subaccount is
 // `m/44'/<coinType>'/0'/0/1`. A coin-type-resolution inconsistency — e.g. the
@@ -131,12 +132,7 @@ export const cancelSwap = async (
       outputs,
       false
     ).toString();
-    const cancelTxid = await electrumWorker.value.broadcast(rawTx);
-    db.broadcast.put({
-      txid: cancelTxid,
-      date: Date.now(),
-      description: "rxd_swap_cancel",
-    });
+    await broadcastSwapCancellation(rawTx);
   } else {
     const ftSwap = contractType === ContractType.FT;
     const refLE = reverseRef(glyphRef as string);

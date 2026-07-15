@@ -73,6 +73,7 @@ import db from "@app/db";
 import opfs from "@app/opfs";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { cancelSwap } from "@app/swap";
+import { broadcastSwapCompletion } from "@app/swapActivity";
 import { photonsToRXD, formatAmountCompact, formatTokenAmount } from "@lib/format";
 import {
   SwapOffer,
@@ -100,6 +101,7 @@ import {
 } from "@lib/script";
 import { accumulateInputs, fundTx, SelectableInput } from "@lib/coinSelect";
 import { buildTx } from "@lib/tx";
+import { buildSwapCompletionOutputs } from "@lib/swapOutputs";
 import rxdIcon from "/rxd.png";
 import dayjs from "dayjs";
 import Outpoint from "@lib/Outpoint";
@@ -107,7 +109,7 @@ import { decodeGlyph } from "@lib/token";
 import { Transaction, Script } from "@radiant-core/radiantjs";
 import { TransferError } from "@lib/transfer";
 import { SwapPrepareError } from "./Swap";
-import { Utxo } from "@lib/types";
+import { UnfinalizedOutput, Utxo } from "@lib/types";
 
 type RoyaltySplit = { address: string; bps: number };
 
@@ -1456,21 +1458,24 @@ export default function OpenOrders({
         },
       ];
 
-      const outputs = [
-        ...makerTerms.outputs,
-        {
-          script: receiveScript,
-          value: offeredOutput.satoshis,
-        },
-      ];
+      // The maker's pre-signed payment (their SIGHASH_SINGLE commits to this)
+      // and the asset delivered to us. `makerTerms.outputs` holds exactly one
+      // entry — the C3 multi-output reject above guarantees it. Ordering is
+      // applied by `buildSwapCompletionOutputs` below — see @lib/swapOutputs.
+      const makerPayment = makerTerms.outputs[0];
+      const assetToTaker = {
+        script: receiveScript,
+        value: offeredOutput.satoshis,
+      };
+      const royaltyOutputs: UnfinalizedOutput[] = [];
+      const fundingOutputs: UnfinalizedOutput[] = [];
 
       if (
         order.offeredGlyph &&
         order.offeredGlyph.tokenType === SmartTokenType.NFT &&
         !order.wantGlyph &&
         order.wantValue &&
-        order.wantValue > 0 &&
-        outputs.length >= 2
+        order.wantValue > 0
       ) {
         const royalty = await getOfferedTokenRoyalty(order.offeredGlyph);
         if (royalty?.enforced) {
@@ -1483,8 +1488,6 @@ export default function OpenOrders({
           );
 
           if (totalRoyalty > 0) {
-            const royaltyOutputs: { script: string; value: number }[] = [];
-
             if (royalty.splits.length > 0) {
               // Allocate split amounts deterministically. Last split receives remainder.
               let remaining = totalRoyalty;
@@ -1516,11 +1519,6 @@ export default function OpenOrders({
                 value: totalRoyalty,
               });
             }
-
-            // Insert royalties immediately after seller payment output.
-            if (royaltyOutputs.length > 0) {
-              outputs.splice(2, 0, ...royaltyOutputs);
-            }
           }
         }
       }
@@ -1530,13 +1528,21 @@ export default function OpenOrders({
         if (order.wantGlyph.tokenType === SmartTokenType.FT) {
           const prepared = await fundFungible(toRefLE, order.wantValue || 0);
           inputs.push(...prepared.inputs);
-          outputs.push(...prepared.outputs);
+          fundingOutputs.push(...prepared.outputs);
         } else {
           const prepared = await fundNonFungible(toRefLE);
           inputs.push(...prepared.inputs);
-          outputs.push(...prepared.outputs);
+          fundingOutputs.push(...prepared.outputs);
         }
       }
+
+      // [makerPayment(0), assetToTaker(1), ...royalties, ...funding].
+      const outputs = buildSwapCompletionOutputs({
+        makerPayment,
+        assetToTaker,
+        royaltyOutputs,
+        fundingOutputs,
+      });
 
       const changeScript = p2pkhScript(wallet.value.address);
       const fund = fundTx(
@@ -1569,8 +1575,8 @@ export default function OpenOrders({
         }
       );
 
-      // Broadcast the completed transaction
-      const txid = await electrumWorker.value.broadcast(tx.toString());
+      // Broadcast the completed transaction and record it in swap history.
+      const txid = await broadcastSwapCompletion(tx.toString());
 
       // If a WAVE name was acquired, nudge the buyer to re-point it at their
       // own address. The new NFT UTXO may not be indexed yet, so route them to
