@@ -57,6 +57,12 @@ import { TransferError } from "@lib/transfer";
 import { SwapPrepareError } from "./Swap";
 import { buildTx } from "@lib/tx";
 import { buildSwapCompletionOutputs } from "@lib/swapOutputs";
+import {
+  buildRoyaltyOutputs,
+  parseRoyalty,
+  RoyaltyTerms,
+  RoyaltyTermsError,
+} from "@lib/royaltyTerms";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import { broadcastSwapCompletion } from "@app/swapActivity";
 import opfs from "@app/opfs";
@@ -76,69 +82,9 @@ type SwapParams = {
   address: string;
 };
 
-type RoyaltySplit = { address: string; bps: number };
-
-function parseRoyalty(payload: unknown): {
-  enforced: boolean;
-  bps: number;
-  address: string;
-  minimum: number;
-  maximum: number | null;
-  splits: RoyaltySplit[];
-} | null {
-  if (!payload || typeof payload !== "object") return null;
-  const royalty = (payload as { royalty?: unknown }).royalty;
-  if (!royalty || typeof royalty !== "object") return null;
-
-  const r = royalty as {
-    enforced?: unknown;
-    bps?: unknown;
-    address?: unknown;
-    minimum?: unknown;
-    maximum?: unknown;
-    splits?: unknown;
-  };
-
-  const enforced = r.enforced === true;
-  const bps = typeof r.bps === "number" ? r.bps : NaN;
-  const address = typeof r.address === "string" ? r.address : "";
-  const minimum = typeof r.minimum === "number" ? r.minimum : 0;
-  const maximum = typeof r.maximum === "number" ? r.maximum : null;
-
-  const splits: RoyaltySplit[] = Array.isArray(r.splits)
-    ? (r.splits
-        .map((s) => {
-          if (!s || typeof s !== "object") return null;
-          const so = s as { address?: unknown; bps?: unknown };
-          const a = typeof so.address === "string" ? so.address : "";
-          const b = typeof so.bps === "number" ? so.bps : NaN;
-          if (!a || !Number.isFinite(b)) return null;
-          return { address: a, bps: b };
-        })
-        .filter(Boolean) as RoyaltySplit[])
-    : [];
-
-  if (!Number.isFinite(bps) || bps <= 0 || bps > 10000) return null;
-  if (!address) return null;
-
-  return { enforced, bps, address, minimum, maximum, splits };
-}
-
-function computeRoyaltyAmount(
-  salePrice: number,
-  bps: number,
-  minimum: number,
-  maximum: number | null
-): number {
-  const raw = Math.floor((salePrice * bps) / 10000);
-  let clamped = Math.max(raw, minimum);
-  if (maximum !== null) clamped = Math.min(clamped, maximum);
-  return clamped;
-}
-
 async function getTokenRoyalty(
   glyph: SmartToken
-): Promise<ReturnType<typeof parseRoyalty> | null> {
+): Promise<RoyaltyTerms | null> {
   if (!glyph.revealOutpoint) return null;
   try {
     const reveal = Outpoint.fromString(glyph.revealOutpoint);
@@ -420,68 +366,36 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
     const royaltyOutputs: UnfinalizedOutput[] = [];
     const fundingOutputs: UnfinalizedOutput[] = [];
 
-    // Royalty handling for the PSRT (maker-signed) swap path.
-    //
-    // IMPORTANT: this is BEST-EFFORT / ADVISORY. In a PSRT swap the maker only
-    // signs output[0] (SIGHASH_SINGLE) and the NFT sits in a plain `nftScript`
-    // — nothing forces these royalty outputs, so a hostile taker building their
-    // own completion tx can omit them. For UNSTRIPPABLE, consensus-enforced
-    // royalty the seller must instead list via the royalty *covenant*
-    // (@lib/royaltyCovenant: buildRoyaltyListingTx / buildRoyaltyPurchaseTx),
-    // which makes the seller-payout and royalty outputs a spend condition and is
-    // proven on regtest in
-    // packages/lib/src/__tests__/royaltyCovenant.regtest.test.ts.
-    //
-    // This block only computes royalty AMOUNTS; their position (index 2+, never
-    // displacing the maker payment at index 0) is fixed by
-    // `buildSwapCompletionOutputs`.
-    if (
-      swapParams.from.contractType === ContractType.NFT &&
-      swapParams.to.contractType === ContractType.RXD &&
-      swapParams.to.value > 0
-    ) {
-      if (swapParams.from.glyph) {
+    try {
+      // Royalty handling for the PSRT (maker-signed) swap path.
+      //
+      // IMPORTANT: this is BEST-EFFORT / ADVISORY. In a PSRT swap the maker only
+      // signs output[0] (SIGHASH_SINGLE) and the NFT sits in a plain `nftScript`
+      // — nothing forces these royalty outputs, so a hostile taker building their
+      // own completion tx can omit them. For UNSTRIPPABLE, consensus-enforced
+      // royalty the seller must instead list via the royalty *covenant*
+      // (@lib/royaltyCovenant: buildRoyaltyListingTx / buildRoyaltyPurchaseTx),
+      // which makes the seller-payout and royalty outputs a spend condition and is
+      // proven on regtest in
+      // packages/lib/src/__tests__/royaltyCovenant.regtest.test.ts.
+      //
+      // Amounts and split allocation come from @lib/royaltyTerms (shared with
+      // OpenOrders); their position (index 2+, never displacing the maker
+      // payment at index 0) is fixed by `buildSwapCompletionOutputs`.
+      if (
+        swapParams.from.contractType === ContractType.NFT &&
+        swapParams.to.contractType === ContractType.RXD &&
+        swapParams.to.value > 0 &&
+        swapParams.from.glyph
+      ) {
         const royalty = await getTokenRoyalty(swapParams.from.glyph);
         if (royalty?.enforced) {
-          const salePrice = swapParams.to.value;
-          const totalRoyalty = computeRoyaltyAmount(
-            salePrice,
-            royalty.bps,
-            royalty.minimum,
-            royalty.maximum
+          royaltyOutputs.push(
+            ...buildRoyaltyOutputs(royalty, swapParams.to.value)
           );
-
-          if (totalRoyalty > 0) {
-            if (royalty.splits.length > 0) {
-              let remaining = totalRoyalty;
-              for (let i = 0; i < royalty.splits.length; i++) {
-                const split = royalty.splits[i];
-                const isLast = i === royalty.splits.length - 1;
-                const amt = isLast
-                  ? remaining
-                  : Math.floor((totalRoyalty * split.bps) / royalty.bps);
-                remaining -= amt;
-                if (amt > 0) {
-                  const script = p2pkhScript(split.address);
-                  if (!script) {
-                    throw new SwapError("Invalid royalty split address");
-                  }
-                  royaltyOutputs.push({ script, value: amt });
-                }
-              }
-            } else {
-              const script = p2pkhScript(royalty.address);
-              if (!script) {
-                throw new SwapError("Invalid royalty address");
-              }
-              royaltyOutputs.push({ script, value: totalRoyalty });
-            }
-          }
         }
       }
-    }
 
-    try {
       // Fund token swaps. Any RXD required for the swap will be done later when funding the whole transaction.
       if (swapParams.to.contractType !== ContractType.RXD) {
         const toRefLE = reverseRef(swapParams.to.glyph?.ref as string);
@@ -536,7 +450,11 @@ function ViewSwap({ swapParams }: { swapParams: SwapParams }) {
       );
       setSigned(tx.toString());
     } catch (error) {
-      if (error instanceof TransferError || error instanceof SwapError) {
+      if (
+        error instanceof TransferError ||
+        error instanceof SwapError ||
+        error instanceof RoyaltyTermsError
+      ) {
         toast({ status: "error", title: error.message });
       } else {
         toast({ status: "error", title: "Failed to create transaction" });

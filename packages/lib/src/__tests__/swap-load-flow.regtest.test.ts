@@ -47,6 +47,7 @@ import { fundTx, SelectableInput } from "../coinSelect";
 import { nftScript, p2pkhScript, parseNftScript } from "../script";
 import { createWaveNameMetadata } from "../wave";
 import { buildSwapCompletionOutputs } from "../swapOutputs";
+import { buildRoyaltyOutputs } from "../royaltyTerms";
 import { Utxo, UnfinalizedInput, UnfinalizedOutput } from "../types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -185,10 +186,28 @@ it.skipIf(process.env.REGTEST_E2E !== "1")(
     const makerInput: UnfinalizedInput = { ...(nftAtSwap as Utxo) };
     const payOut: UnfinalizedOutput = { script: p2pkhScript(A.address), value: PRICE };
     const nftToB: UnfinalizedOutput = { script: nftScript(B.address, refLE), value: nftAtSwap!.value };
-    const royaltyOuts: UnfinalizedOutput[] = [
-      { script: p2pkhScript(royA.address), value: ROY_A },
-      { script: p2pkhScript(royB.address), value: ROY_B },
-    ];
+    // Royalty payouts from the REAL production function (../royaltyTerms), the
+    // same one both takers call — so the confirmed balances asserted at the end
+    // are the node's verdict on the split allocation, not on a fixture.
+    // 600 bps of 5 RXD = 0.3 RXD total; royA takes 400/600, royB (last) the
+    // remainder — i.e. ROY_A / ROY_B below.
+    const royaltyOuts: UnfinalizedOutput[] = buildRoyaltyOutputs(
+      {
+        enforced: true,
+        bps: 600,
+        address: royA.address,
+        minimum: 0,
+        maximum: null,
+        splits: [
+          { address: royA.address, bps: 400 },
+          { address: royB.address, bps: 200 },
+        ],
+      },
+      PRICE
+    );
+    // The split must reproduce the expected payouts exactly, or the on-chain
+    // balance assertions below would be checking the wrong thing.
+    expect(royaltyOuts.map((o) => o.value)).toEqual([ROY_A, ROY_B]);
 
     // Canonical layout from the REAL production function — the node below is
     // what proves it: [payment, nft, ...royalties], change appended after fund.

@@ -102,6 +102,11 @@ import {
 import { accumulateInputs, fundTx, SelectableInput } from "@lib/coinSelect";
 import { buildTx } from "@lib/tx";
 import { buildSwapCompletionOutputs } from "@lib/swapOutputs";
+import {
+  buildRoyaltyOutputs,
+  parseRoyalty,
+  RoyaltyTerms,
+} from "@lib/royaltyTerms";
 import rxdIcon from "/rxd.png";
 import dayjs from "dayjs";
 import Outpoint from "@lib/Outpoint";
@@ -110,66 +115,6 @@ import { Transaction, Script } from "@radiant-core/radiantjs";
 import { TransferError } from "@lib/transfer";
 import { SwapPrepareError } from "./Swap";
 import { UnfinalizedOutput, Utxo } from "@lib/types";
-
-type RoyaltySplit = { address: string; bps: number };
-
-function parseRoyalty(payload: unknown): {
-  enforced: boolean;
-  bps: number;
-  address: string;
-  minimum: number;
-  maximum: number | null;
-  splits: RoyaltySplit[];
-} | null {
-  if (!payload || typeof payload !== "object") return null;
-  const royalty = (payload as { royalty?: unknown }).royalty;
-  if (!royalty || typeof royalty !== "object") return null;
-
-  const r = royalty as {
-    enforced?: unknown;
-    bps?: unknown;
-    address?: unknown;
-    minimum?: unknown;
-    maximum?: unknown;
-    splits?: unknown;
-  };
-
-  const enforced = r.enforced === true;
-  const bps = typeof r.bps === "number" ? r.bps : NaN;
-  const address = typeof r.address === "string" ? r.address : "";
-  const minimum = typeof r.minimum === "number" ? r.minimum : 0;
-  const maximum = typeof r.maximum === "number" ? r.maximum : null;
-
-  const splits: RoyaltySplit[] = Array.isArray(r.splits)
-    ? (r.splits
-        .map((s) => {
-          if (!s || typeof s !== "object") return null;
-          const so = s as { address?: unknown; bps?: unknown };
-          const a = typeof so.address === "string" ? so.address : "";
-          const b = typeof so.bps === "number" ? so.bps : NaN;
-          if (!a || !Number.isFinite(b)) return null;
-          return { address: a, bps: b };
-        })
-        .filter(Boolean) as RoyaltySplit[])
-    : [];
-
-  if (!Number.isFinite(bps) || bps <= 0 || bps > 10000) return null;
-  if (!address) return null;
-
-  return { enforced, bps, address, minimum, maximum, splits };
-}
-
-function computeRoyaltyAmount(
-  salePrice: number,
-  bps: number,
-  minimum: number,
-  maximum: number | null
-): number {
-  const raw = Math.floor((salePrice * bps) / 10000);
-  let clamped = Math.max(raw, minimum);
-  if (maximum !== null) clamped = Math.min(clamped, maximum);
-  return clamped;
-}
 
 function scriptMatchesContract(
   script: string,
@@ -193,7 +138,7 @@ function scriptMatchesContract(
 
 async function getOfferedTokenRoyalty(
   offeredGlyph: SmartToken
-): Promise<ReturnType<typeof parseRoyalty> | null> {
+): Promise<RoyaltyTerms | null> {
   if (!offeredGlyph.revealOutpoint) return null;
   try {
     const reveal = Outpoint.fromString(offeredGlyph.revealOutpoint);
@@ -1479,47 +1424,9 @@ export default function OpenOrders({
       ) {
         const royalty = await getOfferedTokenRoyalty(order.offeredGlyph);
         if (royalty?.enforced) {
-          const salePrice = order.wantValue;
-          const totalRoyalty = computeRoyaltyAmount(
-            salePrice,
-            royalty.bps,
-            royalty.minimum,
-            royalty.maximum
-          );
-
-          if (totalRoyalty > 0) {
-            if (royalty.splits.length > 0) {
-              // Allocate split amounts deterministically. Last split receives remainder.
-              let remaining = totalRoyalty;
-              for (let i = 0; i < royalty.splits.length; i++) {
-                const split = royalty.splits[i];
-                const isLast = i === royalty.splits.length - 1;
-                const amt = isLast
-                  ? remaining
-                  : Math.floor((totalRoyalty * split.bps) / royalty.bps);
-                remaining -= amt;
-                if (amt > 0) {
-                  const script = p2pkhScript(split.address);
-                  if (!script) {
-                    throw new Error("Invalid royalty split address");
-                  }
-                  royaltyOutputs.push({
-                    script,
-                    value: amt,
-                  });
-                }
-              }
-            } else {
-              const script = p2pkhScript(royalty.address);
-              if (!script) {
-                throw new Error("Invalid royalty address");
-              }
-              royaltyOutputs.push({
-                script,
-                value: totalRoyalty,
-              });
-            }
-          }
+          // Amounts + split allocation from @lib/royaltyTerms, shared with
+          // SwapLoad so both takers pay a creator identically.
+          royaltyOutputs.push(...buildRoyaltyOutputs(royalty, order.wantValue));
         }
       }
 
