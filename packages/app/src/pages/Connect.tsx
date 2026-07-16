@@ -9,6 +9,13 @@
  * (unlocking first if needed), and signs ONLY a magic-prefixed message via
  * `@lib/sign` — never a transaction. Nothing is persisted; no key leaves the
  * wallet's transient `withWif` frame.
+ *
+ * A deep-linked request may opt in to an automatic return by carrying a
+ * `callback` URL, in which case approval navigates this tab back to the
+ * requesting site with the result in the fragment (`canAutoReturn` below,
+ * `buildCallbackUrl` in `@app/connect/protocol`). Everything else is unchanged:
+ * a request without one — or one whose callback failed origin-binding — returns
+ * the signature by copy/paste or QR exactly as before.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -44,10 +51,16 @@ import { QRCodeSVG } from "qrcode.react";
 import { Scanner } from "@yudiel/react-qr-scanner";
 import Card from "@app/components/Card";
 import { openModal, wallet } from "@app/signals";
-import { readText, canScanFromPhoto, scanQrFromPhoto } from "@app/platform";
+import {
+  readText,
+  canScanFromPhoto,
+  scanQrFromPhoto,
+  isNativePlatform,
+} from "@app/platform";
 import { withWif } from "@app/wallet";
 import { signMessageWithWif } from "@lib/sign";
 import {
+  buildCallbackUrl,
   buildSignResult,
   encodeSignResult,
   isRecognizedConnectChallenge,
@@ -56,17 +69,38 @@ import {
   type SignResult,
 } from "@app/connect/protocol";
 
+/**
+ * Whether this page may hand a signed result straight back to the request's
+ * `callback` by navigating there (see `buildCallbackUrl`).
+ *
+ * The callback flow exists for one shape: a site deep-linked a browser tab
+ * here, so that tab is still the site's to reclaim. Hence the gate on the
+ * request having actually arrived via `?req=` — and it never fires in the
+ * Capacitor shell,
+ * where navigating away replaces the wallet app itself with a remote page and
+ * leaves no way back. A request that was pasted or scanned in returns the
+ * classic way, by copy/paste, which is what the user's other device or tab is
+ * waiting for anyway.
+ */
+function canAutoReturn(fromDeepLink: boolean): boolean {
+  return fromDeepLink && !isNativePlatform();
+}
+
 export default function Connect() {
   const [searchParams] = useSearchParams();
   const [rawInput, setRawInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<SignResult | null>(null);
+  const [fromDeepLink, setFromDeepLink] = useState(false);
   const toast = useToast();
 
   // Deep-link entry: `#/connect?req=<bare|json|base64url>` (or ?challenge=).
   useEffect(() => {
     const req = searchParams.get("req") || searchParams.get("challenge");
-    if (req) setRawInput(req);
+    if (req) {
+      setRawInput(req);
+      setFromDeepLink(true);
+    }
   }, []);
 
   const parsed = useMemo(
@@ -85,9 +119,17 @@ export default function Connect() {
         toast({ status: "error", title: "Wallet is locked — unable to sign" });
         return;
       }
-      setResult(buildSignResult(req, signed));
+      const signResult = buildSignResult(req, signed);
+      // Always render the manual-return panel first: it is the fallback if the
+      // navigation below is slow, blocked, or skipped.
+      setResult(signResult);
+
+      const callbackUrl = canAutoReturn(fromDeepLink)
+        ? buildCallbackUrl(req, signResult)
+        : undefined;
+      if (callbackUrl) window.location.assign(callbackUrl);
     },
-    [toast]
+    [toast, fromDeepLink]
   );
 
   const onApprove = useCallback(() => {
@@ -109,6 +151,9 @@ export default function Connect() {
     setResult(null);
     setRawInput("");
     setScanning(false);
+    // Whatever is entered next was typed/scanned by hand, not deep-linked, so
+    // it must not inherit the deep link's licence to auto-return.
+    setFromDeepLink(false);
   };
 
   return (
@@ -128,6 +173,7 @@ export default function Connect() {
           request={request}
           signerAddress={signerAddress}
           locked={locked}
+          autoReturn={!!request.callback && canAutoReturn(fromDeepLink)}
           onApprove={onApprove}
           onReject={reset}
         />
@@ -229,12 +275,14 @@ function RequestPanel({
   request,
   signerAddress,
   locked,
+  autoReturn,
   onApprove,
   onReject,
 }: {
   request: SignRequest;
   signerAddress: string;
   locked: boolean;
+  autoReturn: boolean;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -333,6 +381,14 @@ function RequestPanel({
               wallet and the app may reject it.
             </AlertDescription>
           </Alert>
+        )}
+
+        {autoReturn && (
+          <Text textStyle="small" mt={4}>
+            After signing you will be sent back to {request.app || "the app"} at{" "}
+            <b>{request.origin}</b>, which receives your address and signature
+            automatically.
+          </Text>
         )}
 
         {locked && (
