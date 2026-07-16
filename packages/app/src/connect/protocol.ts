@@ -14,6 +14,12 @@
  *      approval, signs via `@lib/sign`, and returns a {@link SignResult}.
  *   3. The dApp verifies the signature with radiantjs `Message.verify`.
  *
+ * The result normally returns to the dApp by hand (copy/paste or QR). A request
+ * may instead opt in to an automatic return by carrying a `callback` URL; the
+ * result then rides back in that URL's fragment (see {@link buildCallbackUrl}).
+ * A `callback` is honoured ONLY when its origin matches the envelope's declared
+ * `origin`, so one site can never route another site's signature elsewhere.
+ *
  * SECURITY: parsing NEVER trusts unvalidated fields. The challenge is run
  * through the same guards the signer enforces (`@lib/sign`: length cap +
  * no control characters) so the UI can render it verbatim and the service can
@@ -40,6 +46,13 @@ export type SignRequest = {
   app?: string;
   /** Address the requester expects to sign; page warns on mismatch (optional). */
   address?: string;
+  /**
+   * Where to return the signed result, as a URL fragment (optional).
+   *
+   * Only ever populated when its origin matches {@link SignRequest.origin} —
+   * see `cleanCallback`. Absent means the classic manual copy/paste return.
+   */
+  callback?: string;
 };
 
 export type SignResult = {
@@ -60,11 +73,18 @@ const MAX_ID_LEN = 128;
 const MAX_LABEL_LEN = 128;
 const MAX_ORIGIN_LEN = 256;
 const MAX_ADDRESS_LEN = 128;
+const MAX_CALLBACK_LEN = 512;
 
 // `<namespace>:wallet-connect:v<n>:...` — the shape Phase A challenges take.
 // Used only to badge a request as "recognized" in the UI; non-matching
 // challenges are still signable (with a warning), never auto-rejected.
 const CONNECT_CHALLENGE_RE = /^[a-z0-9.-]+:wallet-connect:v\d+:/i;
+
+// Captures the segment straight after `…:wallet-connect:v<n>:` — the nonce, in
+// the shape the callback contract specifies
+// (`radiant:wallet-connect:v1:<nonce>:<label>`). Only used to echo a
+// correlation value back to a callback; never load-bearing for the signature.
+const CONNECT_NONCE_RE = /^[a-z0-9.-]+:wallet-connect:v\d+:([^:]+)/i;
 
 /** A trimmed, control-char-free, length-bounded display/identifier string. */
 function cleanString(v: unknown, maxLen: number): string | undefined {
@@ -86,6 +106,82 @@ function cleanAddress(v: unknown): string | undefined {
   const s = cleanString(v, MAX_ADDRESS_LEN);
   if (!s || !/^[0-9a-zA-Z:]+$/.test(s)) return undefined;
   return s;
+}
+
+/**
+ * Parse an origin-ish string to its canonical `scheme://host[:port]` form.
+ * Accepts a full origin (`https://surf.rxd.zone`) or a bare host
+ * (`surf.rxd.zone`, assumed https). Returns undefined for anything that is not
+ * an http(s) origin — including `javascript:`/`data:` URLs, whose `.origin` is
+ * "null" and which must never round-trip a signature.
+ */
+function toHttpOrigin(v: string): string | undefined {
+  let url: URL | undefined;
+  for (const candidate of [v, `https://${v}`]) {
+    try {
+      url = new URL(candidate);
+      break;
+    } catch {
+      /* try the next form */
+    }
+  }
+  if (!url) return undefined;
+  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+  if (!url.hostname) return undefined;
+  return url.origin;
+}
+
+/**
+ * Validate an opt-in result callback, BOUND TO THE ENVELOPE'S ORIGIN.
+ *
+ * This binding is the check that matters: without it, site A could hand
+ * Photonic site B's challenge with an attacker-controlled `callback` and have
+ * the user's signature delivered to the attacker. A callback is therefore kept
+ * only when the envelope declares an origin AND the callback resolves to that
+ * exact origin (scheme, host, and port all). No origin ⇒ nothing to bind to ⇒
+ * no callback, and the user falls back to the manual copy/paste return.
+ *
+ * Any fragment on the callback is dropped — we own the fragment, it is where
+ * the result rides back.
+ */
+function cleanCallback(
+  v: unknown,
+  origin: string | undefined
+): string | undefined {
+  if (!origin) return undefined;
+  const s = cleanString(v, MAX_CALLBACK_LEN);
+  if (!s || /\s/.test(s)) return undefined;
+
+  const expected = toHttpOrigin(origin);
+  if (!expected) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(s); // absolute only — a relative callback has no origin to bind
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+  // Embedded credentials would render as part of the URL we navigate to; a
+  // legitimate callback never needs them.
+  if (url.username || url.password) return undefined;
+  if (url.origin !== expected) return undefined;
+
+  url.hash = "";
+  return url.toString();
+}
+
+/**
+ * The nonce inside a recognized connect challenge, if it has one.
+ *
+ * Per the callback contract the nonce is the segment right after
+ * `<ns>:wallet-connect:v<n>:`, letting the requesting site match the response
+ * to its pending request. Challenges that don't match the recognized shape
+ * yield undefined and the callback simply carries no `nonce`.
+ */
+export function extractChallengeNonce(challenge: string): string | undefined {
+  if (typeof challenge !== "string") return undefined;
+  return CONNECT_NONCE_RE.exec(challenge)?.[1];
 }
 
 /**
@@ -150,6 +246,7 @@ function normalizeEnvelope(obj: Record<string, unknown>): ParsedRequest {
   }
   const err = challengeError(obj.challenge);
   if (err) return { ok: false, error: err };
+  const origin = cleanOrigin(obj.origin);
   return {
     ok: true,
     request: {
@@ -158,9 +255,10 @@ function normalizeEnvelope(obj: Record<string, unknown>): ParsedRequest {
       t: "sign-request",
       challenge: obj.challenge as string,
       id: cleanString(obj.id, MAX_ID_LEN),
-      origin: cleanOrigin(obj.origin),
+      origin,
       app: cleanString(obj.app, MAX_LABEL_LEN),
       address: cleanAddress(obj.address),
+      callback: cleanCallback(obj.callback, origin),
     },
   };
 }
@@ -215,6 +313,37 @@ export function buildSignResult(
     pubkey: signed.pubkey,
     signature: signed.signature,
   };
+}
+
+/**
+ * The URL to hand a signed result back to an opt-in `callback`, or undefined
+ * when the request declared none (the manual copy/paste return).
+ *
+ * The result rides in the FRAGMENT, never the query: a fragment is not sent to
+ * any server, so the signature stays out of access logs, proxy logs, and the
+ * `Referer` header — it is read client-side by the requesting page. Each value
+ * is `encodeURIComponent`-escaped because a base64 signature contains `+`, `/`
+ * and `=`.
+ *
+ * The signature's exposure is bounded regardless: it is over a single-use,
+ * server-issued nonce, so a leaked one cannot be replayed against a different
+ * challenge.
+ */
+export function buildCallbackUrl(
+  req: Pick<SignRequest, "callback" | "challenge">,
+  result: Pick<SignResult, "address" | "signature">
+): string | undefined {
+  if (!req.callback) return undefined;
+  const nonce = extractChallengeNonce(req.challenge);
+  const params: [string, string][] = [
+    ...(nonce ? ([["nonce", nonce]] as [string, string][]) : []),
+    ["address", result.address],
+    ["signature", result.signature],
+  ];
+  const fragment = params
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join("&");
+  return `${req.callback}#${fragment}`;
 }
 
 /** Serialize a result for the response QR / copy box. */

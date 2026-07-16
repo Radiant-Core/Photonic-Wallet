@@ -8,9 +8,11 @@ import { it, expect, describe } from "vitest";
 import {
   parseSignRequest,
   isRecognizedConnectChallenge,
+  buildCallbackUrl,
   buildSignResult,
   encodeSignResult,
   encodeReqParam,
+  extractChallengeNonce,
   CONNECT_PROTOCOL,
   CONNECT_VERSION,
   type SignRequest,
@@ -149,6 +151,148 @@ describe("parseSignRequest — base64url envelope + round-trip", () => {
       expect(r.request.id).toBe("abc");
       expect(r.request.origin).toBe("https://app.glyphgalaxy.com");
     }
+  });
+});
+
+describe("parseSignRequest — callback origin-binding", () => {
+  const withCallback = (fields: Record<string, unknown>) =>
+    parseSignRequest(JSON.stringify({ challenge: CHALLENGE, ...fields }));
+
+  it("keeps a callback whose origin matches the envelope origin", () => {
+    const r = withCallback({
+      origin: "https://surf.rxd.zone",
+      callback: "https://surf.rxd.zone/auth/photonic-callback",
+    });
+    expect(r.ok && r.request.callback).toBe(
+      "https://surf.rxd.zone/auth/photonic-callback"
+    );
+  });
+
+  it("keeps a matching callback when the origin is given as a bare host", () => {
+    const r = withCallback({
+      origin: "surf.rxd.zone",
+      callback: "https://surf.rxd.zone/cb",
+    });
+    expect(r.ok && r.request.callback).toBe("https://surf.rxd.zone/cb");
+  });
+
+  it("drops a callback pointing at a different origin", () => {
+    // The attack this binding exists for: site A routing site B's signature
+    // to an attacker-controlled callback.
+    const r = withCallback({
+      origin: "https://surf.rxd.zone",
+      callback: "https://evil.example/steal",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.request.callback).toBeUndefined();
+  });
+
+  it("drops a callback that differs only by host suffix, scheme, or port", () => {
+    const cases = [
+      "https://surf.rxd.zone.evil.example/cb",
+      "https://notsurf.rxd.zone/cb",
+      "http://surf.rxd.zone/cb",
+      "https://surf.rxd.zone:8443/cb",
+    ];
+    for (const callback of cases) {
+      const r = withCallback({ origin: "https://surf.rxd.zone", callback });
+      expect(r.ok && r.request.callback, callback).toBeUndefined();
+    }
+  });
+
+  it("drops a callback when the envelope declares no origin to bind to", () => {
+    const r = withCallback({ callback: "https://surf.rxd.zone/cb" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.request.callback).toBeUndefined();
+  });
+
+  it("drops non-http(s), relative, and credentialed callbacks", () => {
+    const cases = [
+      // The literal IS the test: this is the scheme the parser must refuse.
+      // eslint-disable-next-line no-script-url
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "/auth/photonic-callback",
+      "https://user:pass@surf.rxd.zone/cb",
+    ];
+    for (const callback of cases) {
+      const r = withCallback({ origin: "https://surf.rxd.zone", callback });
+      expect(r.ok && r.request.callback, callback).toBeUndefined();
+    }
+  });
+
+  it("strips any fragment the callback arrives with — we own the fragment", () => {
+    const r = withCallback({
+      origin: "https://surf.rxd.zone",
+      callback: "https://surf.rxd.zone/cb#already-here",
+    });
+    expect(r.ok && r.request.callback).toBe("https://surf.rxd.zone/cb");
+  });
+
+  it("keeps the request when the callback is malformed", () => {
+    const r = withCallback({
+      origin: "https://surf.rxd.zone",
+      callback: "not a url",
+    });
+    expect(r.ok && r.request.challenge).toBe(CHALLENGE);
+    expect(r.ok && r.request.callback).toBeUndefined();
+  });
+});
+
+describe("extractChallengeNonce", () => {
+  it("takes the segment after the wallet-connect version", () => {
+    expect(
+      extractChallengeNonce("radiant:wallet-connect:v1:abc123:SURF.RXD sign-in")
+    ).toBe("abc123");
+  });
+
+  it("returns undefined for an unrecognized challenge", () => {
+    expect(extractChallengeNonce("just some text")).toBeUndefined();
+    expect(extractChallengeNonce("")).toBeUndefined();
+  });
+});
+
+describe("buildCallbackUrl", () => {
+  const SIGNED = {
+    address: "14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i",
+    signature:
+      "IHdStUu1KegHDyNSnHtD+yRS+A3/0P4xGlyu8yF/HLg9Tjek8tliTbCjbqy1Xi4cMwJuVHQbMBGo5fsPpmZ3W6s=",
+  };
+
+  it("matches the contract's test vector", () => {
+    const url = buildCallbackUrl(
+      {
+        challenge: "radiant:wallet-connect:v1:abc123:SURF.RXD sign-in | …",
+        callback: "https://surf.rxd.zone/auth/photonic-callback",
+      },
+      SIGNED
+    );
+    expect(url).toBe(
+      "https://surf.rxd.zone/auth/photonic-callback#nonce=abc123&address=14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i&signature=IHdStUu1KegHDyNSnHtD%2ByRS%2BA3%2F0P4xGlyu8yF%2FHLg9Tjek8tliTbCjbqy1Xi4cMwJuVHQbMBGo5fsPpmZ3W6s%3D"
+    );
+  });
+
+  it("puts the result in the fragment, never the query", () => {
+    const url = buildCallbackUrl(
+      { challenge: CHALLENGE, callback: "https://surf.rxd.zone/cb" },
+      SIGNED
+    )!;
+    expect(url.indexOf("#")).toBeGreaterThan(-1);
+    expect(url.slice(0, url.indexOf("#"))).not.toMatch(/[?&]/);
+    expect(url.split("#")[1]).toContain("signature=");
+  });
+
+  it("omits the nonce when the challenge carries none", () => {
+    const url = buildCallbackUrl(
+      { challenge: "freeform text", callback: "https://surf.rxd.zone/cb" },
+      SIGNED
+    );
+    expect(url).not.toContain("nonce=");
+    expect(url).toContain("address=");
+  });
+
+  it("returns undefined when the request has no callback", () => {
+    expect(buildCallbackUrl({ challenge: CHALLENGE }, SIGNED)).toBeUndefined();
   });
 });
 
