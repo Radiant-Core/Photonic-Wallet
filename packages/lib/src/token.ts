@@ -25,8 +25,9 @@ const toObject = (obj: unknown) =>
   typeof obj === "object" ? (obj as { [key: string]: unknown }) : {};
 
 const filterFileObj = (
-  obj: SmartTokenFile
+  obj: SmartTokenFile | undefined | null
 ): { embed?: SmartTokenEmbeddedFile; remote?: SmartTokenRemoteFile } => {
+  if (!obj) return {};
   const embed = obj as Partial<SmartTokenEmbeddedFile>;
   if (typeof embed.t === "string" && embed.b instanceof Uint8Array) {
     return { embed: { t: embed.t, b: embed.b } };
