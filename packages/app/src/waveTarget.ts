@@ -49,8 +49,18 @@ export async function updateWaveTarget(opts: {
   name: string;
   domain: string;
   newTarget: string;
+  /**
+   * Who receives the re-created singleton. Defaults to this wallet (a plain
+   * self-repoint). Set it to a recipient for an atomic SEND — one `mod` that
+   * transfers ownership AND points the target at them. The mod covenant forces
+   * the token output to be an auth-covenant singleton, so a cold recipient can't
+   * discover it via listunspent; prefer a plain transfer + recipient auto-repoint
+   * (which keeps the singleton discoverable) unless you specifically need atomicity.
+   */
+  newOwner?: string;
 }): Promise<WaveTargetUpdateResult> {
   const { ref, txoId, name, domain, newTarget } = opts;
+  const newOwner = opts.newOwner ?? wallet.value.address;
 
   if (!wallet.value.wif) {
     throw new Error("Wallet locked");
@@ -107,7 +117,10 @@ export async function updateWaveTarget(opts: {
   // tokenOutputIndex=0 (NFT token is output 0)
   const glyph = encodeGlyphMutable("mod", payload, 1, 1, 0, 0);
   const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
-  const nftOutputScript = nftAuthScript(wallet.value.address, nftRefLE, [
+  // The carried-forward singleton goes to newOwner (self by default). The
+  // covenant doesn't pin the owner — the embedded p2pkh is the only owner gate —
+  // so re-creating it at a recipient is a valid atomic transfer.
+  const nftOutputScript = nftAuthScript(newOwner, nftRefLE, [
     { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },
   ]);
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Container,
   VStack,
@@ -867,10 +867,11 @@ function WaveNameCard({
     }
   };
 
-  const handleUpdateTarget = async () => {
-    if (requireUnlock(handleUpdateTarget)) return;
+  // Core self-repoint: re-point this name's target to `target` and keep the
+  // local db consistent. Shared by the manual button and the auto-repoint below.
+  // Assumes the wallet is unlocked (wif present) — the callers gate on that.
+  const doUpdateTarget = async (target: string, opts?: { silent?: boolean }) => {
     if (!record.id || !record.txoId) return;
-
     setIsUpdating(true);
     try {
       const { txid, newNftTxo, rxdInputs, outputs } = await updateWaveTarget({
@@ -878,7 +879,7 @@ function WaveNameCard({
         txoId: record.txoId,
         name: record.name,
         domain: record.domain,
-        newTarget,
+        newTarget: target,
       });
 
       // The update co-spent the NFT singleton and re-created it at a NEW
@@ -911,7 +912,7 @@ function WaveNameCard({
         attrs: {
           name: record.name.split(".")[0],
           domain: record.domain,
-          target: newTarget,
+          target,
           target_type: "address",
         },
         lastTxoId: newTxoId,
@@ -919,22 +920,49 @@ function WaveNameCard({
         height: Infinity,
       });
 
-      toast({
-        title: "Target updated",
-        description: `Transaction: ${txid.slice(0, 16)}...`,
-        status: "success",
-      });
-      onClose();
+      if (!opts?.silent) {
+        toast({
+          title: "Target updated",
+          description: `Transaction: ${txid.slice(0, 16)}...`,
+          status: "success",
+        });
+        onClose();
+      }
     } catch (error) {
-      toast({
-        title: "Update failed",
-        description: error instanceof Error ? error.message : String(error),
-        status: "error",
-      });
+      if (!opts?.silent) {
+        toast({
+          title: "Update failed",
+          description: error instanceof Error ? error.message : String(error),
+          status: "error",
+        });
+      }
+      throw error;
     } finally {
       setIsUpdating(false);
     }
   };
+
+  const handleUpdateTarget = async () => {
+    if (requireUnlock(handleUpdateTarget)) return;
+    await doUpdateTarget(newTarget).catch(() => {});
+  };
+
+  // Auto-repoint a RECEIVED name to this wallet: when a name lands here via a
+  // plain transfer, its target still points at the sender (needsTargetUpdate).
+  // Fix it automatically — "point to the recipient on transfer". Only when the
+  // wallet is already unlocked (never force a password prompt), fire once per
+  // name, and swallow failures (the manual "Update Target" button remains).
+  // Safe because Photonic tracks the name BY REF locally, so it stays visible
+  // even after the singleton becomes an auth-covenant UTXO.
+  const autoRepointed = useRef(false);
+  useEffect(() => {
+    if (autoRepointed.current) return;
+    if (!record.needsTargetUpdate || !record.id || !record.txoId) return;
+    if (!wallet.value.wif || record.listed) return; // unlocked only; not while listed
+    autoRepointed.current = true;
+    void doUpdateTarget(wallet.value.address, { silent: true }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.needsTargetUpdate, record.id, record.txoId, record.listed]);
 
   const handleRenew = async () => {
     if (requireUnlock(handleRenew)) return;
