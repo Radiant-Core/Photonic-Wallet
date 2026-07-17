@@ -1,4 +1,4 @@
-import { wallet } from "./signals";
+import { openModal, wallet } from "./signals";
 import { SavedWallet, WalletState } from "./types";
 import { SecretBytes, disposeSecret } from "./secretBytes";
 
@@ -62,6 +62,37 @@ export function lockWallet() {
     swapWif: disposeSecret(wallet.value.swapWif),
     locked: true,
   };
+}
+
+/**
+ * Gate a spending action behind an unlocked wallet.
+ *
+ * If the wallet is locked, open the global unlock modal (handled by the
+ * `<Unlock />` component mounted in `App`) and, on a successful unlock, invoke
+ * `retry` — typically the calling handler itself, so the action resumes where
+ * the user left off. This replaces the older pattern of dead-ending with a
+ * "Wallet locked" error toast: instead of telling the user to go unlock, we
+ * put the password field in front of them and continue automatically.
+ *
+ * Returns `true` when the wallet was locked (the caller should stop — the
+ * action will be retried after unlock) and `false` when already unlocked (the
+ * caller should proceed).
+ *
+ * Usage:
+ *   const handleFoo = async () => {
+ *     if (requireUnlock(handleFoo)) return;
+ *     // ...proceeds only when unlocked
+ *   };
+ */
+export function requireUnlock(retry: () => void): boolean {
+  if (!wallet.value.locked) return false;
+  openModal.value = {
+    modal: "unlock",
+    onClose: (success: boolean) => {
+      if (success) retry();
+    },
+  };
+  return true;
 }
 
 export function loadWalletFromSaved(savedWallet?: SavedWallet) {

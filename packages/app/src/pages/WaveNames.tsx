@@ -62,7 +62,8 @@ import PageHeader from "@app/components/PageHeader";
 import ContentContainer from "@app/components/ContentContainer";
 import NoContent from "@app/components/NoContent";
 import Card from "@app/components/Card";
-import { wallet, feeRate, openModal } from "@app/signals";
+import { wallet, feeRate } from "@app/signals";
+import { requireUnlock } from "@app/wallet";
 import { electrumWorker } from "@app/electrum/Electrum";
 import db from "@app/db";
 import {
@@ -740,10 +741,8 @@ function WaveNameCard({
   // address and clear swapPending. Reuses the same cancelSwap path as the
   // Pending Swaps page.
   const handleCancelListing = async () => {
-    if (wallet.value.locked) {
-      openModal.value = { modal: "unlock" };
-      return;
-    }
+    // Resume the cancel automatically once the user unlocks.
+    if (requireUnlock(handleCancelListing)) return;
     setIsCancelling(true);
     try {
       const pending = await db.swap
@@ -789,14 +788,11 @@ function WaveNameCard({
   };
 
   const handleReclaim = async () => {
-    if (!wallet.value.wif) {
-      toast({
-        title: "Wallet locked",
-        description: "Please unlock your wallet to reclaim this name",
-        status: "error",
-      });
-      return;
-    }
+    // If locked, prompt for the password and resume on unlock instead of
+    // dead-ending with an error toast.
+    if (requireUnlock(handleReclaim)) return;
+    const wif = wallet.value.wif;
+    if (!wif) return;
 
     setIsBurning(true);
     try {
@@ -827,7 +823,7 @@ function WaveNameCard({
       // Burn the expired NFT
       const { tx } = burnNft(
         wallet.value.address,
-        wallet.value.wif.toString(),
+        wif.toString(),
         { ...txo, txid: nftTxid, vout: nftVout },
         rxdUtxos,
         undefined,
@@ -872,14 +868,8 @@ function WaveNameCard({
   };
 
   const handleUpdateTarget = async () => {
-    if (!wallet.value.wif || !record.id || !record.txoId) {
-      toast({
-        title: "Wallet locked",
-        description: "Please unlock your wallet to update the target",
-        status: "error",
-      });
-      return;
-    }
+    if (requireUnlock(handleUpdateTarget)) return;
+    if (!record.id || !record.txoId) return;
 
     setIsUpdating(true);
     try {
@@ -947,14 +937,8 @@ function WaveNameCard({
   };
 
   const handleRenew = async () => {
-    if (!wallet.value.wif || !record.id) {
-      toast({
-        title: "Wallet locked",
-        description: "Please unlock your wallet to renew",
-        status: "error",
-      });
-      return;
-    }
+    if (requireUnlock(handleRenew)) return;
+    if (!record.id) return;
 
     setIsRenewing(true);
     try {
@@ -983,14 +967,9 @@ function WaveNameCard({
   };
 
   const handleBurn = async () => {
-    if (!wallet.value.wif || !record.txoId) {
-      toast({
-        title: "Wallet locked",
-        description: "Please unlock your wallet to burn",
-        status: "error",
-      });
-      return;
-    }
+    if (requireUnlock(handleBurn)) return;
+    const wif = wallet.value.wif;
+    if (!wif || !record.txoId) return;
 
     setIsBurning(true);
     try {
@@ -1005,7 +984,7 @@ function WaveNameCard({
 
       const result = burnNft(
         wallet.value.address,
-        wallet.value.wif.toString(),
+        wif.toString(),
         txo,
         rxdUtxos,
         burnReason || undefined,
@@ -1073,14 +1052,9 @@ function WaveNameCard({
   };
 
   const handleTransfer = async () => {
-    if (!wallet.value.wif || !record.txoId) {
-      toast({
-        title: "Wallet locked",
-        description: "Please unlock your wallet to transfer",
-        status: "error",
-      });
-      return;
-    }
+    if (requireUnlock(handleTransfer)) return;
+    const wif = wallet.value.wif;
+    if (!wif || !record.txoId) return;
 
     if (!transferAddress || !isP2pkh(transferAddress)) {
       toast({
@@ -1112,7 +1086,7 @@ function WaveNameCard({
         wallet.value.address,
         transferAddress,
         feeRate.value,
-        wallet.value.wif.toString()
+        wif.toString()
       );
 
       const txid = await electrumWorker.value.broadcast(tx.toString());

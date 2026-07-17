@@ -62,6 +62,7 @@ import {
 } from "@app/encryptionService";
 import { StorageManager } from "@lib/storage";
 import { wallet, feeRate } from "@app/signals";
+import { requireUnlock } from "@app/wallet";
 import { deriveEncryptionKeypair } from "@app/keys";
 import { deriveKeyHKDF, unwrapCEK, wrapCEK } from "@lib/encryption";
 import {
@@ -389,7 +390,11 @@ export default function EncryptedContentUnlock({
    * Output is a small JSON blob the recipient pastes into Import.
    */
   const handleExportCEK = async () => {
-    if (!walletMnemonic) return;
+    // Locked wallet: prompt for the password and resume on unlock instead of
+    // silently doing nothing.
+    if (requireUnlock(handleExportCEK)) return;
+    const mnemonic = wallet.value.mnemonic;
+    if (!mnemonic) return;
     const recipientPubHex = recipientPubkeyHex.trim().replace(/^0x/i, "");
     if (recipientPubHex.length !== 64) {
       toast({
@@ -404,7 +409,7 @@ export default function EncryptedContentUnlock({
     setIsExporting(true);
     try {
       const keypair = deriveEncryptionKeypair(
-        walletMnemonic.toString(),
+        mnemonic.toString(),
         wallet.value.coinType
       );
       const recipients = stub.crypto?.recipients;
@@ -489,14 +494,13 @@ export default function EncryptedContentUnlock({
    */
   const handleImportCEK = async () => {
     if (!assertStorageAvailable()) return;
-    if (!walletMnemonic) {
-      toast({
-        title: t`Wallet locked`,
-        description: t`Unlock your wallet first, then try again`,
-        status: "warning",
-      });
-      return;
-    }
+    // Locked wallet: open the unlock modal and resume import on success,
+    // rather than stopping at a "Wallet locked" toast. Read the mnemonic
+    // fresh from the signal (not the render-time `walletMnemonic`) since the
+    // retry runs the closure captured while still locked.
+    if (requireUnlock(handleImportCEK)) return;
+    const mnemonic = wallet.value.mnemonic;
+    if (!mnemonic) return;
     setIsImporting(true);
     setDecryptProgress(null);
     try {
@@ -515,7 +519,7 @@ export default function EncryptedContentUnlock({
       }
 
       const keypair = deriveEncryptionKeypair(
-        walletMnemonic.toString(),
+        mnemonic.toString(),
         wallet.value.coinType
       );
       // cek_hash from the share token is the binding AAD used when it was wrapped
@@ -658,20 +662,16 @@ export default function EncryptedContentUnlock({
   /** Wallet key mode: derive X25519 keypair from HD wallet (m/44'/0'/0'/2/0) */
   const handleWalletKeyDecrypt = async () => {
     if (!assertStorageAvailable()) return;
-    if (!walletMnemonic) {
-      toast({
-        title: t`Wallet Locked`,
-        description: t`Unlock your wallet first to use your encryption key`,
-        status: "warning",
-      });
-      return;
-    }
+    // Locked wallet: prompt for the password and resume on unlock.
+    if (requireUnlock(handleWalletKeyDecrypt)) return;
+    const mnemonic = wallet.value.mnemonic;
+    if (!mnemonic) return;
 
     setIsDecrypting(true);
     setDecryptProgress(null);
     try {
       const keypair = deriveEncryptionKeypair(
-        walletMnemonic.toString(),
+        mnemonic.toString(),
         wallet.value.coinType
       );
 
@@ -716,14 +716,13 @@ export default function EncryptedContentUnlock({
       });
       return;
     }
-    if (!wallet.value.wif || !wallet.value.address) {
-      toast({
-        title: t`Wallet Locked`,
-        description: t`Unlock your wallet to publish a reveal transaction.`,
-        status: "warning",
-      });
-      return;
-    }
+    // Locked wallet: prompt for the password and resume on unlock. Read the
+    // secrets fresh from the signal (not the render-time `walletMnemonic`)
+    // since the retry runs the closure captured while still locked.
+    if (requireUnlock(handlePublishReveal)) return;
+    const wif = wallet.value.wif;
+    const mnemonic = wallet.value.mnemonic;
+    if (!wif || !wallet.value.address) return;
 
     setIsRevealing(true);
     try {
@@ -740,9 +739,9 @@ export default function EncryptedContentUnlock({
       // C2: Unwrap the CEK if it was encrypted at rest (ephemeralX25519 present).
       // Legacy records without ephemeral keys fall back to plaintext.
       let cekHex = savedReveal.cek;
-      if (savedReveal.ephemeralX25519 && walletMnemonic) {
+      if (savedReveal.ephemeralX25519 && mnemonic) {
         const keypair = deriveEncryptionKeypair(
-          walletMnemonic.toString(),
+          mnemonic.toString(),
           wallet.value.coinType
         );
         const unwrapped = unwrapCEKForStorage(savedReveal, keypair);
@@ -754,7 +753,7 @@ export default function EncryptedContentUnlock({
       const cekBytes = hexToBytes(cekHex);
       const result = buildRevealTx(
         wallet.value.address,
-        wallet.value.wif.toString(),
+        wif.toString(),
         {
           tokenRef,
           cek: cekBytes,
