@@ -183,6 +183,38 @@ export interface RoyaltyIndexListing {
   status: string;
 }
 
+/** One token row from RXinDexer's v4 recency (discovery) index (glyph.get_recent /
+ *  glyph.get_tokens_by_type order="recent"). `ref` is display form (`txid_vout`);
+ *  `ref_hex` is the raw 72-hex LE ref (script-operand form) — reverseRef() it to get
+ *  the BE ref the local glyph DB and detail routes key on. List responses omit
+ *  embedded icon payloads (`embed.data` is null) to stay within the server's
+ *  bandwidth budget; only the type/size summary and any remote URL survive. */
+export interface RecentGlyphToken {
+  ref: string;
+  ref_hex: string;
+  type: number;
+  type_name: string;
+  protocols: number[];
+  name: string | null;
+  ticker: string | null;
+  deploy_height: number;
+  deploy_txid: string | null;
+  is_spent: boolean;
+  icon_type?: string | null;
+  remote?: { url: string | null; type: string | null } | null;
+  embed?: { type: string | null; size: number | null; data: string | null } | null;
+  attrs?: Record<string, unknown>;
+  is_wave?: boolean;
+  is_wave_duplicate?: boolean;
+}
+
+/** One page of the recency feed. `next_cursor` is an opaque, order-specific cursor —
+ *  feed it back verbatim for the next page, never persist it across sessions. */
+export interface RecentGlyphPage {
+  tokens: RecentGlyphToken[];
+  next_cursor: string | null;
+}
+
 /** A prediction market discovered by RXinDexer's predict index (RMKT beacon). Refs are in
  *  display form (`txid_vout`); resolution params come from the on-chain singleton state, so
  *  `status_at_creation` is only the creation status — query live status via blockchain.ref.get. */
@@ -507,6 +539,36 @@ const worker = {
       return result;
     } catch {
       return [];
+    }
+  },
+  // RXinDexer v4 discovery index: newest-deployed glyphs, across all types or one
+  // GlyphTokenType (1=FT 2=NFT 3=DAT 4=DMINT 5=WAVE 6=Container 7=Authority).
+  // Cursor-paginated: pass the previous page's next_cursor (opaque, order- and
+  // type-specific — never reuse across a filter change or persist it). Returns
+  // null when the server lacks the v4 index (older indexers) so callers can show
+  // an unavailable state.
+  async getRecentGlyphs(
+    limit = 50,
+    cursor: string | null = null,
+    tokenType?: number
+  ) {
+    try {
+      // "" decodes server-side to no-cursor (first page) — the ws client's
+      // param typing has no null.
+      const params: (string | number)[] =
+        tokenType === undefined
+          ? [limit, cursor ?? ""]
+          : [limit, cursor ?? "", tokenType];
+      const result = (await electrum.client?.request(
+        "glyph.get_recent",
+        ...params
+      )) as RecentGlyphPage | { error: string } | undefined;
+      if (!result || "error" in result || !Array.isArray(result.tokens)) {
+        return null;
+      }
+      return result;
+    } catch {
+      return null;
     }
   },
   // RXinDexer prediction-market discovery (market.* / RMKT beacons). Returns []/null when the

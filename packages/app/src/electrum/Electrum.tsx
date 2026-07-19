@@ -104,6 +104,11 @@ const wrapped = wrap<{
     offset?: number,
     ref?: string
   ) => import("./worker/electrumWorker").RoyaltyIndexListing[];
+  getRecentGlyphs: (
+    limit?: number,
+    cursor?: string | null,
+    tokenType?: number
+  ) => import("./worker/electrumWorker").RecentGlyphPage | null;
   listMarkets: (
     limit?: number,
     offset?: number
