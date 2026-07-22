@@ -41,8 +41,9 @@ const devSigner = {
 const ATTACKER_WIF = "cVqn3rEVEEXc2Gq6zDdXLZVNFBcpCjoch7VQytSMH3wQ7Uufvv26"; // canonical vector idx 1
 /** Sign a request as Xetch would (server side) so parse's provenance gate passes. */
 const signGood = (req: Omit<SignRequest, "xsig">) => signRequest(req, devSigner.wif);
-/** Standard parse opts for the tests: testnet pin + fixed clock. */
-const OPTS = { net: "testnet" as const, now: NOW };
+/** Standard parse opts: testnet pin + fixed clock + dev (the testnet pin is a
+ *  public key, so it's only honoured in dev builds — mirrors the prod page). */
+const OPTS = { net: "testnet" as const, now: NOW, dev: true };
 
 /** A well-formed, Xetch-SIGNED request (what a real request looks like on the wire). */
 function goodRequest(overrides: Partial<SignRequest> = {}): SignRequest {
@@ -159,9 +160,29 @@ describe("parseSignParam — hostile input", () => {
   });
 
   it("fails closed on an unknown network (no pinned signer)", () => {
-    const r = parseSignParam(encodeParam(goodRequest()), { net: "regtest" as never, now: NOW });
+    const r = parseSignParam(encodeParam(goodRequest()), { net: "regtest" as never, now: NOW, dev: true });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/no pinned Xetch signing key/);
+  });
+
+  it("a PROD build (dev:false) refuses testnet — its pin is a PUBLIC key", () => {
+    // The whole point of the hardening: a production bundle must never verify
+    // against the public dev key, even in testnet mode. Same request that passes
+    // under dev:true is refused under dev:false.
+    const signed = encodeParam(goodRequest());
+    expect(parseSignParam(signed, { net: "testnet", now: NOW, dev: true }).ok).toBe(true);
+    const prod = parseSignParam(signed, { net: "testnet", now: NOW, dev: false });
+    expect(prod.ok).toBe(false);
+    if (!prod.ok) expect(prod.reason).toMatch(/no pinned Xetch signing key/);
+  });
+
+  it("mainnet verification does NOT depend on the dev flag", () => {
+    // Mainnet uses a secret-key pin, live in every build. (Signed by the dev key
+    // here, so it won't verify against the mainnet pin — but the point is the
+    // pin is PRESENT and attempted regardless of dev, i.e. not "no pin".)
+    const r = parseSignParam(encodeParam(goodRequest()), { net: "mainnet", now: NOW, dev: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/xsig/i); // reached verification, not "no pin"
   });
 
   it("refuses amounts smuggled into the request only if the contract does — and it does not carry them at all", () => {

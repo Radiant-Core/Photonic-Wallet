@@ -62,6 +62,13 @@ export const ALLOWED_SIGN_ORIGINS: readonly string[] = [
  * mainnet = the production key (its WIF lives only in Xetch's prod .env).
  * testnet = a well-known dev key (the canonical BIP-39 vector), so a dev/test
  *           Xetch can sign locally without a secret.
+ *
+ * ⚠ The testnet key's WIF is PUBLIC, so its pin is only honoured in DEV builds
+ * (see parseSignParam's `dev` gate, same compile-out as DEV_ORIGIN). A
+ * production bundle therefore cannot verify against a public key at all — a
+ * prod wallet switched to testnet mode fails closed rather than accepting a
+ * request anyone could forge. Only the mainnet pin (a secret key) is live in
+ * production.
  */
 export const XETCH_SIGN_ADDRESS: Record<"mainnet" | "testnet", string> = {
   mainnet: "1DXLKpLakD9SxFXuYSA7W8d99UWdTv5krk",
@@ -119,8 +126,20 @@ export function parseSignParam(
 ): ParsedSignParam {
   if (!raw || typeof raw !== "string") return { ok: false, reason: "missing request" };
 
-  const signerAddress = XETCH_SIGN_ADDRESS[opts.net];
-  if (!signerAddress) return { ok: false, reason: `no pinned Xetch signing key for network ${opts.net}` };
+  // The testnet signing key is PUBLIC (the canonical dev vector), so its pin is
+  // honoured only in DEV builds — same compile-out as DEV_ORIGIN. In a
+  // production bundle `dev` is false, so a testnet-mode wallet gets no pin and
+  // fails closed here, rather than "verifying" a request anyone could forge.
+  // Mainnet always uses its secret-key pin.
+  const signerAddress =
+    opts.net === "mainnet"
+      ? XETCH_SIGN_ADDRESS.mainnet
+      : opts.net === "testnet" && opts.dev
+        ? XETCH_SIGN_ADDRESS.testnet
+        : undefined; // unknown net, or testnet in a prod build → no pin, fail closed
+  if (!signerAddress) {
+    return { ok: false, reason: `no pinned Xetch signing key for network ${opts.net} in this build` };
+  }
 
   let decoded: unknown;
   try {
