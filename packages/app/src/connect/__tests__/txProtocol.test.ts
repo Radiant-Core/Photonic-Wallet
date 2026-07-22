@@ -21,6 +21,7 @@ import {
   buildBridgeReturnUrl,
   makeBridgeResponse,
   describeSignAction,
+  signedPayloadDetails,
 } from "../txProtocol";
 
 const NOW = 1_800_000_000; // fixed unix seconds so expiry is deterministic
@@ -194,5 +195,41 @@ describe("describeSignAction", () => {
     const label = describeSignAction({ ...base, t: "post", text: "y".repeat(500) });
     expect(label.length).toBeLessThan(120);
     expect(label).toContain("…");
+  });
+});
+
+describe("signedPayloadDetails — nothing signed goes unshown", () => {
+  const base = { p: "xetch" as const, v: 1 as const, ts: NOW, n: "x" };
+
+  it("surfaces media the one-liner omits (the hidden-attachment attack)", () => {
+    const rows = signedPayloadDetails({ ...base, t: "post", text: "gm", media: [{ h: "deadbeef", mime: "image/png" }] } as never);
+    const media = rows.find((r) => r.label.startsWith("Media"));
+    expect(media).toBeDefined();
+    expect(media!.value).toContain("deadbeef");
+  });
+
+  it("surfaces a stealth parent on a post (silently a reply/branch)", () => {
+    const rows = signedPayloadDetails({ ...base, t: "post", text: "gm", parent: "c".repeat(64) } as never);
+    expect(rows.some((r) => r.label === "Attached to post" && r.value === "c".repeat(64))).toBe(true);
+  });
+
+  it("surfaces the actual fields a profile update writes", () => {
+    const rows = signedPayloadDetails({ ...base, t: "profile", meta: { name: "Mallory", bio: "hi", avatar: "abc" } } as never);
+    const labels = rows.map((r) => r.label);
+    expect(labels).toContain("Field: name");
+    expect(labels).toContain("Field: bio");
+    expect(labels).toContain("Field: avatar");
+    expect(rows.find((r) => r.label === "Field: name")!.value).toBe("Mallory");
+  });
+
+  it("does not duplicate what the description already says", () => {
+    // A poll vote's `vote` meta is in the description; a reply's parent is framed
+    // by the description — neither should reappear as a detail row.
+    expect(signedPayloadDetails({ ...base, t: "like", parent: "p", meta: { vote: 2 } } as never)).toEqual([]);
+    expect(signedPayloadDetails({ ...base, t: "reply", parent: "p".repeat(64), text: "hi" } as never)).toEqual([]);
+  });
+
+  it("is empty for a plain post with nothing hidden", () => {
+    expect(signedPayloadDetails({ ...base, t: "post", text: "just text" } as never)).toEqual([]);
   });
 });

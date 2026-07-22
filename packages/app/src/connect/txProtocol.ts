@@ -149,10 +149,57 @@ export function makeBridgeResponse(
 }
 
 /**
+ * Every signed field the one-line description does NOT already convey, as
+ * label/value rows for the confirmation screen.
+ *
+ * This exists because `signEnvelope` signs the WHOLE core under the user's
+ * identity key — `text`, `media`, `parent`, `target`, `meta`, all of it — while
+ * `describeSignAction` only renders a few. Anything signed but unshown is
+ * content the user authored without seeing: a "post" that also carries media or
+ * a hidden `parent` (a stealth reply), or a "profile" update whose actual
+ * bio/avatar never appear. So we surface the rest here, and the page shows it,
+ * so "what was approved" equals "what was signed."
+ *
+ * `text`, and `target`/`vote` where the description already states them, are
+ * omitted to avoid duplication.
+ */
+export function signedPayloadDetails(core: SignRequest["core"]): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+  const c = core as SignRequest["core"] & {
+    media?: Array<{ h?: unknown; mime?: unknown }>;
+    parent?: unknown;
+    meta?: Record<string, unknown>;
+  };
+
+  if (Array.isArray(c.media) && c.media.length > 0) {
+    rows.push({
+      label: `Media (${c.media.length})`,
+      value: c.media.map((m) => (typeof m?.h === "string" ? m.h : "?")).join(", "),
+    });
+  }
+  // A `parent` on anything other than the reply/branch/like the description
+  // already frames is worth surfacing — it changes what the post IS.
+  if (typeof c.parent === "string" && c.parent && core.t !== "reply" && core.t !== "branch" && core.t !== "like") {
+    rows.push({ label: "Attached to post", value: c.parent });
+  }
+  // Non-`vote` meta is arbitrary signed content — most importantly the fields a
+  // `profile` update actually writes (name/bio/avatar/…). Show each pair.
+  if (c.meta && typeof c.meta === "object") {
+    for (const [k, v] of Object.entries(c.meta)) {
+      if (k === "vote") continue; // already reflected in the description
+      rows.push({ label: `Field: ${k}`, value: String(v) });
+    }
+  }
+  return rows;
+}
+
+/**
  * The action in plain words for the approval screen. This line is the human
  * side of the trust boundary — it must describe what the CORE says, because
  * the core is the only thing the requesting site truly controls. Everything
  * priced (recipients, amounts, fee) is derived locally and shown separately.
+ * It is a SUMMARY — {@link signedPayloadDetails} carries the fields it omits so
+ * nothing signed goes unshown.
  */
 export function describeSignAction(core: SignRequest["core"]): string {
   const quote = (s: string, max = 80) =>

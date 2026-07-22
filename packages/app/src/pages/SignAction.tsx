@@ -74,9 +74,11 @@ import { isNativePlatform } from "@app/platform";
 import {
   parseSignParam,
   describeSignAction,
+  signedPayloadDetails,
   makeBridgeResponse,
   buildBridgeReturnUrl,
 } from "@app/connect/txProtocol";
+import { isNonceConsumed, consumeNonce } from "@app/connect/consumedNonces";
 import type { SelectableInput } from "@lib/coinSelect";
 import type { UnfinalizedInput } from "@lib/types";
 
@@ -110,6 +112,11 @@ interface Priced {
 }
 
 interface PendingTx {
+  /** The nonce of the request this tx was built for. Broadcasting checks it
+   *  still matches the CURRENT request: a hash-nav to a new /sign?req= (or an
+   *  unlock completing after the request changed) must never broadcast a tx
+   *  built for request A while the screen now shows request B. */
+  nonce: string;
   rawTx: string;
   txid: string;
   /** photons leaving this wallet (payments + data output), excluding change. */
@@ -194,6 +201,18 @@ export default function SignAction() {
     if (!req || phase.k !== "pricing") return;
     let live = true;
     (async () => {
+      // Replay guard: a request we've already broadcast for is dead. The nonce
+      // is consumed at broadcast (not here), so a benign reload of an un-sent
+      // request still works — only a genuine re-fire of a settled one is caught.
+      if (isNonceConsumed(req.nonce)) {
+        setPhase({
+          k: "refused",
+          reason: "This request was already used. If you meant to do this again, start a fresh action on the site.",
+          respond: "rejected",
+        });
+        return;
+      }
+
       // The connected address must be OURS. A request naming someone else's
       // address is at best a stale session, at worst a confusion attack —
       // either way we refuse rather than warn: this page spends.
@@ -218,7 +237,9 @@ export default function SignAction() {
       try {
         cfg = (await fetchJson(`${req.origin}/api/config`)) as typeof cfg;
       } catch (e) {
-        setPhase({ k: "refused", reason: `Couldn't reach ${req.origin} for pricing: ${(e as Error).message}`, respond: "rejected" });
+        // Don't stamp a refusal onto a request that's already been superseded
+        // by a newer one (hash-nav mid-flight) — this catch runs after an await.
+        if (live) setPhase({ k: "refused", reason: `Couldn't reach ${req.origin} for pricing: ${(e as Error).message}`, respond: "rejected" });
         return;
       }
       if (!live) return;
@@ -279,7 +300,7 @@ export default function SignAction() {
           }
           authorAddress = post.post.author;
         } catch (e) {
-          setPhase({ k: "refused", reason: `Couldn't resolve who this action pays: ${(e as Error).message}`, respond: "rejected" });
+          if (live) setPhase({ k: "refused", reason: `Couldn't resolve who this action pays: ${(e as Error).message}`, respond: "rejected" });
           return;
         }
       }
@@ -341,15 +362,23 @@ export default function SignAction() {
       if (!built) throw new Error("Wallet is locked");
 
       // Belt-and-suspenders: judge our own tx by the same rule the server
-      // applies at ingest. If this fails, something upstream is wrong and the
-      // only safe output is a refusal.
+      // applies at ingest — but against the SIGNED tx's outputs, not the list we
+      // asked the builder for. Verifying the computed list only proves
+      // computePayments agrees with itself; deriving the payouts from the built
+      // scripts proves the tx we're about to broadcast actually pays them, so a
+      // builder that dropped or altered an output is caught here, not on chain.
       const action = pricedActionOf(req.core);
+      const builtPayouts = priced.payments.outputs.map((o) => {
+        const script = p2pkhScript(o.address);
+        const value = built.outputs.filter((b) => b.script === script).reduce((s, b) => s + b.value, 0n);
+        return { address: o.address, value };
+      });
       const verdict = verifyPayments({
         action: action!,
         photonsPerUsd: priced.photonsPerUsd,
         platformAddress: priced.platformAddress,
         authorAddress: priced.authorAddress,
-        payouts: priced.payments.outputs.map((o) => ({ address: o.address, value: o.value })),
+        payouts: builtPayouts,
         selfAction: priced.authorAddress === wallet.value.address,
       });
       if (!verdict.ok) throw new Error(`self-check failed: ${verdict.reason}`);
@@ -376,6 +405,7 @@ export default function SignAction() {
       const debit = inputTotal - changeBack;
 
       setPendingTx({
+        nonce: req.nonce, // bind the built tx to THIS request (see confirmBroadcast)
         rawTx: built.hex,
         txid: built.txid,
         debit,
@@ -401,12 +431,23 @@ export default function SignAction() {
   // ---- broadcast + return ---------------------------------------------------
   const confirmBroadcast = async () => {
     if (!req || !pendingTx || broadcasting.current) return;
+    // The built tx must belong to the request now on screen. If they diverged
+    // (a hash-nav to a new request, or an unlock that completed after the
+    // request changed), refuse rather than broadcast tx A while showing B.
+    if (pendingTx.nonce !== req.nonce) {
+      cancelConfirm();
+      toast({ title: "This request changed — build it again", status: "warning" });
+      return;
+    }
     if (expired()) {
       cancelConfirm();
       setPhase({ k: "refused", reason: "This request expired before it was broadcast.", respond: "expired" });
       return;
     }
     broadcasting.current = true;
+    // Consume the nonce BEFORE the network call: once we commit to broadcasting
+    // this request, a replay of it must be refused even if we crash mid-send.
+    consumeNonce(req.nonce);
     try {
       const broadcastTxid = await electrumWorker.value.broadcast(pendingTx.rawTx);
       const txid = broadcastTxid || pendingTx.txid;
@@ -502,18 +543,32 @@ export default function SignAction() {
     mention: "Mention",
     pay: "Payment",
   };
+  const details = signedPayloadDetails(req.core);
 
   return (
     <Container maxW="container.md" py={8}>
       <Heading size="md" mb={4}>Sign &amp; pay</Heading>
       <Card p={6} mb={4}>
         <Box mb={4}>
-          <Text textStyle="label" mb={1}>Requested by</Text>
+          {/* HONEST attribution: we verified the request TALKS TO this origin
+              (allowlisted; every fetch and the reply go there) — we did NOT
+              verify a page there initiated it. `origin` is attacker-writable, so
+              "requested by" would assert provenance we can't prove. */}
+          <Text textStyle="label" mb={1}>Signing for</Text>
           <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">{req.origin}</Code>
+          <Text color="text.muted" fontSize="xs" mt={1}>
+            Any website can open this screen. Only continue if you just started this
+            action on {req.origin}.
+          </Text>
         </Box>
         <Box mb={4}>
           <Text textStyle="label" mb={1}>Action</Text>
           <Text fontWeight="bold">{describeSignAction(req.core)}</Text>
+          {details.map((d, i) => (
+            <DataRow key={i} label={d.label}>
+              <Text fontSize="sm" wordBreak="break-all">{d.value}</Text>
+            </DataRow>
+          ))}
         </Box>
         <Divider my={3} />
         <VStack align="stretch" spacing={1}>
@@ -556,6 +611,11 @@ export default function SignAction() {
                 <DataRow label="Action">
                   <Text>{describeSignAction(req.core)}</Text>
                 </DataRow>
+                {details.map((d, i) => (
+                  <DataRow key={`d${i}`} label={d.label}>
+                    <Text fontSize="sm" wordBreak="break-all">{d.value}</Text>
+                  </DataRow>
+                ))}
                 {priced.payments.outputs.map((o, i) => (
                   <DataRow key={i} label={roleLabel[o.role] ?? o.role}>
                     <Text sx={{ fontVariantNumeric: "tabular-nums" }} wordBreak="break-all">
@@ -588,7 +648,7 @@ export default function SignAction() {
             </VStack>
           </ModalBody>
           <ModalFooter>
-            <Button variant="primary" onClick={() => void confirmBroadcast()} mr={4}>
+            <Button variant="primary" isLoading={broadcasting.current} onClick={() => void confirmBroadcast()} mr={4}>
               Confirm &amp; broadcast
             </Button>
             <Button onClick={cancelConfirm}>Cancel</Button>
