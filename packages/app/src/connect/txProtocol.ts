@@ -49,6 +49,25 @@ export const ALLOWED_SIGN_ORIGINS: readonly string[] = [
   "https://www.xetch.net",
 ];
 
+/**
+ * Xetch's request-signing ADDRESS, per network (bridge v2). The provenance
+ * anchor: the wallet REQUIRES every sign request to carry a signature that
+ * verifies against this, so a page that merely claims `origin:"xetch.net"`
+ * cannot get the wallet to act — it has no key to produce the signature.
+ *
+ * The origin allowlist above is the fast pre-check; THIS is the cryptographic
+ * proof. Rotating the key means changing these values (a wallet release) and
+ * swapping `XETCH_SIGN_WIF` on the server.
+ *
+ * mainnet = the production key (its WIF lives only in Xetch's prod .env).
+ * testnet = a well-known dev key (the canonical BIP-39 vector), so a dev/test
+ *           Xetch can sign locally without a secret.
+ */
+export const XETCH_SIGN_ADDRESS: Record<"mainnet" | "testnet", string> = {
+  mainnet: "1DXLKpLakD9SxFXuYSA7W8d99UWdTv5krk",
+  testnet: "moMfswEJUgX3VK6LWBgFvZsXzHHxZHxJ1f",
+};
+
 /** Dev-loopback origins (any port). Only honoured when the caller passes
  *  `dev: true`, which the page wires to `import.meta.env.DEV` — dead code in a
  *  production bundle rather than a latent bypass. */
@@ -86,16 +105,22 @@ export type ParsedSignParam =
  * Decode and validate a `?req=` parameter into a trusted-enough-to-DISPLAY
  * request. Hostile input in, verdict out; never throws.
  *
- * Order matters: the structural parse (bridge-kit's, 14 rejection reasons,
- * including expiry) runs FIRST so the origin check below reads a `string`
- * that actually is one, then the origin gate turns "well-formed" into
- * "allowed to ask".
+ * Three gates, in order:
+ *   1. Structural parse (bridge-kit) — shape, nonce, expiry, and, given the
+ *      pinned signer address, that Xetch's `xsig` VERIFIES. This is the
+ *      provenance gate: a request not signed by Xetch is rejected here.
+ *   2. Origin allowlist — the fast first-party check.
+ * `net` selects which pinned Xetch signing address to verify against; it is
+ * REQUIRED, and an unknown network fails closed (no pin ⇒ no valid request).
  */
 export function parseSignParam(
   raw: string | null | undefined,
-  opts?: { now?: number; dev?: boolean },
+  opts: { net: "mainnet" | "testnet"; now?: number; dev?: boolean },
 ): ParsedSignParam {
   if (!raw || typeof raw !== "string") return { ok: false, reason: "missing request" };
+
+  const signerAddress = XETCH_SIGN_ADDRESS[opts.net];
+  if (!signerAddress) return { ok: false, reason: `no pinned Xetch signing key for network ${opts.net}` };
 
   let decoded: unknown;
   try {
@@ -104,10 +129,12 @@ export function parseSignParam(
     return { ok: false, reason: "undecodable request" };
   }
 
-  const parsed = parseBridgeRequest(decoded, opts?.now !== undefined ? { now: opts.now } : undefined);
+  // Structural + provenance in one pass: signerAddress makes bridge-kit REQUIRE
+  // and verify xsig, so a forged (unsigned or wrong-key) request never returns ok.
+  const parsed = parseBridgeRequest(decoded, { signerAddress, ...(opts.now !== undefined ? { now: opts.now } : {}) });
   if (!parsed.ok) return { ok: false, reason: parsed.reason };
 
-  if (!isAllowedSignOrigin(parsed.value.origin, { dev: opts?.dev })) {
+  if (!isAllowedSignOrigin(parsed.value.origin, { dev: opts.dev })) {
     return { ok: false, reason: `origin not allowed to request transaction signing: ${parsed.value.origin}` };
   }
 

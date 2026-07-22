@@ -142,9 +142,11 @@ export default function SignAction() {
   // Parse ONCE per param value. Everything downstream keys off this. The dev
   // flag admits localhost origins in dev builds only — the branch is compiled
   // out of production, not merely configured off.
+  // net selects which pinned Xetch signing address the provenance check
+  // verifies against — mainnet in prod, testnet for a dev/test stack.
   const parsed = useMemo(
-    () => parseSignParam(searchParams.get("req"), { dev: DEV }),
-    [searchParams],
+    () => parseSignParam(searchParams.get("req"), { net: wallet.value.net, dev: DEV }),
+    [searchParams, wallet.value.net],
   );
 
   const initialPhase = useCallback(

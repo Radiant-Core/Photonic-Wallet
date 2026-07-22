@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import {
   makeSignRequest,
+  signRequest,
   verifyResponse,
   type SignRequest,
 } from "@xetch/bridge-kit";
@@ -22,11 +23,28 @@ import {
   makeBridgeResponse,
   describeSignAction,
   signedPayloadDetails,
+  XETCH_SIGN_ADDRESS,
 } from "../txProtocol";
 
 const NOW = 1_800_000_000; // fixed unix seconds so expiry is deterministic
 
-/** A well-formed request as Xetch would build it (bridge-kit's own factory). */
+// Xetch's DEV request-signing key — the canonical BIP-39 vector at the testnet
+// path, which derives XETCH_SIGN_ADDRESS.testnet. Tests pin `net: "testnet"`
+// and sign with this, exercising the real provenance gate. Hardcoded (not
+// derived) so the Photonic app test needs no @radiant-core/sdk import; these
+// are the well-known vector, safe to expose. The prod mainnet WIF is secret
+// and never in code.
+const devSigner = {
+  wif: "cTk9NhxTCzfbsB4psto8C9ChaavWf6oysufiKHU5j4zhTxG9mZsc",
+  address: "moMfswEJUgX3VK6LWBgFvZsXzHHxZHxJ1f",
+};
+const ATTACKER_WIF = "cVqn3rEVEEXc2Gq6zDdXLZVNFBcpCjoch7VQytSMH3wQ7Uufvv26"; // canonical vector idx 1
+/** Sign a request as Xetch would (server side) so parse's provenance gate passes. */
+const signGood = (req: Omit<SignRequest, "xsig">) => signRequest(req, devSigner.wif);
+/** Standard parse opts for the tests: testnet pin + fixed clock. */
+const OPTS = { net: "testnet" as const, now: NOW };
+
+/** A well-formed, Xetch-SIGNED request (what a real request looks like on the wire). */
 function goodRequest(overrides: Partial<SignRequest> = {}): SignRequest {
   const req = makeSignRequest({
     origin: "https://xetch.net",
@@ -35,7 +53,7 @@ function goodRequest(overrides: Partial<SignRequest> = {}): SignRequest {
     core: { p: "xetch", v: 1, t: "like", ts: NOW, parent: "a".repeat(64), n: "n1" },
     now: NOW,
   });
-  return { ...req, ...overrides };
+  return signGood({ ...req, ...overrides });
 }
 
 /** Encode exactly as Xetch's bridge-link does (b64url of UTF-8 JSON). */
@@ -79,7 +97,7 @@ describe("origin allowlist", () => {
 
 describe("parseSignParam — hostile input", () => {
   it("accepts a genuine Xetch-encoded request", () => {
-    const r = parseSignParam(encodeParam(goodRequest()), { now: NOW });
+    const r = parseSignParam(encodeParam(goodRequest()), OPTS);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.req.origin).toBe("https://xetch.net");
   });
@@ -92,32 +110,65 @@ describe("parseSignParam — hostile input", () => {
     ["json array", encodeParam([1, 2, 3])],
     ["json scalar", encodeParam(42)],
   ])("refuses %s without throwing", (_l, raw) => {
-    const r = parseSignParam(raw as string | null, { now: NOW });
+    const r = parseSignParam(raw as string | null, OPTS);
     expect(r.ok).toBe(false);
   });
 
   it("refuses a structurally valid request from a foreign origin", () => {
-    const r = parseSignParam(encodeParam(goodRequest({ origin: "https://evil.example" })), { now: NOW });
+    const r = parseSignParam(encodeParam(goodRequest({ origin: "https://evil.example" })), OPTS);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/origin/);
   });
 
   it("refuses an expired request (bridge-kit's own expiry gate)", () => {
-    const r = parseSignParam(encodeParam(goodRequest()), { now: NOW + 3600 });
+    const r = parseSignParam(encodeParam(goodRequest()), { ...OPTS, now: NOW + 3600 });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/expired/);
   });
 
   it("refuses a request whose namespace or version is wrong", () => {
-    expect(parseSignParam(encodeParam({ ...goodRequest(), ns: "glyphgalaxy:sign:v1" }), { now: NOW }).ok).toBe(false);
-    expect(parseSignParam(encodeParam({ ...goodRequest(), v: 2 }), { now: NOW }).ok).toBe(false);
+    expect(parseSignParam(encodeParam({ ...goodRequest(), ns: "glyphgalaxy:sign:v1" }), OPTS).ok).toBe(false);
+    expect(parseSignParam(encodeParam({ ...goodRequest(), v: 99 }), OPTS).ok).toBe(false);
+  });
+
+  it("REQUIRES Xetch's signature — an unsigned request is refused (v2 provenance)", () => {
+    // makeSignRequest without signGood = a request no page could distinguish
+    // from a forgery. It must not reach the confirm screen.
+    const unsigned = makeSignRequest({
+      origin: "https://xetch.net", sessionId: "s", address: "1Bv", now: NOW,
+      core: { p: "xetch", v: 1, t: "like", ts: NOW, parent: "a".repeat(64), n: "n" } as never,
+    });
+    const r = parseSignParam(encodeParam(unsigned), OPTS);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/xsig|signed by Xetch/i);
+  });
+
+  it("refuses a request signed by the WRONG key (a forger's own signature)", () => {
+    const base = makeSignRequest({
+      origin: "https://xetch.net", sessionId: "s", address: "1Bv", now: NOW,
+      core: { p: "xetch", v: 1, t: "like", ts: NOW, parent: "a".repeat(64), n: "n" } as never,
+    });
+    const forged = signRequest(base, ATTACKER_WIF); // valid signature, wrong signer
+    const r = parseSignParam(encodeParam(forged), OPTS);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/xsig/i);
+  });
+
+  it("the pinned testnet address matches the dev key (guards a bad pin)", () => {
+    expect(XETCH_SIGN_ADDRESS.testnet).toBe(devSigner.address);
+  });
+
+  it("fails closed on an unknown network (no pinned signer)", () => {
+    const r = parseSignParam(encodeParam(goodRequest()), { net: "regtest" as never, now: NOW });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/no pinned Xetch signing key/);
   });
 
   it("refuses amounts smuggled into the request only if the contract does — and it does not carry them at all", () => {
     // The contract has no amount fields; extra keys must not create any.
     const r = parseSignParam(
       encodeParam({ ...goodRequest(), payments: [{ address: "evil", value: "999999999" }], fee: "1" }),
-      { now: NOW },
+      OPTS,
     );
     // Parse may accept (unknown keys ignored) — but the typed result must not expose them.
     if (r.ok) {
