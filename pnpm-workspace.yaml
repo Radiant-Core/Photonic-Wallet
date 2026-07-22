@@ -23,7 +23,7 @@ minimumReleaseAgeExclude:
   # exempting them from the 1-day cooldown is safe — the policy exists to blunt
   # a compromised UPSTREAM release, which this isn't. Drop these once each is
   # past the 24h window.
-  - '@xetch/bridge-kit@0.2.0'
+  - '@xetch/bridge-kit@0.2.1'
   - '@xetch/config@0.2.0'
   - '@xetch/protocol@0.1.0'
 overrides:

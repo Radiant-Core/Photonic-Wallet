@@ -29,12 +29,15 @@ import {
   parseSignRequest as parseBridgeRequest,
   signResponse as buildBridgeResponse,
   type SignRequest,
+  type CoreSignRequest,
+  type TxSignRequest,
   type SignResponse,
   type SignStatus,
+  type TxProposal,
 } from "@xetch/bridge-kit";
 
 // Re-export for the page + tests so they import ONE module for the protocol.
-export type { SignRequest, SignResponse, SignStatus };
+export type { SignRequest, CoreSignRequest, TxSignRequest, SignResponse, SignStatus, TxProposal };
 
 /**
  * Origins allowed to request a transaction signature. First-party pin, v1:
@@ -209,9 +212,9 @@ export function makeBridgeResponse(
  * `text`, and `target`/`vote` where the description already states them, are
  * omitted to avoid duplication.
  */
-export function signedPayloadDetails(core: SignRequest["core"]): Array<{ label: string; value: string }> {
+export function signedPayloadDetails(core: NonNullable<SignRequest["core"]>): Array<{ label: string; value: string }> {
   const rows: Array<{ label: string; value: string }> = [];
-  const c = core as SignRequest["core"] & {
+  const c = core as NonNullable<SignRequest["core"]> & {
     media?: Array<{ h?: unknown; mime?: unknown }>;
     parent?: unknown;
     meta?: Record<string, unknown>;
@@ -247,7 +250,7 @@ export function signedPayloadDetails(core: SignRequest["core"]): Array<{ label: 
  * It is a SUMMARY — {@link signedPayloadDetails} carries the fields it omits so
  * nothing signed goes unshown.
  */
-export function describeSignAction(core: SignRequest["core"]): string {
+export function describeSignAction(core: NonNullable<SignRequest["core"]>): string {
   const quote = (s: string, max = 80) =>
     `“${s.length > max ? s.slice(0, max - 1) + "…" : s}”`;
   switch (core.t) {
@@ -272,4 +275,72 @@ export function describeSignAction(core: SignRequest["core"]): string {
       // suspenders for a future core type arriving ahead of wallet support.
       return `Unrecognised action: ${String(core.t)}`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// tx-proposal path (generic signing) — the wallet's independent verification
+// ---------------------------------------------------------------------------
+
+/** One recipient decoded from a tx proposal's outputs, for display + self-check. */
+export interface DecodedRecipient {
+  address: string;
+  value: bigint;
+}
+
+/** A tx proposal the wallet has verified is safe to build: every recipient
+ *  output decodes to a real address the user can see. */
+export interface DecodedSend {
+  recipients: DecodedRecipient[];
+  /** Total leaving to recipients (excludes our change + the network fee). */
+  sending: bigint;
+}
+
+export type DecodeSendResult =
+  | { ok: true; plan: DecodedSend }
+  | { ok: false; reason: string };
+
+/**
+ * Independently decide what a "send" {@link TxProposal} would DO, from the
+ * request alone — the heart of the generic path's safety. What the user is
+ * authorizing is WHERE the money goes: the OUTPUTS. This decodes each output to
+ * an address + amount so the confirm screen shows the real destinations; a
+ * redirected or undecodable output is caught here, before anything is signed.
+ *
+ * The wallet does NOT trust the proposal's `inputs`: for a plain send it funds
+ * the transaction itself from its own coins (identical to the wallet's own Send
+ * RXD flow, so token-bearing UTXOs can never be spent as fee/change). The
+ * proposed inputs are therefore just a hint the wallet replaces — nothing the
+ * requester puts there can make the wallet spend a coin it didn't choose.
+ *
+ * Pure and injectable (rjs is passed in as `scriptToAddress`) so it unit-tests
+ * with plain strings. Fail-closed on every branch.
+ */
+export function decodeSendProposal(
+  tx: TxProposal,
+  scriptToAddress: (scriptHex: string) => string | null,
+): DecodeSendResult {
+  if (tx.intent !== "send") return { ok: false, reason: `unsupported transaction type: ${String(tx.intent)}` };
+  if (!Array.isArray(tx.outputs) || tx.outputs.length === 0) return { ok: false, reason: "the request proposes no recipients" };
+
+  const recipients: DecodedRecipient[] = [];
+  let sending = 0n;
+  for (const o of tx.outputs) {
+    const address = scriptToAddress(o.script);
+    if (!address) return { ok: false, reason: "a recipient output isn't a standard address this wallet can show — refusing" };
+    let v: bigint;
+    try { v = BigInt(o.value); } catch { return { ok: false, reason: "a recipient output has an unreadable amount" }; }
+    if (v <= 0n) return { ok: false, reason: "a recipient output has a non-positive amount" };
+    recipients.push({ address, value: v });
+    sending += v;
+  }
+
+  return { ok: true, plan: { recipients, sending } };
+}
+
+/** One-line human summary of a decoded send, for the approval header. */
+export function describeSend(plan: DecodedSend, ticker: string, toRXD: (photons: bigint) => string): string {
+  if (plan.recipients.length === 1) {
+    return `Send ${toRXD(plan.recipients[0].value)} ${ticker} to ${plan.recipients[0].address}`;
+  }
+  return `Send ${toRXD(plan.sending)} ${ticker} to ${plan.recipients.length} recipients`;
 }

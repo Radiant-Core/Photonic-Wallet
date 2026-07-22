@@ -92,7 +92,7 @@
     "tiny-secp256k1": "2.2.4",
     "vite-plugin-pwa": "^0.17.5",
     "vite-plugin-top-level-await": "^1.4.4",
-    "@xetch/bridge-kit": "^0.2.0"
+    "@xetch/bridge-kit": "^0.2.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",

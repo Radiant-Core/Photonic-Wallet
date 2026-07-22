@@ -23,6 +23,8 @@ import {
   makeBridgeResponse,
   describeSignAction,
   signedPayloadDetails,
+  decodeSendProposal,
+  describeSend,
   XETCH_SIGN_ADDRESS,
 } from "../txProtocol";
 
@@ -303,5 +305,77 @@ describe("signedPayloadDetails — nothing signed goes unshown", () => {
 
   it("is empty for a plain post with nothing hidden", () => {
     expect(signedPayloadDetails({ ...base, t: "post", text: "just text" } as never)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tx-proposal decoding (generic send path)
+// ---------------------------------------------------------------------------
+describe("decodeSendProposal — what the wallet independently verifies", () => {
+  // A trivial script→address decoder for the test: map known scripts to labels.
+  const addrOf: Record<string, string> = {
+    "76a914aa88ac": "1Alice",
+    "76a914bb88ac": "1Bob",
+  };
+  const decode = (hex: string): string | null => addrOf[hex] ?? null;
+
+  const sendTx = (over: Partial<import("../txProtocol").TxProposal> = {}): import("../txProtocol").TxProposal => ({
+    intent: "send",
+    inputs: [{ txid: "a".repeat(64), vout: 0, value: "100000", script: "76a914ff88ac" }],
+    outputs: [{ script: "76a914aa88ac", value: "50000" }],
+    addChange: true,
+    network: "testnet",
+    ...over,
+  });
+
+  it("decodes a single recipient to its address + amount", () => {
+    const r = decodeSendProposal(sendTx(), decode);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.plan.recipients).toEqual([{ address: "1Alice", value: 50000n }]);
+      expect(r.plan.sending).toBe(50000n);
+    }
+  });
+
+  it("sums multiple recipients", () => {
+    const r = decodeSendProposal(
+      sendTx({ outputs: [{ script: "76a914aa88ac", value: "50000" }, { script: "76a914bb88ac", value: "25000" }] }),
+      decode,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.plan.sending).toBe(75000n);
+  });
+
+  it("REFUSES an output that doesn't decode to a standard address", () => {
+    const r = decodeSendProposal(sendTx({ outputs: [{ script: "6a0bdeadbeef", value: "50000" }] }), decode);
+    expect(r).toMatchObject({ ok: false, reason: /standard address/ });
+  });
+
+  it("refuses a non-send intent", () => {
+    const r = decodeSendProposal(sendTx({ intent: "drain" as never }), decode);
+    expect(r).toMatchObject({ ok: false, reason: /unsupported transaction type/ });
+  });
+
+  it("refuses a zero or unreadable recipient amount", () => {
+    expect(decodeSendProposal(sendTx({ outputs: [{ script: "76a914aa88ac", value: "0" }] }), decode))
+      .toMatchObject({ ok: false, reason: /non-positive/ });
+    expect(decodeSendProposal(sendTx({ outputs: [{ script: "76a914aa88ac", value: "notanumber" }] }), decode))
+      .toMatchObject({ ok: false, reason: /unreadable/ });
+  });
+
+  it("refuses when there are no recipients", () => {
+    const r = decodeSendProposal(sendTx({ outputs: [] }), decode);
+    expect(r).toMatchObject({ ok: false, reason: /no recipients/ });
+  });
+
+  it("describeSend reads naturally for one and many recipients", () => {
+    const toRXD = (p: bigint) => (Number(p) / 1e8).toString();
+    const one = decodeSendProposal(sendTx(), decode);
+    if (one.ok) expect(describeSend(one.plan, "RXD", toRXD)).toBe("Send 0.0005 RXD to 1Alice");
+    const many = decodeSendProposal(
+      sendTx({ outputs: [{ script: "76a914aa88ac", value: "50000" }, { script: "76a914bb88ac", value: "25000" }] }),
+      decode,
+    );
+    if (many.ok) expect(describeSend(many.plan, "RXD", toRXD)).toBe("Send 0.00075 RXD to 2 recipients");
   });
 });

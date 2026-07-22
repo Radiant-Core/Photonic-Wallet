@@ -77,8 +77,10 @@ import {
   signedPayloadDetails,
   makeBridgeResponse,
   buildBridgeReturnUrl,
+  type CoreSignRequest,
 } from "@app/connect/txProtocol";
 import { isNonceConsumed, consumeNonce } from "@app/connect/consumedNonces";
+import SignTxAction from "@app/pages/SignTxAction";
 import type { SelectableInput } from "@lib/coinSelect";
 import type { UnfinalizedInput } from "@lib/types";
 
@@ -135,7 +137,20 @@ type Phase =
   | { k: "refused"; reason: string; respond: "rejected" | "expired" }
   | { k: "returning" };
 
+/**
+ * Route a parsed request to the right flow. A `tx` proposal is the generic
+ * signing path (SignTxAction); everything else is the core-intent path below.
+ * Only hooks that run every render live here (useSearchParams), so the
+ * conditional child render is rules-of-hooks safe.
+ */
 export default function SignAction() {
+  const [searchParams] = useSearchParams();
+  const parsed = parseSignParam(searchParams.get("req"), { net: wallet.value.net, dev: DEV });
+  if (parsed.ok && parsed.req.tx) return <SignTxAction />;
+  return <SignCoreAction />;
+}
+
+function SignCoreAction() {
   const [searchParams] = useSearchParams();
   const toast = useToast();
 
@@ -180,7 +195,11 @@ export default function SignAction() {
     setConfirmOpen(false);
   }, [initialPhase]);
 
-  const req: SignRequest | null = parsed.ok ? parsed.req : null;
+  // This flow only ever renders for core-intent requests (the dispatcher routes
+  // tx proposals to SignTxAction), so narrow to CoreSignRequest — `req.core` is
+  // then defined throughout. A tx request slipping through resolves to null and
+  // falls into the invalid/native handling, which is the safe outcome.
+  const req: CoreSignRequest | null = parsed.ok && parsed.req.core ? (parsed.req as CoreSignRequest) : null;
 
   /** Leave for the requesting site with a MAC'd non-ok outcome. Used by every
    *  refusal path so the opener tab is never left waiting out its timeout. */
