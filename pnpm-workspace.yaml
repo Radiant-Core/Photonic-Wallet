@@ -18,5 +18,13 @@ minimumReleaseAgeExclude:
   # pruned once they're well past the window — no point listing exclusions
   # the policy already accepts on its own.
   - '@radiant-core/radiantjs@2.0.6'
+  # Xetch bridge-kit + its deps, freshly published for the /sign transaction
+  # bridge. First-party packages we control (not third-party supply chain), so
+  # exempting them from the 1-day cooldown is safe — the policy exists to blunt
+  # a compromised UPSTREAM release, which this isn't. Drop these once each is
+  # past the 24h window.
+  - '@xetch/bridge-kit@0.1.0'
+  - '@xetch/config@0.1.0'
+  - '@xetch/protocol@0.1.0'
 overrides:
   protobufjs: ^7.5.5
