@@ -8,10 +8,13 @@
  *     `fake-indexeddb/auto` no-op (it only installs when absent). Force the
  *     real fake-indexeddb factory + key range into place.
  *
- *  2. `setup.ts` mocks `crypto.subtle.digest` to a `vi.fn()` returning
- *     `undefined`. Dexie's module init calls `getPrototypeOf(crypto.subtle
- *     .digest(...))` to detect the native Promise, which throws on `undefined`.
- *     Drop `subtle` so Dexie falls back to its `Promise.resolve()` path.
+ *  2. (Retired.) `setup.ts` used to mock `crypto.subtle.digest` as a `vi.fn()`
+ *     returning `undefined`, which broke Dexie's native-Promise detection
+ *     (`getPrototypeOf(crypto.subtle.digest(...))`), so this file dropped
+ *     `subtle` to force Dexie's fallback. `setup.ts` now installs Node's REAL
+ *     WebCrypto — `digest()` returns a genuine Promise, Dexie detects it
+ *     correctly, and the drop became not just unnecessary but impossible
+ *     (`subtle` is getter-only on a real Crypto object).
  */
 import { IDBFactory, IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
 
@@ -19,9 +22,3 @@ import { IDBFactory, IDBKeyRange as FDBKeyRange } from "fake-indexeddb";
   new IDBFactory();
 (globalThis as unknown as { IDBKeyRange: typeof FDBKeyRange }).IDBKeyRange =
   FDBKeyRange;
-
-const cryptoObj = (globalThis as unknown as { crypto?: { subtle?: unknown } })
-  .crypto;
-if (cryptoObj && cryptoObj.subtle) {
-  cryptoObj.subtle = undefined;
-}

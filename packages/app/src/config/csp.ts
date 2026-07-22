@@ -26,6 +26,13 @@ const CONNECT_HOSTS = [
   "https://testnet.radiantexplorer.com",
   // First-party swap relay
   "https://swap.radiantcore.org",
+  // Xetch (first-party social app): the /sign transaction-bridge page fetches
+  // /api/config (pricing rate) and /api/post/<id> (who an action pays) so it
+  // can price a request LOCALLY instead of trusting numbers from the request.
+  // Host-scoped, read-only GETs; the same origins are also the hardcoded
+  // sign-request allowlist in connect/txProtocol.ts.
+  "https://xetch.net",
+  "https://www.xetch.net",
   // Off-chain reference odds for prediction markets (Polymarket Gamma API, CORS-enabled).
   // Read-only, host-scoped; only a creator-supplied market slug is sent (see predict/referenceOdds.ts).
   "https://gamma-api.polymarket.com",

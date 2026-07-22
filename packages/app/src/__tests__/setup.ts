@@ -68,22 +68,14 @@ vi.mock("@app/db", () => ({
   },
 }));
 
-// Mock crypto.getRandomValues
-Object.defineProperty(global, "crypto", {
-  value: {
-    getRandomValues: (arr: Uint8Array) => {
-      for (let i = 0; i < arr.length; i++) {
-        arr[i] = Math.floor(Math.random() * 256);
-      }
-      return arr;
-    },
-    subtle: {
-      digest: vi.fn(),
-      encrypt: vi.fn(),
-      decrypt: vi.fn(),
-    },
-  },
-});
+// Real WebCrypto, not a mock. jsdom ships no `crypto.subtle`, and the old
+// stub here (`digest: vi.fn()` etc.) made anything that actually computes a
+// hash or HMAC — like the Xetch bridge's response MAC — fail with
+// "importKey is not a function" instead of testing real cryptography.
+// Node 20+ implements the same WebCrypto spec browsers do, so tests exercise
+// the identical code path production runs. Nothing asserted on the old mock.
+import { webcrypto } from "node:crypto";
+Object.defineProperty(global, "crypto", { value: webcrypto });
 
 // Mock window.matchMedia
 Object.defineProperty(window, "matchMedia", {

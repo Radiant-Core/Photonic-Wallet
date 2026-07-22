@@ -91,7 +91,8 @@
     "react-swipeable": "^7.0.1",
     "tiny-secp256k1": "2.2.4",
     "vite-plugin-pwa": "^0.17.5",
-    "vite-plugin-top-level-await": "^1.4.4"
+    "vite-plugin-top-level-await": "^1.4.4",
+    "@xetch/bridge-kit": "link:../../../Xetch/packages/bridge-kit"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",

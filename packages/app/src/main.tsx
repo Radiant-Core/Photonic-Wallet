@@ -565,6 +565,16 @@ const router = createHashRouter([
             element: <Connect />,
           },
           {
+            // External TRANSACTION signing (Xetch bridge). A separate route
+            // from /connect on purpose: that page promises it cannot spend,
+            // and this one exists to spend. Lazy — it pulls the whole
+            // bridge-kit pricing/builder chain, which no other page needs.
+            path: "/sign",
+            lazy: async () => ({
+              Component: (await import("./pages/SignAction")).default,
+            }),
+          },
+          {
             // History/activity folded into the unified History tab (/coins).
             path: "/history",
             element: <Navigate to="/coins" replace />,
