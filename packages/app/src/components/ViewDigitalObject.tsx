@@ -128,14 +128,17 @@ export default function ViewDigitalObject({
   const successDisclosure = useDisclosure();
   // No default result: `undefined` means the live query hasn't resolved yet
   // (loading), which we surface distinctly from a token that isn't in the
-  // wallet (resolved but missing).
+  // DB at all (resolved but missing). A glyph without a TxO is a token the
+  // wallet doesn't own (e.g. opened from the Market's Recently Minted feed,
+  // or an author/container ref) — rendered read-only below: token info and
+  // content, no owner actions.
   const result = useLiveQuery(async () => {
     const nft = await db.glyph.get({ ref: sref });
-    if (!nft?.lastTxoId) return [undefined, undefined];
-    const txo = await db.txo.get(nft.lastTxoId);
+    if (!nft) return [undefined, undefined];
+    const txo = nft.lastTxoId ? await db.txo.get(nft.lastTxoId) : undefined;
     const a = nft?.author && (await db.glyph.get({ ref: nft.author }));
     const c = nft?.container && (await db.glyph.get({ ref: nft.container }));
-    return [nft, txo, a, c] as [SmartToken, TxO, SmartToken?, SmartToken?];
+    return [nft, txo, a, c] as [SmartToken, TxO?, SmartToken?, SmartToken?];
   }, [sref]);
   const [nft, txo, author, container] = result ?? [];
   const txid = useRef("");
@@ -157,7 +160,7 @@ export default function ViewDigitalObject({
       </ContentContainer>
     );
   }
-  if (!txo || !nft) {
+  if (!nft) {
     return (
       <ContentContainer>
         <PageHeader />
@@ -230,7 +233,7 @@ export default function ViewDigitalObject({
     "image/gif",
     "image/avif",
   ].includes(nft.embed?.t || "");
-  const location = Outpoint.fromUTXO(txo.txid, txo.vout);
+  const location = txo ? Outpoint.fromUTXO(txo.txid, txo.vout) : undefined;
   const isLink = !!nft.location;
 
   return (
@@ -369,6 +372,19 @@ export default function ViewDigitalObject({
                   Swap pending
                 </Alert>
               )}
+              {!txo && (
+                <Alert
+                  status="info"
+                  variant="subtle"
+                  as={GridItem}
+                  justifyContent="center"
+                  colSpan={2}
+                  fontSize="sm"
+                >
+                  <AlertIcon />
+                  {"Not in your wallet — token info from the network"}
+                </Alert>
+              )}
               {!nft.embed && nft.remote && !isIPFS && (
                 <Warning>
                   {"URLs may be unsafe and result in loss of funds"}
@@ -414,7 +430,9 @@ export default function ViewDigitalObject({
                   </GridItem>
                 </>
               )}
-              {isMutable && (
+              {/* Owner actions require the backing TxO — a glyph-only row
+                  (unowned token opened from the Market) is view-only. */}
+              {txo && isMutable && (
                 <Button
                   leftIcon={<ActionIcon as={MdEdit} />}
                   onClick={() => unlock(openEdit)}
@@ -423,23 +441,27 @@ export default function ViewDigitalObject({
                   {"Edit Token"}
                 </Button>
               )}
-              <Button
-                variant="primary"
-                disabled={nft.swapPending}
-                leftIcon={<ActionIcon as={TbArrowUpRight} />}
-                onClick={() => unlock(openSend)}
-              >
-                {"Send"}
-              </Button>
-              <Button
-                disabled={nft.swapPending}
-                leftIcon={<ActionIcon as={MdDeleteForever} />}
-                onClick={() => unlock(openMelt)}
-                _hover={{ bg: "red.600" }}
-              >
-                {"Melt"}
-              </Button>
-              {nft.royalty && (
+              {txo && (
+                <>
+                  <Button
+                    variant="primary"
+                    disabled={nft.swapPending}
+                    leftIcon={<ActionIcon as={TbArrowUpRight} />}
+                    onClick={() => unlock(openSend)}
+                  >
+                    {"Send"}
+                  </Button>
+                  <Button
+                    disabled={nft.swapPending}
+                    leftIcon={<ActionIcon as={MdDeleteForever} />}
+                    onClick={() => unlock(openMelt)}
+                    _hover={{ bg: "red.600" }}
+                  >
+                    {"Melt"}
+                  </Button>
+                </>
+              )}
+              {txo && nft.royalty && (
                 <Button
                   disabled={nft.swapPending}
                   leftIcon={<ActionIcon as={MdSell} />}
@@ -455,7 +477,7 @@ export default function ViewDigitalObject({
                   swap here that would bypass the royalty. Mirrors the WAVE
                   Names "List for Sale" flow — pre-fills the Swap page with this
                   token as the offered asset; signing happens there. */}
-              {!nft.royalty && (
+              {txo && !nft.royalty && (
                 <Button
                   disabled={nft.swapPending}
                   leftIcon={<ActionIcon as={MdSell} />}
@@ -487,30 +509,34 @@ export default function ViewDigitalObject({
                   setDecryptedMime(mime);
                 }}
               >
-                <PropertyCard heading={"Output value"}>
-                  <Photons value={txo.value} />
-                </PropertyCard>
+                {txo && (
+                  <PropertyCard heading={"Output value"}>
+                    <Photons value={txo.value} />
+                  </PropertyCard>
+                )}
                 {nft.type && (
                   <PropertyCard heading={"Type"}>
                     <TokenType type={nft.type} />
                   </PropertyCard>
                 )}
-                <PropertyCard heading={"Location"}>
-                  <div>
-                    <Identifier showCopy copyValue={txo.txid}>
-                      {location.shortOutput()}
-                    </Identifier>
-                    <IconButton
-                      aria-label={"Open in block explorer"}
-                      icon={<ExternalLinkIcon />}
-                      size="xs"
-                      variant="ghost"
-                      as={Link}
-                      to={createExplorerUrl(location.getTxid())}
-                      target="_blank"
-                    />
-                  </div>
-                </PropertyCard>
+                {txo && location && (
+                  <PropertyCard heading={"Location"}>
+                    <div>
+                      <Identifier showCopy copyValue={txo.txid}>
+                        {location.shortOutput()}
+                      </Identifier>
+                      <IconButton
+                        aria-label={"Open in block explorer"}
+                        icon={<ExternalLinkIcon />}
+                        size="xs"
+                        variant="ghost"
+                        as={Link}
+                        to={createExplorerUrl(location.getTxid())}
+                        target="_blank"
+                      />
+                    </div>
+                  </PropertyCard>
+                )}
                 {/* Temporarily disabled. See comment regarding date in buildUpdateTXOs.
                       <PropertyCard heading={"Received"}>
                         {txo.date
@@ -518,41 +544,47 @@ export default function ViewDigitalObject({
                           : "Unconfirmed"}
                       </PropertyCard>
                       */}
-                <PropertyCard heading={"Height"}>
-                  {txo.height === Infinity ? "Unconfirmed" : txo.height}
-                </PropertyCard>
+                {txo && (
+                  <PropertyCard heading={"Height"}>
+                    {txo.height === Infinity ? "Unconfirmed" : txo.height}
+                  </PropertyCard>
+                )}
               </TokenDetails>
             )}
           </Grid>
         </Container>
       </Grid>
-      <SendDigitalObject
-        glyph={nft}
-        txo={txo}
-        disclosure={sendDisclosure}
-        onSuccess={(txid) => {
-          sendDisclosure.onClose();
-          openSuccess(txid);
-        }}
-      />
-      <EditDigitalObject
-        token={nft}
-        txo={txo}
-        disclosure={editDisclosure}
-        onSuccess={(txid) => {
-          editDisclosure.onClose();
-          openSuccess(txid);
-        }}
-      />
-      <MeltDigitalObject
-        asset={txo}
-        disclosure={meltDisclosure}
-        onSuccess={(txid: string) => {
-          meltDisclosure.onClose();
-          openSuccess(txid);
-        }}
-      />
-      <RoyaltyListModal glyph={nft} txo={txo} disclosure={listDisclosure} />
+      {txo && (
+        <>
+          <SendDigitalObject
+            glyph={nft}
+            txo={txo}
+            disclosure={sendDisclosure}
+            onSuccess={(txid) => {
+              sendDisclosure.onClose();
+              openSuccess(txid);
+            }}
+          />
+          <EditDigitalObject
+            token={nft}
+            txo={txo}
+            disclosure={editDisclosure}
+            onSuccess={(txid) => {
+              editDisclosure.onClose();
+              openSuccess(txid);
+            }}
+          />
+          <MeltDigitalObject
+            asset={txo}
+            disclosure={meltDisclosure}
+            onSuccess={(txid: string) => {
+              meltDisclosure.onClose();
+              openSuccess(txid);
+            }}
+          />
+          <RoyaltyListModal glyph={nft} txo={txo} disclosure={listDisclosure} />
+        </>
+      )}
       <TxSuccessModal
         onClose={() => {
           successDisclosure.onClose();

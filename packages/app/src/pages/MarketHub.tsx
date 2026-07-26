@@ -42,6 +42,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import Card from "@app/components/Card";
 import ContentContainer from "@app/components/ContentContainer";
+import RecentlyMinted from "@app/components/RecentlyMinted";
 import NoContent from "@app/components/NoContent";
 import PageHeader from "@app/components/PageHeader";
 import SectionHeading from "@app/components/SectionHeading";
@@ -285,6 +286,20 @@ export default function MarketHub() {
   const [resolvedGlyphs, setResolvedGlyphs] = useState<
     Map<string, SmartToken | null>
   >(new Map());
+
+  // Top-level hub tab: active listings vs the recently-minted discovery feed.
+  const tab = searchParams.get("tab") === "recent" ? "recent" : "listings";
+  const setTab = (t: "listings" | "recent") => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (t === "listings") next.delete("tab");
+        else next.set("tab", t);
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   const filter = (searchParams.get("filter") as MarketFilter) || "all";
   const setFilter = (f: MarketFilter) => {
@@ -690,14 +705,18 @@ export default function MarketHub() {
     <ContentContainer>
       <PageHeader
         toolbar={
-          <Button
-            size="sm"
-            leftIcon={<Icon as={MdRefresh} />}
-            onClick={refreshAll}
-            isLoading={loading && orders.length === 0}
-          >
-            Refresh
-          </Button>
+          // The recently-minted feed has its own refresh (its cursor state
+          // lives in the component, not here).
+          tab === "listings" ? (
+            <Button
+              size="sm"
+              leftIcon={<Icon as={MdRefresh} />}
+              onClick={refreshAll}
+              isLoading={loading && orders.length === 0}
+            >
+              Refresh
+            </Button>
+          ) : undefined
         }
       >
         Market
@@ -705,6 +724,31 @@ export default function MarketHub() {
 
       <Container maxW="container.xl" px={4}>
         <VStack spacing={4} align="stretch">
+          {/* Hub tabs */}
+          <ButtonGroup
+            size="sm"
+            isAttached
+            variant="outline"
+            alignSelf="flex-start"
+          >
+            <Button
+              onClick={() => setTab("listings")}
+              variant={tab === "listings" ? "subtle" : "ghost"}
+            >
+              Listings
+            </Button>
+            <Button
+              onClick={() => setTab("recent")}
+              variant={tab === "recent" ? "subtle" : "ghost"}
+            >
+              Recently Minted
+            </Button>
+          </ButtonGroup>
+
+          {tab === "recent" ? (
+            <RecentlyMinted />
+          ) : (
+            <>
           <Alert status="info" variant="subtle" borderRadius="md" fontSize="sm">
             <AlertIcon />
             <Box>
@@ -1117,6 +1161,8 @@ export default function MarketHub() {
               </VStack>
             </Card>
           </Box>
+            </>
+          )}
         </VStack>
       </Container>
     </ContentContainer>

@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=packages/app"],
       "port": 5173
+    },
+    {
+      "name": "prod-smoke",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8931", "--directory", "packages/app/dist"],
+      "port": 8931
     }
   ]
 }
