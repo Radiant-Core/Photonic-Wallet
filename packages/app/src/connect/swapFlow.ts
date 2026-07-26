@@ -292,7 +292,44 @@ export type SwapAcceptPreview = {
    * unindexed, or not actually an NFT offer) — the approval screen falls
    * back to showing price-only in that case. */
   glyph?: SmartToken;
+  /**
+   * The enforced creator royalty `acceptSwapOffer` will add to the completion
+   * transaction, in RXD — a real charge to the taker on top of the price, so
+   * the approval screen must show it. Undefined when the token carries no
+   * enforced royalty, or when it couldn't be resolved (in which case the
+   * screen says so rather than implying zero).
+   */
+  royaltyRxd?: number;
+  /**
+   * True when the royalty lookup itself failed, as opposed to resolving to
+   * "no enforced royalty". Lets the panel distinguish "nothing owed" from
+   * "we don't know yet" instead of showing a misleadingly low total.
+   */
+  royaltyUnknown?: boolean;
 };
+
+/**
+ * Total enforced royalty for a sale, in RXD, or undefined when nothing is
+ * owed. Pure, and deliberately routed through the same `buildRoyaltyOutputs`
+ * that `acceptSwapOffer` uses to build the actual outputs — summing the real
+ * outputs is what keeps the figure shown on the approval screen from drifting
+ * from the amount the taker is actually charged (bps, minimum/maximum
+ * clamping and split rounding all included for free).
+ *
+ * Throws whatever `buildRoyaltyOutputs` throws (e.g. an invalid royalty
+ * payout address); callers treat that as "royalty unknown".
+ */
+export function royaltyTotalRxd(
+  royalty: RoyaltyTerms | null,
+  pricePhotons: number
+): number | undefined {
+  if (!royalty?.enforced) return undefined;
+  const total = buildRoyaltyOutputs(royalty, pricePhotons).reduce(
+    (sum, output) => sum + output.value,
+    0
+  );
+  return total > 0 ? photonsToRxd(total) : undefined;
+}
 
 /**
  * Resolve what a `swap-accept-request`'s PSRT is actually buying, for the
@@ -305,6 +342,12 @@ export type SwapAcceptPreview = {
  * (malformed PSRT, prevout no longer resolvable, network hiccup) degrades to
  * price-only rather than blocking the approval screen — `acceptSwapOffer`
  * re-validates everything for real when the user actually approves.
+ *
+ * Also resolves the enforced creator royalty, because the taker pays it on
+ * top of the price: showing price alone understates what approving actually
+ * costs. It is computed by running the same `buildRoyaltyOutputs` call
+ * `acceptSwapOffer` uses, so the figure shown cannot drift from the outputs
+ * that actually get built.
  */
 export async function previewSwapAccept(
   req: Pick<SwapAcceptRequest, "psrt">
@@ -317,7 +360,8 @@ export async function previewSwapAccept(
   }
   if (psrtTx.inputs.length !== 1 || psrtTx.outputs.length !== 1) return null;
 
-  const priceRxd = photonsToRxd(psrtTx.outputs[0].satoshis);
+  const pricePhotons = psrtTx.outputs[0].satoshis;
+  const priceRxd = photonsToRxd(pricePhotons);
 
   const txid = bytesToHex(psrtTx.inputs[0].prevTxId);
   const vout = psrtTx.inputs[0].outputIndex;
@@ -351,8 +395,26 @@ export async function previewSwapAccept(
       console.debug(
         `[swapFlow] previewSwapAccept: could not resolve glyph metadata for ref ${ref}`
       );
+      // Without the glyph there is no reveal outpoint to read royalty terms
+      // from, so the royalty is genuinely unknown rather than absent.
+      return { priceRxd, royaltyUnknown: true };
     }
-    return { priceRxd, glyph };
+
+    // Kept in its own try/catch so an unparseable or invalid-address royalty
+    // only costs us the royalty line, not the resolved item above it.
+    let royaltyRxd: number | undefined;
+    let royaltyUnknown: boolean | undefined;
+    try {
+      royaltyRxd = royaltyTotalRxd(await getTokenRoyalty(glyph), pricePhotons);
+    } catch (error) {
+      console.debug(
+        `[swapFlow] previewSwapAccept: could not resolve royalty for ref ${ref}`,
+        error
+      );
+      royaltyUnknown = true;
+    }
+
+    return { priceRxd, glyph, royaltyRxd, royaltyUnknown };
   } catch (error) {
     console.debug(
       `[swapFlow] previewSwapAccept: failed to resolve reserved outpoint ${txid}:${vout}`,

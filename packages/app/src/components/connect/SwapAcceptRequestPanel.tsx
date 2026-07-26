@@ -3,8 +3,13 @@
  * dApp asks the wallet to complete and broadcast a purchase against a
  * maker's PSRT, optionally adding a marketplace fee output. This always
  * broadcasts on approval — there is no "return unsigned" option.
+ *
+ * The taker pays the price PLUS any enforced creator royalty PLUS the
+ * requested marketplace fee, so all three are itemized with a total: showing
+ * price alone would understate what approving costs.
  */
 import { useEffect, useState } from "react";
+import Big from "big.js";
 import {
   Alert,
   AlertDescription,
@@ -64,6 +69,20 @@ export default function SwapAcceptRequestPanel({
       cancelled = true;
     };
   }, [request, electrumStatus.value]);
+
+  const hasMarketplaceFee =
+    request.feeRxd !== undefined && !!request.feeAddress;
+
+  // Only worth a "Total" line when something is added on top of the price;
+  // otherwise it would just restate it. Summed with Big so the RXD decimals
+  // don't produce float artifacts like 0.30000000000000004.
+  const extrasTotal =
+    parsed && (parsed.royaltyRxd !== undefined || hasMarketplaceFee)
+      ? Big(parsed.priceRxd)
+          .plus(parsed.royaltyRxd ?? 0)
+          .plus(hasMarketplaceFee ? (request.feeRxd as number) : 0)
+          .toString()
+      : undefined;
 
   return (
     <Stack spacing={4}>
@@ -136,17 +155,52 @@ export default function SwapAcceptRequestPanel({
             <Text fontSize="lg" fontWeight="medium">
               {parsed.priceRxd} RXD
             </Text>
-          </>
-        )}
 
-        {request.feeRxd !== undefined && request.feeAddress && (
-          <>
-            <Text textStyle="label" mt={3} mb={1}>
-              Marketplace fee
-            </Text>
-            <Text fontSize="sm">
-              {request.feeRxd} RXD to <b>{request.feeAddress}</b>
-            </Text>
+            {parsed.royaltyRxd !== undefined && (
+              <>
+                <Text textStyle="label" mt={3} mb={1}>
+                  Creator royalty
+                </Text>
+                <Text fontSize="sm">{parsed.royaltyRxd} RXD</Text>
+              </>
+            )}
+
+            {hasMarketplaceFee && (
+              <>
+                <Text textStyle="label" mt={3} mb={1}>
+                  Marketplace fee
+                </Text>
+                <Text fontSize="sm">
+                  {request.feeRxd} RXD to <b>{request.feeAddress}</b>
+                </Text>
+              </>
+            )}
+
+            {extrasTotal && (
+              <>
+                <Text textStyle="label" mt={3} mb={1}>
+                  Total
+                </Text>
+                <Text fontSize="lg" fontWeight="medium">
+                  {extrasTotal} RXD
+                </Text>
+                <Text textStyle="small" color="text.secondary">
+                  Plus the network fee, which depends on the final transaction
+                  size.
+                </Text>
+              </>
+            )}
+
+            {parsed.royaltyUnknown && (
+              <Alert status="warning" mt={3} borderRadius="lg">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  This item's creator royalty couldn't be checked, so the total
+                  above may be incomplete. If the token enforces a royalty, it
+                  is charged on top of the price.
+                </AlertDescription>
+              </Alert>
+            )}
           </>
         )}
 

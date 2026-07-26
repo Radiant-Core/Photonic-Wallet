@@ -4,6 +4,11 @@
  * content — before `Connect.tsx` calls `mintFromRequest`. Minting always
  * broadcasts (there is no "return unsigned" option, unlike PSBT requests),
  * so this is the only checkpoint before funds actually move.
+ *
+ * A request may also override the wallet's own fee rate, which the user pays.
+ * `buildTx`'s `feeCheck` bounds how far that can go, but a silently applied
+ * override is still the user's money, so it is shown — and flagged when it is
+ * above what the wallet would have charged.
  */
 import {
   Alert,
@@ -21,6 +26,7 @@ import {
 } from "@chakra-ui/react";
 import { MdImage, MdInsertDriveFile } from "react-icons/md";
 import Card from "@app/components/Card";
+import { feeRate as feeRateSignal } from "@app/signals";
 import type { MintRequest } from "@app/connect/protocol";
 
 const IMAGE_MIME_TYPES = new Set([
@@ -87,6 +93,9 @@ export default function MintRequestPanel({
   onReject: () => void;
 }) {
   const attrEntries = request.attrs ? Object.entries(request.attrs) : [];
+  const walletFeeRate = feeRateSignal.value;
+  const feeRateRaised =
+    request.feeRate !== undefined && request.feeRate > walletFeeRate;
 
   return (
     <Stack spacing={4}>
@@ -159,6 +168,31 @@ export default function MintRequestPanel({
                 </WrapItem>
               ))}
             </Wrap>
+          </>
+        )}
+
+        {request.feeRate !== undefined && (
+          <>
+            <Text textStyle="label" mt={3} mb={1}>
+              Fee rate
+            </Text>
+            <Text fontSize="sm">
+              {request.feeRate} photons/byte{" "}
+              <Text as="span" color="text.secondary">
+                (requested by the app, replacing your wallet's{" "}
+                {walletFeeRate} photons/byte)
+              </Text>
+            </Text>
+            {feeRateRaised && (
+              <Alert status="warning" mt={2} borderRadius="lg">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  This app is asking to pay a higher network fee than your
+                  wallet's own setting. The extra cost comes out of your RXD
+                  balance.
+                </AlertDescription>
+              </Alert>
+            )}
           </>
         )}
 
