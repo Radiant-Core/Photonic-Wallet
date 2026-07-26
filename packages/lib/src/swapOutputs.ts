@@ -46,6 +46,13 @@ export type SwapCompletionOutputs = {
    */
   royaltyOutputs?: UnfinalizedOutput[];
   /**
+   * Marketplace/platform fee payouts (e.g. a connect-driven `swap-accept-
+   * request`'s `feeRxd`/`feeAddress`) — a distinct concept from creator
+   * royalty, but positionally identical: index 2+, after royalties, never
+   * displacing the maker payment.
+   */
+  platformFeeOutputs?: UnfinalizedOutput[];
+  /**
    * Outputs funding the asset the maker wants (token-for-token swaps), from
    * `fundFungible` / `fundNonFungible`. Appended last.
    */
@@ -56,7 +63,7 @@ export type SwapCompletionOutputs = {
  * Assemble swap-completion outputs in the only order the maker's signature
  * permits:
  *
- *   [ makerPayment, assetToTaker, ...royaltyOutputs, ...fundingOutputs ]
+ *   [ makerPayment, assetToTaker, ...royaltyOutputs, ...platformFeeOutputs, ...fundingOutputs ]
  *
  * Change is appended by the caller AFTER `fundTx` computes it (funding needs
  * this output list first), so it always trails and never affects index 0.
@@ -69,6 +76,10 @@ export function buildSwapCompletionOutputs(
 
   if (opts.royaltyOutputs?.length) {
     outputs.push(...opts.royaltyOutputs);
+  }
+
+  if (opts.platformFeeOutputs?.length) {
+    outputs.push(...opts.platformFeeOutputs);
   }
 
   if (opts.fundingOutputs?.length) {

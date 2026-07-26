@@ -65,6 +65,9 @@ export {
 // Storage (Phase 2: Off-Chain Storage)
 export * from "./storage";
 
+// Radiant PSBT (BIP-174 profile, byte-compatible with Radiant Core)
+export * from "./psbt";
+
 // Radiant Vault (CLTV timelocking)
 export * from "./vault";
 

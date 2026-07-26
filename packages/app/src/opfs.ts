@@ -20,7 +20,6 @@ export async function getTx(txid: string): Promise<string | undefined> {
   try {
     const fileHandle = await dir.getFileHandle(txid);
     const buf = await (await fileHandle.getFile()).arrayBuffer();
-    console.debug(`OPFS get ${txid}`);
     return bytesToHex(new Uint8Array(buf));
   } catch {
     return undefined;

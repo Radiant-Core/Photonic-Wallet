@@ -148,6 +148,53 @@ describe("swap completion output ordering", () => {
     expect(outputs[0].script).toBe(makerPaymentScript);
   });
 
+  it("orders platform-fee outputs after royalty, before funding", () => {
+    const royaltyOutputs: UnfinalizedOutput[] = [
+      { script: p2pkhScript(ADDR.royaltyA), value: 200_000 },
+    ];
+    const platformFeeOutputs: UnfinalizedOutput[] = [
+      { script: p2pkhScript(ADDR.royaltyB), value: 50_000 },
+    ];
+    const fundingOutputs: UnfinalizedOutput[] = [
+      { script: p2pkhScript(ADDR.buyer), value: 500_000 },
+    ];
+
+    const outputs = buildSwapCompletionOutputs({
+      makerPayment,
+      assetToTaker,
+      royaltyOutputs,
+      platformFeeOutputs,
+      fundingOutputs,
+    });
+
+    expect(outputs.map((o) => o.script)).toEqual([
+      makerPaymentScript,
+      assetScript,
+      royaltyOutputs[0].script,
+      platformFeeOutputs[0].script,
+      fundingOutputs[0].script,
+    ]);
+    expect(outputs[0].script).toBe(makerPaymentScript);
+  });
+
+  it("supports a platform fee with no royalty present", () => {
+    const platformFeeOutputs: UnfinalizedOutput[] = [
+      { script: p2pkhScript(ADDR.royaltyA), value: 50_000 },
+    ];
+
+    const outputs = buildSwapCompletionOutputs({
+      makerPayment,
+      assetToTaker,
+      platformFeeOutputs,
+    });
+
+    expect(outputs.map((o) => o.script)).toEqual([
+      makerPaymentScript,
+      assetScript,
+      platformFeeOutputs[0].script,
+    ]);
+  });
+
   it("treats empty royalty/funding lists as absent", () => {
     const outputs = buildSwapCompletionOutputs({
       makerPayment,
