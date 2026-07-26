@@ -39,14 +39,18 @@ export default function Unlock() {
 
     disclosure.onClose();
     if (onCloseCallback.current) {
-      onCloseCallback.current(true);
+      const cb = onCloseCallback.current;
+      onCloseCallback.current = undefined;
+      cb(true);
     }
   };
 
   const onClose = () => {
     disclosure.onClose();
     if (onCloseCallback.current) {
-      onCloseCallback.current(false);
+      const cb = onCloseCallback.current;
+      onCloseCallback.current = undefined;
+      cb(false);
     }
   };
 

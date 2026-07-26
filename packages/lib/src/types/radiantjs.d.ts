@@ -50,6 +50,8 @@ declare module "@radiant-core/radiantjs" {
 
     // Sighash.sign — upstream uses `(...args: any[])` which loses
     // call-site type checking. Replace with the real signature.
+    // Sighash.verify — exists at runtime (lib/transaction/sighash.js) but is
+    // not declared upstream; used by the PSBT tests to check partial sigs.
     namespace Sighash {
       function sign(
         tx: Transaction,
@@ -59,6 +61,25 @@ declare module "@radiant-core/radiantjs" {
         subscript: Script,
         satoshisBN: crypto.BN
       ): crypto.Signature;
+      function verify(
+        tx: Transaction,
+        signature: crypto.Signature,
+        publicKey: PublicKey,
+        inputIndex: number,
+        subscript: Script,
+        satoshisBN: crypto.BN
+      ): boolean;
+    }
+  }
+
+  namespace crypto {
+    // Parse a transaction-format signature (DER ‖ trailing sighash byte),
+    // populating `nhashtype`. Ships at runtime, undeclared upstream.
+    interface Signature {
+      nhashtype: number;
+    }
+    namespace Signature {
+      function fromTxFormat(buf: Buffer): Signature;
     }
   }
 
@@ -70,6 +91,10 @@ declare module "@radiant-core/radiantjs" {
     function fromScriptHash(scriptHash: string | Buffer): Address;
     function fromScript(
       script: Script,
+      network?: Networks.Network | string
+    ): Address;
+    function fromPublicKeyHash(
+      hash: Buffer,
       network?: Networks.Network | string
     ): Address;
   }

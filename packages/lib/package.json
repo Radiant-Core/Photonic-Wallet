@@ -18,6 +18,7 @@
     "./protocols": "./src/protocols.ts",
     "./transfer": "./src/transfer.ts",
     "./sign": "./src/sign.ts",
+    "./psbt": "./src/psbt/index.ts",
     "./electrumWsClient": "./src/electrumWsClient.ts"
   },
   "scripts": {

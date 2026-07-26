@@ -132,7 +132,7 @@ export const cancelSwap = async (
       outputs,
       false
     ).toString();
-    await broadcastSwapCancellation(rawTx);
+    return await broadcastSwapCancellation(rawTx);
   } else {
     const ftSwap = contractType === ContractType.FT;
     const refLE = reverseRef(glyphRef as string);
@@ -183,6 +183,7 @@ export const cancelSwap = async (
     await db.glyph.where({ ref: glyphRef }).modify({
       swapPending: false,
     });
+    return cancelTxid;
   }
 };
 
