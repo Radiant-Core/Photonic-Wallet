@@ -1233,6 +1233,36 @@ describe("parseConnectRequest — swap-accept-request envelope", () => {
     expect(badAddr.ok).toBe(false);
   });
 
+  it("rejects a feeAddress that passes the charset check but fails base58check", () => {
+    // The last character is altered, so the checksum no longer matches. This
+    // is charset-legal and was previously accepted here, only blowing up
+    // later inside `p2pkhScript` — after the user had already approved.
+    const corrupted = parseConnectRequest(
+      JSON.stringify({
+        t: "swap-accept-request",
+        psrt: SAMPLE_PSRT_HEX,
+        feeRxd: 1,
+        feeAddress: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNb",
+      })
+    );
+    expect(corrupted.ok).toBe(false);
+    expect(!corrupted.ok && corrupted.error).toMatch(/feeAddress/);
+  });
+
+  it("accepts a testnet feeAddress — network is not this layer's call", () => {
+    // Parsing is network-agnostic on purpose; swapFlow does the
+    // wallet-network comparison, where the wallet's network is known.
+    const testnet = parseConnectRequest(
+      JSON.stringify({
+        t: "swap-accept-request",
+        psrt: SAMPLE_PSRT_HEX,
+        feeRxd: 1,
+        feeAddress: "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn",
+      })
+    );
+    expect(testnet.ok).toBe(true);
+  });
+
   it("binds the callback to the declared origin, same rule as other request types", () => {
     const kept = parseConnectRequest(
       JSON.stringify({

@@ -7,8 +7,9 @@
  * disclosure, because the failure mode is silent: a missing line doesn't
  * break anything, it just means the user approved a cost they never saw.
  *
- *  1. `MintRequestPanel` shows a dApp-supplied `feeRate` override, and flags
- *     it when it is above what the wallet would have charged on its own.
+ *  1. `MintRequestPanel` previews the bytes that will actually be written on
+ *     chain (sanitized, for SVG), and shows a dApp-supplied `feeRate`
+ *     override, flagging it when above what the wallet would have charged.
  *  2. `SwapAcceptRequestPanel` itemizes price + enforced creator royalty +
  *     marketplace fee with a total, since the taker pays all three, and says
  *     so when the royalty could not be determined rather than implying zero.
@@ -17,7 +18,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { Buffer } from "buffer";
 import { ChakraProvider } from "@chakra-ui/react";
+import { embeddableContentBytes } from "@app/svgSanitize";
 import type { MintRequest, SwapAcceptRequest } from "@app/connect/protocol";
 import type { SwapAcceptPreview } from "@app/connect/swapFlow";
 
@@ -68,6 +71,56 @@ const mintProps = {
   onApprove: noop,
   onReject: noop,
 };
+
+describe("MintRequestPanel — content preview", () => {
+  it("previews the SANITIZED svg, not the raw bytes the dApp sent", () => {
+    // What the user approves has to be what gets written on-chain:
+    // `buildMintPayload` embeds `embeddableContentBytes(...)`, so the preview
+    // must render exactly those bytes. A raw preview would render markup that
+    // never makes it on-chain (and, for a hostile SVG, markup the sanitizer
+    // exists to remove).
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="5"/></svg>';
+    renderPanel(
+      <MintRequestPanel
+        request={mintRequest({
+          main: {
+            mime: "image/svg+xml",
+            data: Buffer.from(svg).toString("base64"),
+          },
+        })}
+        {...mintProps}
+      />
+    );
+
+    const img = screen.getByAltText("NFT content preview") as HTMLImageElement;
+    const previewed = Buffer.from(
+      img.src.replace(/^data:image\/svg\+xml;base64,/, ""),
+      "base64"
+    ).toString();
+
+    expect(previewed).not.toContain("<script>");
+    expect(previewed).toContain("circle");
+    // And it is byte-identical to what the mint payload would embed.
+    expect(previewed).toBe(
+      Buffer.from(
+        embeddableContentBytes("image/svg+xml", new Uint8Array(Buffer.from(svg)))
+      ).toString()
+    );
+  });
+
+  it("leaves a non-svg image untouched", () => {
+    const png = Buffer.from("hello").toString("base64");
+    renderPanel(
+      <MintRequestPanel
+        request={mintRequest({ main: { mime: "image/png", data: png } })}
+        {...mintProps}
+      />
+    );
+    const img = screen.getByAltText("NFT content preview") as HTMLImageElement;
+    expect(img.src).toBe(`data:image/png;base64,${png}`);
+  });
+});
 
 describe("MintRequestPanel — fee rate disclosure", () => {
   beforeEach(() => {

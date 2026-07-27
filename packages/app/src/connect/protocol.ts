@@ -58,8 +58,11 @@
  * "any non-empty type", because this content is dApp-controlled, not the
  * user's own file picker.
  */
+import rjs from "@radiant-core/radiantjs";
 import { MAX_MESSAGE_LENGTH, hasControlChars } from "@lib/sign";
 import { filterAttrs } from "@lib/token";
+
+const { Address } = rjs;
 
 export const CONNECT_PROTOCOL = "photonic-connect";
 export const CONNECT_VERSION = 1;
@@ -408,6 +411,34 @@ function cleanOrigin(v: unknown): string | undefined {
 function cleanAddress(v: unknown): string | undefined {
   const s = cleanString(v, MAX_ADDRESS_LEN);
   if (!s || !/^[0-9a-zA-Z:]+$/.test(s)) return undefined;
+  return s;
+}
+
+/**
+ * Like {@link cleanAddress}, but for an address that will actually be PAID —
+ * currently only a `swap-accept-request`'s `feeAddress`, which becomes a real
+ * output script.
+ *
+ * The charset check alone lets a typo'd or corrupted address through to
+ * `p2pkhScript`, which throws mid-flow (safely, but as an opaque late failure
+ * after the user has already approved). Decoding it here means a bad address
+ * is rejected at parse with a clear reason, before anything is shown or
+ * signed.
+ *
+ * Deliberately network-AGNOSTIC: radiantjs infers the network from the
+ * version byte, so this accepts both mainnet and testnet encodings and only
+ * rejects a failed base58check. Whether the address matches the wallet's own
+ * network is checked in `@app/connect/swapFlow`, which — unlike this pure
+ * transport layer — knows which network the wallet is on.
+ */
+function cleanPayoutAddress(v: unknown): string | undefined {
+  const s = cleanAddress(v);
+  if (!s) return undefined;
+  try {
+    Address.fromString(s);
+  } catch {
+    return undefined;
+  }
   return s;
 }
 
@@ -799,7 +830,7 @@ function normalizeSwapAcceptEnvelope(obj: Record<string, unknown>): ParsedReques
     if (typeof obj.feeRxd !== "number" || !Number.isFinite(obj.feeRxd) || obj.feeRxd <= 0) {
       return { ok: false, error: "feeRxd must be a positive number" };
     }
-    feeAddress = cleanAddress(obj.feeAddress);
+    feeAddress = cleanPayoutAddress(obj.feeAddress);
     if (!feeAddress) return { ok: false, error: "feeAddress is not a valid address" };
     feeRxd = obj.feeRxd;
   }
@@ -943,6 +974,51 @@ export function buildSignResult(
   };
 }
 
+/** One key-value pair, or nothing when the value is absent. */
+function optionalParam(
+  key: string,
+  value: string | undefined
+): [string, string][] {
+  return value === undefined ? [] : [[key, value]];
+}
+
+/**
+ * Compose a callback URL carrying `params` in the FRAGMENT — the single place
+ * every request type's result (and reject, and error) return is built.
+ *
+ * The fragment, never the query, is what keeps results out of server access
+ * logs, proxy logs and the `Referer` header: it is read client-side by the
+ * requesting page and never transmitted. Every value is
+ * `encodeURIComponent`-escaped, because base64 payloads contain `+`, `/`
+ * and `=`.
+ *
+ * Callers never pass an unvalidated `callback` here — origin-binding happened
+ * once, at parse time, in `cleanCallback`.
+ *
+ * `enforceSizeCap` defaults to true: a composed URL over
+ * {@link MAX_CALLBACK_URL_LEN} yields undefined so the caller falls back to
+ * the manual copy/paste return, since a silently truncated result is worse
+ * than no auto-return at all. {@link buildCallbackUrl} is the one opt-out —
+ * it has always been uncapped, and its payload can in principle approach the
+ * cap (a challenge is bounded only by `MAX_MESSAGE_LENGTH`, 4096, and the
+ * nonce is a segment of it), so applying the cap now could turn a
+ * currently-working sign callback into a manual fallback. That asymmetry is
+ * deliberate rather than an oversight.
+ */
+function composeCallbackUrl(
+  callback: string | undefined,
+  params: [string, string][],
+  { enforceSizeCap = true }: { enforceSizeCap?: boolean } = {}
+): string | undefined {
+  if (!callback) return undefined;
+  const fragment = params
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join("&");
+  const url = `${callback}#${fragment}`;
+  if (enforceSizeCap && url.length > MAX_CALLBACK_URL_LEN) return undefined;
+  return url;
+}
+
 /**
  * The URL to hand a signed result back to an opt-in `callback`, or undefined
  * when the request declared none (the manual copy/paste return).
@@ -961,17 +1037,17 @@ export function buildCallbackUrl(
   req: Pick<SignRequest, "callback" | "challenge">,
   result: Pick<SignResult, "address" | "signature">
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const nonce = extractChallengeNonce(req.challenge);
-  const params: [string, string][] = [
-    ...(nonce ? ([["nonce", nonce]] as [string, string][]) : []),
-    ["address", result.address],
-    ["signature", result.signature],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  return `${req.callback}#${fragment}`;
+  return composeCallbackUrl(
+    req.callback,
+    [
+      ...optionalParam("nonce", extractChallengeNonce(req.challenge)),
+      ["address", result.address],
+      ["signature", result.signature],
+    ],
+    // Deliberately uncapped, unlike every other result type — see
+    // `composeCallbackUrl`.
+    { enforceSizeCap: false }
+  );
 }
 
 /** Serialize a result for the response QR / copy box. */
@@ -1027,22 +1103,12 @@ export function buildPsbtCallbackUrl(
   req: Pick<PsbtSignRequest, "callback">,
   result: Pick<PsbtSignResult, "id" | "psbt" | "txid" | "complete">
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(result.id ? ([["id", result.id]] as [string, string][]) : []),
-    ...(result.txid !== undefined
-      ? ([["txid", result.txid]] as [string, string][])
-      : []),
-    ...(result.psbt !== undefined
-      ? ([["psbt", result.psbt]] as [string, string][])
-      : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
+    ...optionalParam("txid", result.txid),
+    ...optionalParam("psbt", result.psbt),
     ["complete", String(result.complete)],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }
 
 /** Serialize a {@link SwapOfferResult} for the response QR / copy box. */
@@ -1098,9 +1164,8 @@ export function buildSwapOfferCallbackUrl(
     | "priceRxd"
   >
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(result.id ? ([["id", result.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
     ["psrt", result.psrt],
     ["reserveTxid", result.reserveTxid],
     ["reserveVout", String(result.reserveVout)],
@@ -1108,12 +1173,7 @@ export function buildSwapOfferCallbackUrl(
     ["ref", result.ref],
     ["payoutAddress", result.payoutAddress],
     ["priceRxd", String(result.priceRxd)],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }
 
 /** Serialize a {@link SwapAcceptResult} for the response QR / copy box. */
@@ -1140,16 +1200,10 @@ export function buildSwapAcceptCallbackUrl(
   req: Pick<SwapAcceptRequest, "callback">,
   result: Pick<SwapAcceptResult, "id" | "txid">
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(result.id ? ([["id", result.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
     ["txid", result.txid],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }
 
 /** Serialize a {@link MintResult} for the response QR / copy box. */
@@ -1201,29 +1255,15 @@ export function buildMintCallbackUrl(
     "id" | "broadcast" | "ref" | "commitTxid" | "revealTxid" | "commitHex" | "revealHex"
   >
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(result.id ? ([["id", result.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
     ["broadcast", String(result.broadcast)],
     ["ref", result.ref],
-    ...(result.commitTxid !== undefined
-      ? ([["commitTxid", result.commitTxid]] as [string, string][])
-      : []),
-    ...(result.revealTxid !== undefined
-      ? ([["revealTxid", result.revealTxid]] as [string, string][])
-      : []),
-    ...(result.commitHex !== undefined
-      ? ([["commitHex", result.commitHex]] as [string, string][])
-      : []),
-    ...(result.revealHex !== undefined
-      ? ([["revealHex", result.revealHex]] as [string, string][])
-      : []),
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+    ...optionalParam("commitTxid", result.commitTxid),
+    ...optionalParam("revealTxid", result.revealTxid),
+    ...optionalParam("commitHex", result.commitHex),
+    ...optionalParam("revealHex", result.revealHex),
+  ]);
 }
 
 /** Serialize a {@link SwapCancelResult} for the response QR / copy box. */
@@ -1250,16 +1290,10 @@ export function buildSwapCancelCallbackUrl(
   req: Pick<SwapCancelRequest, "callback">,
   result: Pick<SwapCancelResult, "id" | "txid">
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(result.id ? ([["id", result.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
     ["txid", result.txid],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }
 
 /**
@@ -1273,16 +1307,10 @@ export function buildRejectCallbackUrl(req: {
   callback?: string;
   id?: string;
 }): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(req.id ? ([["id", req.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", req.id),
     ["rejected", "true"],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }
 
 /**
@@ -1344,20 +1372,24 @@ export function classifyConnectError(err: unknown): {
  * explicitly declining ({@link buildRejectCallbackUrl}). Without this, a
  * dApp waiting on a deep-linked request has no way to distinguish "still
  * working" from "failed" and is left hanging until its own timeout.
+ *
+ * PRIVACY CONTRACT — `error.message` is forwarded verbatim to the requesting
+ * site. This is the one path that hands raw internal error text to a third
+ * party, so a throw site anywhere in the mint/psbt/swap flows must keep its
+ * message free of anything the dApp shouldn't learn: no seed or WIF material
+ * (obviously), but also no wallet balances, no addresses or outpoints the
+ * request didn't already reference, and no full UTXO-set details. Today's
+ * messages are safe — they name txids the dApp itself supplied or created,
+ * which are public — but "insufficient funds" must never grow into
+ * "insufficient funds: have 1234 photons". Widen with care.
  */
 export function buildErrorCallbackUrl(
   req: { callback?: string; id?: string },
   error: { code: ConnectErrorCode; message: string }
 ): string | undefined {
-  if (!req.callback) return undefined;
-  const params: [string, string][] = [
-    ...(req.id ? ([["id", req.id]] as [string, string][]) : []),
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", req.id),
     ["error", error.code],
     ["message", error.message],
-  ];
-  const fragment = params
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-    .join("&");
-  const url = `${req.callback}#${fragment}`;
-  return url.length <= MAX_CALLBACK_URL_LEN ? url : undefined;
+  ]);
 }

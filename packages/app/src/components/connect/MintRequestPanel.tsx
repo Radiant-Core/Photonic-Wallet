@@ -24,10 +24,36 @@ import {
   Wrap,
   WrapItem,
 } from "@chakra-ui/react";
+import { Buffer } from "buffer";
 import { MdImage, MdInsertDriveFile } from "react-icons/md";
 import Card from "@app/components/Card";
 import { feeRate as feeRateSignal } from "@app/signals";
+import { embeddableContentBytes } from "@app/svgSanitize";
 import type { MintRequest } from "@app/connect/protocol";
+
+/**
+ * Data URL for the preview, built from the bytes that will actually be
+ * written on-chain — `embeddableContentBytes` is the same call
+ * `buildMintPayload` makes, so an SVG is previewed in its SANITIZED form.
+ * Previewing the raw input instead would show the user a rendering of
+ * something other than what they are approving (an SVG whose stripped
+ * `<script>`/`<foreignObject>` content still contributes to what is drawn).
+ *
+ * Falls back to the raw data if the base64 can't be decoded; that input would
+ * fail later in `buildMintPayload` anyway, and a broken <img> is a clearer
+ * signal here than a thrown render.
+ */
+function embeddedPreviewSrc(mime: string, data: string): string {
+  try {
+    const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const bytes = Uint8Array.from(Buffer.from(padded, "base64"));
+    const embedded = embeddableContentBytes(mime, bytes);
+    return `data:${mime};base64,${Buffer.from(embedded).toString("base64")}`;
+  } catch {
+    return `data:${mime};base64,${data}`;
+  }
+}
 
 const IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -60,7 +86,7 @@ function ContentPreview({ main }: { main: MintRequest["main"] }) {
         mx="auto"
       >
         <img
-          src={`data:${main.mime};base64,${main.data}`}
+          src={embeddedPreviewSrc(main.mime, main.data)}
           alt="NFT content preview"
           style={{ display: "block", width: "100%", height: "auto" }}
         />

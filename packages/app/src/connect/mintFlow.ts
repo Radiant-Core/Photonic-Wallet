@@ -21,7 +21,7 @@ import { feeRate as feeRateSignal } from "@app/signals";
 import { ContractType } from "@app/types";
 import { updateRxdBalances } from "@app/utxos";
 import { mintToken } from "@lib/mint";
-import { sanitizeSvgBytes, looksLikeSvg } from "@app/svgSanitize";
+import { embeddableContentBytes } from "@app/svgSanitize";
 import { GLYPH_NFT } from "@lib/protocols";
 import type {
   SmartTokenEmbeddedFile,
@@ -59,11 +59,9 @@ export function buildMintPayload(req: MintRequest): SmartTokenPayload {
         `main content exceeds the ${mintEmbedMaxBytes / 1024}KB on-chain limit`
       );
     }
-    const sanitized =
-      req.main.mime === "image/svg+xml" || looksLikeSvg(bytes)
-        ? sanitizeSvgBytes(bytes)
-        : bytes;
-    main = { t: req.main.mime, b: sanitized };
+    // Shared with MintRequestPanel's preview so the user cannot be shown one
+    // set of bytes and have another written on-chain.
+    main = { t: req.main.mime, b: embeddableContentBytes(req.main.mime, bytes) };
   } else {
     main = { t: req.main.mime, u: req.main.url };
   }

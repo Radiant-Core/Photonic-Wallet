@@ -65,6 +65,27 @@ export function sanitizeSvgBytes(bytes: Uint8Array): Uint8Array {
 }
 
 /**
+ * The bytes that will actually be written on-chain for a piece of mint
+ * content, given its declared MIME type: SVG — whether declared as such or
+ * merely detected by {@link looksLikeSvg} — is sanitised, everything else
+ * passes through untouched.
+ *
+ * This exists so the decision has exactly ONE home. An approval screen that
+ * previews the raw input while the payload embeds the sanitised bytes is
+ * showing the user something other than what they are approving; keeping both
+ * `@app/connect/mintFlow`'s `buildMintPayload` and `MintRequestPanel` on this
+ * function means the preview and the payload cannot drift apart.
+ */
+export function embeddableContentBytes(
+  mime: string,
+  bytes: Uint8Array
+): Uint8Array {
+  return mime === "image/svg+xml" || looksLikeSvg(bytes)
+    ? sanitizeSvgBytes(bytes)
+    : bytes;
+}
+
+/**
  * Pure string sanitiser. Exposed for tests and any caller that already
  * has SVG as a string.
  */

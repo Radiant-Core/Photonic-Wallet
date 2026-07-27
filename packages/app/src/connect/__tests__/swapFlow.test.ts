@@ -28,7 +28,7 @@ vi.mock("@app/utxos", () => ({
 vi.mock("@app/swapActivity", () => ({ broadcastSwapCompletion: vi.fn() }));
 vi.mock("@app/swap", () => ({ cancelSwap: vi.fn() }));
 
-import { royaltyTotalRxd } from "../swapFlow";
+import { assertFeeAddressNetwork, royaltyTotalRxd } from "../swapFlow";
 
 const PHOTONS_PER_RXD = 100_000_000;
 
@@ -129,5 +129,31 @@ describe("royaltyTotalRxd", () => {
     expect(() =>
       royaltyTotalRxd(terms({ address: "not-an-address" }), 10 * PHOTONS_PER_RXD)
     ).toThrow();
+  });
+});
+
+const TESTNET_ADDRESS = "mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn";
+
+describe("assertFeeAddressNetwork", () => {
+  it("accepts a fee address on the same network as the wallet", () => {
+    expect(() => assertFeeAddressNetwork(CREATOR, SPLIT_A)).not.toThrow();
+  });
+
+  it("accepts no fee address at all", () => {
+    expect(() => assertFeeAddressNetwork(CREATOR, undefined)).not.toThrow();
+  });
+
+  it("rejects a testnet fee address on a mainnet wallet", () => {
+    // Parse-time validation is network-agnostic by design, so this mismatch
+    // can only be caught here — before an irreversible broadcast.
+    expect(() => assertFeeAddressNetwork(CREATOR, TESTNET_ADDRESS)).toThrow(
+      /testnet address but this wallet is on livenet/
+    );
+  });
+
+  it("rejects a mainnet fee address on a testnet wallet", () => {
+    expect(() => assertFeeAddressNetwork(TESTNET_ADDRESS, CREATOR)).toThrow(
+      /livenet address but this wallet is on testnet/
+    );
   });
 });

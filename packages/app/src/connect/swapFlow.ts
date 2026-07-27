@@ -48,7 +48,7 @@ import type {
   SwapOfferRequest,
 } from "@app/connect/protocol";
 
-const { Transaction } = rjs;
+const { Address, Transaction } = rjs;
 
 export class SwapFlowError extends Error {
   constructor(message: string) {
@@ -424,6 +424,33 @@ export async function previewSwapAccept(
   }
 }
 
+/**
+ * Refuse a marketplace fee address that belongs to a different chain than the
+ * wallet.
+ *
+ * `cleanPayoutAddress` (protocol.ts) already proved the address decodes, but
+ * being network-agnostic transport code it cannot know which chain the wallet
+ * is on. The comparison is made against the wallet's OWN address rather than a
+ * network signal, so the two can never disagree.
+ *
+ * A cross-network fee address is a marketplace misconfiguration: the payout
+ * lands on a hash160 the operator is probably not watching on this chain, and
+ * the purchase is irreversible once broadcast. Cheap to check, so check it.
+ */
+export function assertFeeAddressNetwork(
+  walletAddress: string,
+  feeAddress: string | undefined
+): void {
+  if (!feeAddress) return;
+  const walletNet = Address.fromString(walletAddress).network.name;
+  const feeNet = Address.fromString(feeAddress).network.name;
+  if (walletNet !== feeNet) {
+    throw new SwapFlowError(
+      `the marketplace fee address is a ${feeNet} address but this wallet is on ${walletNet}`
+    );
+  }
+}
+
 export type SwapAcceptOutcome = { txid: string };
 
 /**
@@ -441,6 +468,8 @@ export async function acceptSwapOffer(
   if (psrtTx.inputs.length !== 1 || psrtTx.outputs.length !== 1) {
     throw new SwapFlowError("psrt must have exactly one input and one output");
   }
+
+  assertFeeAddressNetwork(address, req.feeAddress);
 
   const txid = bytesToHex(psrtTx.inputs[0].prevTxId);
   const vout = psrtTx.inputs[0].outputIndex;
