@@ -158,10 +158,19 @@ export async function enrichPsbt(psbt: Psbt): Promise<EnrichedPsbt> {
   }
 
   const allFinalized = analysis.inputs.every((i) => i.finalized);
+  // How many of the wallet's own inputs still need a NEW signature this
+  // approval — used for the "N of your inputs will be signed" display text.
   const signableCount = analysis.inputs.filter(
     (i, idx) => i.mine && !i.finalized && !i.hasPartialSig && !inputs[idx].scriptMismatch
   ).length;
-  if (signableCount === 0 && !allFinalized) {
+  // Whether ANY input belongs to the wallet at all, regardless of whether
+  // it's already signed — a PSBT whose own inputs are already validly
+  // signed (just not yet finalized, e.g. mid multi-party hand-off) still has
+  // a legitimate stake here and shouldn't be refused as "not yours".
+  const mineCount = analysis.inputs.filter(
+    (i, idx) => i.mine && !inputs[idx].scriptMismatch
+  ).length;
+  if (mineCount === 0 && !allFinalized) {
     blockers.push("None of this transaction's inputs belong to your wallet.");
   }
 
