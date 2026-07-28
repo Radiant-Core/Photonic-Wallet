@@ -75,6 +75,59 @@ export default defineConfig({
   preview: {
     headers: DEV_SERVER_HEADERS,
   },
+  build: {
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          // processShim + the buffer polyfill must evaluate before the
+          // radiantjs chunk. Cross-chunk imports are hoisted and execute
+          // BEFORE the importing chunk's own inlined module code — if the
+          // shim stayed inlined in the entry while radiantjs is split out,
+          // radiantjs would init before globalThis.Buffer/process exist
+          // (the old white-screen crash class). Giving the shim its own
+          // chunk preserves source order: main.tsx imports ./processShim
+          // first, so Rollup emits that chunk import first in the entry.
+          if (
+            id.includes("/src/processShim") ||
+            id.includes("node_modules/buffer/")
+          )
+            return "polyfills";
+          if (!id.includes("node_modules")) return undefined;
+          // bn.js / elliptic / hash.js are radiantjs's OWN CommonJS deps and
+          // must live in the same chunk: splitting them out creates a chunk
+          // cycle (bn.js needs the Buffer interop hoisted into the radiantjs
+          // chunk, radiantjs needs bn.js) → TDZ "Cannot access before
+          // initialization" at module eval → white screen with no console
+          // error. Verified 2026-07-27.
+          if (
+            id.includes("@radiant-core/radiantjs") ||
+            id.includes("/bn.js/") ||
+            id.includes("/elliptic/") ||
+            id.includes("/hash.js/")
+          )
+            return "radiantjs";
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id))
+            return "react";
+          if (id.includes("react-router") || id.includes("@remix-run"))
+            return "router";
+          if (
+            id.includes("@chakra-ui") ||
+            id.includes("@emotion") ||
+            id.includes("framer-motion")
+          )
+            return "ui";
+          if (id.includes("react-icons")) return "icons";
+          if (id.includes("@noble/") || id.includes("@scure/"))
+            return "crypto";
+          if (id.includes("/dexie") || id.includes("localforage"))
+            return "storage";
+          if (id.includes("@lingui")) return "i18n";
+          return undefined;
+        },
+      },
+    },
+  },
   plugins: [
     react({
       babel: {
@@ -94,42 +147,65 @@ export default defineConfig({
       ? [capacitorCspPlugin()]
       : [
           VitePWA({
-            workbox: { globPatterns: ["**/*"] },
-      registerType: "prompt",
-      includeAssets: ["**/*"],
-      manifest: {
-        theme_color: "#1a1a24",
-        background_color: "#1a1a24",
-        display: "standalone",
-        scope: "/",
-        start_url: "/",
-        short_name: "Photonic Wallet",
-        description: "Mint and transfer tokens on Radiant",
-        name: "Photonic Wallet",
-        icons: [
-          {
-            src: "pwa-64x64.png",
-            sizes: "64x64",
-            type: "image/png",
-          },
-          {
-            src: "pwa-192x192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "pwa-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
-          {
-            src: "maskable-icon-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "maskable",
-          },
-        ],
-      },
+            workbox: {
+              // Everything index.html references MUST be precached or the SW
+              // serves a cached shell whose JS 404s after the next deploy —
+              // the recurring white-screen bug. The default 2 MiB cap
+              // silently dropped the entry chunk; 7 MiB means even a
+              // monolith regression stays precached (scripts/
+              // check-precache.mjs fails the build long before that).
+              globPatterns: [
+                "**/*.{js,mjs,css,html,ico,png,svg,woff2,webmanifest}",
+              ],
+              maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
+              // Activate a new SW immediately on install. Load-bearing for
+              // stranded users: a white-screened page has no app to post
+              // SKIP_WAITING, and a plain reload never activates a waiting
+              // SW — without this they stay broken forever. Page-reload
+              // timing stays app-controlled (modal-aware) in ReloadPrompt.
+              skipWaiting: true,
+              clientsClaim: true,
+              cleanupOutdatedCaches: true,
+            },
+            registerType: "prompt",
+            // Registration + update handling is hand-rolled in
+            // ReloadPrompt.tsx (the plugin's prompt-mode client force-reloads
+            // on update with no way to defer around an open modal). Don't
+            // inject the plugin's own register script alongside it.
+            injectRegister: null,
+            manifest: {
+              theme_color: "#1a1a24",
+              background_color: "#1a1a24",
+              display: "standalone",
+              scope: "/",
+              start_url: "/",
+              short_name: "Photonic Wallet",
+              description: "Mint and transfer tokens on Radiant",
+              name: "Photonic Wallet",
+              icons: [
+                {
+                  src: "pwa-64x64.png",
+                  sizes: "64x64",
+                  type: "image/png",
+                },
+                {
+                  src: "pwa-192x192.png",
+                  sizes: "192x192",
+                  type: "image/png",
+                },
+                {
+                  src: "pwa-512x512.png",
+                  sizes: "512x512",
+                  type: "image/png",
+                },
+                {
+                  src: "maskable-icon-512x512.png",
+                  sizes: "512x512",
+                  type: "image/png",
+                  purpose: "maskable",
+                },
+              ],
+            },
           }),
         ]),
     // basicSsl serves a self-signed cert so Safari (which force-upgrades
@@ -153,20 +229,8 @@ export default defineConfig({
     alias: {
       "@app": path.resolve(__dirname, "./src"),
       "@lib": path.resolve(__dirname, "../lib/src"),
-      // The Capacitor build disables VitePWA, so its virtual modules no longer
-      // exist. Point ReloadPrompt's imports at inert stubs instead.
-      ...(isCapacitorBuild
-        ? {
-            "virtual:pwa-register/react": path.resolve(
-              __dirname,
-              "./src/stubs/pwaRegister.ts",
-            ),
-            "virtual:pwa-info": path.resolve(
-              __dirname,
-              "./src/stubs/pwaInfo.ts",
-            ),
-          }
-        : {}),
+      // (ReloadPrompt no longer imports the plugin's virtual modules — SW
+      // registration is hand-rolled there — so no Capacitor stubs needed.)
     },
   },
   optimizeDeps: {

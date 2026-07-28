@@ -25,6 +25,7 @@ import localizedFormat from "dayjs/plugin/localizedFormat";
 import "./timelockStore";
 // Native-shell init (status bar, splash, safe-area class). No-op on web/Tauri.
 import { initNative } from "./platform";
+import RootErrorBoundary from "./components/RootErrorBoundary";
 import App from "./App";
 import Servers from "./pages/Servers";
 import WalletSettings from "./pages/WalletSettings";
@@ -721,11 +722,18 @@ const toastOptions: ToastProviderProps = {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   /*<React.StrictMode>*/
-  <ChakraProvider theme={theme} toastOptions={toastOptions}>
-    <RouterProvider router={router} />
-  </ChakraProvider>
+  <RootErrorBoundary>
+    <ChakraProvider theme={theme} toastOptions={toastOptions}>
+      <RouterProvider router={router} />
+    </ChakraProvider>
+  </RootErrorBoundary>
   /*</React.StrictMode>*/
 );
 
+// Signals public/boot-recovery.js that the app mounted — its watchdog and
+// auto-recovery paths stand down once this is set.
+window.__APP_BOOTED = true;
+
 // Style the native status bar and dismiss the launch splash once the UI is up.
 void initNative();
+

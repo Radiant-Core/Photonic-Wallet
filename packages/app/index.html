@@ -20,6 +20,13 @@
       shims now live in src/processShim.ts and are loaded as the first
       import in src/main.tsx — see R28 in REMEDIATION_PLAN.md.
     -->
+    <!--
+      Boot recovery must load BEFORE the entry module so it can observe the
+      entry script failing to load (stale SW cache / deleted hashed assets)
+      and self-heal by clearing SW + caches. External classic script — the
+      CSP (script-src 'self') forbids inline. Lives in public/.
+    -->
+    <script src="/boot-recovery.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

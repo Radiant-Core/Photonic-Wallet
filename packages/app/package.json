@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-precache.mjs",
+    "precache:check": "node scripts/check-precache.mjs",
     "tauri": "tauri",
     "tauri:build": "tauri build",
     "build:mobile": "CAP_BUILD=1 vite build && cap copy && cap sync",
