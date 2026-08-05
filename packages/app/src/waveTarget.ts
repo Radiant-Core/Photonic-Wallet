@@ -13,6 +13,7 @@ import {
 } from "@lib/script";
 import { buildTx, findTokenOutput } from "@lib/tx";
 import { SmartTokenPayload, UnfinalizedInput } from "@lib/types";
+import { calculateNameCost, DEFAULT_REGISTRATION_DURATION } from "@lib/wave";
 import { Transaction } from "@radiant-core/radiantjs";
 
 /**
@@ -58,6 +59,13 @@ export async function updateWaveTarget(opts: {
    * (which keeps the singleton discoverable) unless you specifically need atomicity.
    */
   newOwner?: string;
+  /**
+   * Current expiry (unix seconds), re-asserted in the mod payload so a target
+   * update doesn't drop the expires attr from the latest on-chain state. The
+   * indexer computes expiry authoritatively; this keeps wallet-side display
+   * consistent.
+   */
+  expires?: number;
 }): Promise<WaveTargetUpdateResult> {
   const { ref, txoId, name, domain, newTarget } = opts;
   const newOwner = opts.newOwner ?? wallet.value.address;
@@ -100,13 +108,15 @@ export async function updateWaveTarget(opts: {
     throw new Error("Could not locate mutable contract output");
   }
 
-  // Build updated payload - only updating target
+  // Build updated payload - only updating target (expires re-asserted when
+  // known so the latest mod state keeps carrying it for display).
   const payload: Partial<SmartTokenPayload> = {
     attrs: {
       name: name.split(".")[0],
       domain,
       target: newTarget,
       target_type: "address",
+      ...(opts.expires ? { expires: opts.expires } : {}),
     },
   };
 
@@ -214,5 +224,189 @@ export async function updateWaveTarget(opts: {
     newNftTxo,
     rxdInputs: fund.funding as SelectableInput[],
     outputs,
+  };
+}
+
+const WAVE_TREASURY_ADDRESS = "1GrwkQNJfjbEJjH25heszNZLpbZou8nfXG";
+
+export interface WaveRenewResult {
+  txid: string;
+  /** The NFT singleton's new UTXO (this tx, vout 0). Insert + relink the glyph. */
+  newNftTxo: TxO;
+  /** RXD coins consumed for the fee (have db ids). */
+  rxdInputs: SelectableInput[];
+  /** Final output list, for RXD change bookkeeping via updateWalletUtxos. */
+  outputs: { script: string; value: number }[];
+  /** Unix timestamp the name was renewed to. */
+  newExpires: number;
+}
+
+/**
+ * Renew a WAVE name by extending its expiration by another 2 years. The existing
+ * target is re-asserted and a renewal fee (same as registration cost, by name
+ * length) is sent to the WAVE treasury address.
+ *
+ * The indexer is the authority on renewals: any tx that spends the name's
+ * singleton and pays >= the name's registration price to the treasury extends
+ * the expiry to max(current expiry, block time) + 2 years. The attrs.expires
+ * written here is display-level and mirrors that rule: renewing early ADDS a
+ * full term to the current expiry rather than forfeiting the remaining time.
+ */
+export async function renewWaveName(opts: {
+  ref: string;
+  txoId: number;
+  name: string;
+  domain: string;
+  target: string;
+  targetType?: "address" | "ref" | "url" | "data";
+  /** Current expiry (unix seconds) — the new term stacks on top of it. */
+  currentExpires?: number;
+  newOwner?: string;
+}): Promise<WaveRenewResult> {
+  const { ref, txoId, name, domain, target, targetType = "address" } = opts;
+  const newOwner = opts.newOwner ?? wallet.value.address;
+
+  if (!wallet.value.wif) {
+    throw new Error("Wallet locked");
+  }
+
+  const txo = (await db.txo.get({ id: txoId })) as TxO;
+  if (!txo) {
+    throw new Error("Token UTXO not found");
+  }
+
+  const bareName = name.split(".")[0];
+  const fullName = `${bareName}.${domain}`;
+  const renewalFee = calculateNameCost(fullName);
+  // Stack the new term on the current expiry (indexer rule: max(current, now)
+  // + duration) so an early renewal never forfeits the time already paid for.
+  const now = Math.floor(Date.now() / 1000);
+  const newExpires =
+    Math.max(opts.currentExpires ?? 0, now) + DEFAULT_REGISTRATION_DURATION;
+
+  const nftRefBE = Outpoint.fromString(ref);
+  const nftRefLE = nftRefBE.reverse().toString();
+  const { txid: nftTxid, vout: refVout } = nftRefBE.toObject();
+
+  // Mutable contract ref is always token ref + 1
+  const mutRefBE = Outpoint.fromUTXO(nftTxid, refVout + 1);
+  const mutRefLE = mutRefBE.reverse().toString();
+
+  const refResponse = await electrumWorker.value.getRef(mutRefBE.toString());
+  if (!refResponse?.length) {
+    throw new Error("Mutable contract UTXO not found");
+  }
+  const location = refResponse[refResponse.length - 1].tx_hash;
+  const hex = await electrumWorker.value.getTransaction(location);
+  const refTx = new Transaction(hex);
+
+  const { vout: mutVout, output: mutOutput } = findTokenOutput(
+    refTx,
+    mutRefLE,
+    parseMutableScript
+  );
+
+  if (mutVout === undefined || !mutOutput) {
+    throw new Error("Could not locate mutable contract output");
+  }
+
+  // Build updated payload: keep the current target (re-assert it) and bump the
+  // expiration timestamp by 2 years.
+  const payload: Partial<SmartTokenPayload> = {
+    attrs: {
+      name: bareName,
+      domain,
+      target,
+      target_type: targetType,
+      expires: newExpires,
+    },
+  };
+
+  const glyph = encodeGlyphMutable("mod", payload, 1, 1, 0, 0);
+  const mutOutputScript = mutableNftScript(mutRefLE, glyph.payloadHash);
+  const nftOutputScript = nftAuthScript(newOwner, nftRefLE, [
+    { ref: mutRefLE, scriptSigHash: glyph.scriptSigHash },
+  ]);
+
+  const nftInput: UnfinalizedInput = { ...txo };
+  const mutInput: UnfinalizedInput = {
+    txid: refTx.id,
+    vout: mutVout,
+    script: mutOutput.script.toHex(),
+    value: mutOutput.satoshis,
+    scriptSigSize: mutOutputScript.length / 2,
+  };
+
+  const nftOutput = { script: nftOutputScript, value: txo.value };
+  const mutContractOutput = { script: mutOutputScript, value: mutInput.value };
+  const feeOutput = {
+    script: p2pkhScript(WAVE_TREASURY_ADDRESS),
+    value: renewalFee,
+  };
+
+  const inputs: UnfinalizedInput[] = [nftInput, mutInput];
+  const outputs = [nftOutput, mutContractOutput, feeOutput];
+
+  const rxdUtxos = await db.txo
+    .where({ contractType: ContractType.RXD, spent: 0 })
+    .toArray();
+
+  const p2pkh = p2pkhScript(wallet.value.address);
+  const fund = fundTx(
+    wallet.value.address,
+    rxdUtxos,
+    inputs,
+    outputs,
+    p2pkh,
+    feeRate.value
+  );
+
+  if (!fund.funded) {
+    throw new Error("Insufficient funds for renewal fee + transaction fee");
+  }
+
+  inputs.push(...fund.funding);
+  outputs.push(...fund.change);
+
+  const rawTx = buildTx(
+    wallet.value.address,
+    wallet.value.wif.toString(),
+    inputs,
+    outputs,
+    false,
+    (index, script) => {
+      if (index === 1) {
+        // Mutable contract input: replace p2pkh scriptSig with glyph scriptSig
+        script.set({ chunks: [] });
+        script.add(glyph.scriptSig);
+      }
+    }
+  ).toString();
+
+  const txid = await electrumWorker.value.broadcast(rawTx);
+  await db.broadcast.put({
+    txid,
+    date: Date.now(),
+    description: "wave_name_renew",
+  });
+
+  const newNftTxo: TxO = {
+    contractType: ContractType.NFT,
+    script: nftOutputScript,
+    value: nftOutput.value,
+    txid,
+    vout: 0,
+    spent: 0,
+    height: Infinity,
+    date: Date.now(),
+    byRef: 1,
+  };
+
+  return {
+    txid,
+    newNftTxo,
+    rxdInputs: fund.funding as SelectableInput[],
+    outputs,
+    newExpires,
   };
 }

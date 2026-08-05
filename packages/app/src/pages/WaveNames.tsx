@@ -79,9 +79,10 @@ import {
   validateWaveName,
   canReclaimWaveName,
   createWaveReclaimMetadata,
+  calculateNameCost,
   GRACE_PERIOD,
 } from "@lib/wave";
-import { updateWaveTarget } from "@app/waveTarget";
+import { updateWaveTarget, renewWaveName } from "@app/waveTarget";
 import { photonsToRXD } from "@lib/format";
 import createExplorerUrl from "@app/network/createExplorerUrl";
 import Outpoint from "@lib/Outpoint";
@@ -880,6 +881,7 @@ function WaveNameCard({
         name: record.name,
         domain: record.domain,
         newTarget: target,
+        expires: record.expires,
       });
 
       // The update co-spent the NFT singleton and re-created it at a NEW
@@ -914,6 +916,7 @@ function WaveNameCard({
           domain: record.domain,
           target,
           target_type: "address",
+          ...(record.expires ? { expires: record.expires } : {}),
         },
         lastTxoId: newTxoId,
         spent: 0,
@@ -966,24 +969,70 @@ function WaveNameCard({
 
   const handleRenew = async () => {
     if (requireUnlock(handleRenew)) return;
-    if (!record.id) return;
+    if (!record.id || !record.txoId) return;
 
     setIsRenewing(true);
     try {
-      // Renewal would extend expiration by 2 years from now once implemented.
-      // Currently this UI surface only informs the user — the on-chain
-      // renewal flow is not wired up yet.
+      const glyph = (await db.glyph.get(record.id)) as Record<string, unknown> | undefined;
+      const targetType = ((glyph?.attrs as Record<string, unknown> | undefined)?.target_type as
+        | "address"
+        | "ref"
+        | "url"
+        | "data"
+        | undefined) || "address";
+
+      const { txid, newNftTxo, rxdInputs, outputs, newExpires } =
+        await renewWaveName({
+          ref: record.ref,
+          txoId: record.txoId,
+          name: record.name,
+          domain: record.domain,
+          target: record.target,
+          targetType,
+          currentExpires: record.expires,
+        });
+
+      // Spend the old NFT singleton and insert the renewed one at vout 0.
+      await db.txo.update(record.txoId, { spent: 1 });
+      const newTxoId = (await db.txo.put(newNftTxo)) as number;
+
+      // RXD fee coins + change bookkeeping.
+      const changeScript = p2pkhScript(wallet.value.address);
+      await updateWalletUtxos(
+        ContractType.RXD,
+        changeScript,
+        changeScript,
+        txid,
+        rxdInputs,
+        outputs as unknown as UnfinalizedInput[]
+      );
+      await updateRxdBalances(wallet.value.address);
+
+      // Keep the local glyph row in sync with the new on-chain attrs.
+      await db.glyph.update(record.id, {
+        attrs: {
+          name: record.name.split(".")[0],
+          domain: record.domain,
+          target: record.target,
+          target_type: targetType,
+          expires: newExpires,
+        },
+        lastTxoId: newTxoId,
+        spent: 0,
+        height: Infinity,
+      });
+
       toast({
-        title: "Renewal not available",
-        description: `On-chain renewal will be implemented in a future update. Your name is still active until ${
-          record.expires
-            ? new Date(record.expires * 1000).toLocaleDateString()
-            : "N/A"
-        }.`,
-        status: "info",
+        title: "WAVE Name Renewed",
+        description: `${record.name}.${record.domain} is now active until ${new Date(
+          newExpires * 1000
+        ).toLocaleDateString()}. TX: ${txid.slice(0, 16)}...`,
+        status: "success",
+        duration: 8000,
       });
       onRenewClose();
     } catch (error) {
+      console.error("Renewal failed:", error);
       toast({
         title: "Renewal failed",
         description: error instanceof Error ? error.message : String(error),
@@ -1320,6 +1369,7 @@ function WaveNameCard({
               onClick={onRenewOpen}
               colorScheme="orange"
               variant="outline"
+              isDisabled={record.listed}
             >
               {"Renew"}
             </Button>
@@ -1489,7 +1539,9 @@ function WaveNameCard({
                 </Box>
               )}
               <Text fontSize="sm" color="text.muted">
-                {"Renewal cost: Same as registration based on name length"}
+                {`Renewal cost: ${photonsToRXD(
+                  calculateNameCost(record.name)
+                )} RXD`}
               </Text>
             </VStack>
           </ModalBody>
