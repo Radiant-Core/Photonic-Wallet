@@ -9,6 +9,7 @@ import { network } from "@app/signals";
 import config from "@app/config.json";
 import { findSwaps } from "./findSwaps";
 import { isUtxoUnspent } from "./isUtxoUnspent";
+import { backfillHistory } from "./historyBackfill";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 import { HeadersSubscription } from "./Headers";
 import { verifyTransactionInclusion, type TxVerification } from "@app/verifier";
@@ -405,6 +406,12 @@ const worker = {
   },
   async discoverVaults(wif: string, address: string, swapWif?: string) {
     return vault.discoverVaults(wif, address, swapWif);
+  },
+  // Rebuild db.broadcast activity from on-chain history (get_history on the
+  // wallet's p2pkh addresses). Address-only, so it runs while locked; see
+  // historyBackfill.ts for the incremental/latch semantics.
+  async backfillHistory(addresses: string[]) {
+    return backfillHistory(electrum, addresses);
   },
   async addVault(record: VaultRecord) {
     return vault.addVault(record);

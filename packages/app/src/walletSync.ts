@@ -12,6 +12,9 @@
  *     indexer by their owner-stable (zero-ref) scripthash.
  *   - Royalty *listings* — kept in local `db.covenant`; the reconcile here also
  *     self-heals a listing an earlier build wrongly marked resolved.
+ *   - Activity history (`db.broadcast`) — written locally at broadcast time, so
+ *     a restored wallet has none; rebuilt from on-chain get_history (see
+ *     electrum/worker/historyBackfill.ts).
  * This function covers those. Callers run manualSync() first for the rest.
  */
 import { electrumWorker } from "@app/electrum/Electrum";
@@ -25,6 +28,8 @@ export interface DiscoverAllResult {
   incomplete: boolean;
   /** Vaults were skipped because the wallet is locked (no WIF). */
   vaultsSkippedLocked: boolean;
+  /** History entries backfilled/corrected from on-chain history this run. */
+  historyRecorded: number;
 }
 
 /**
@@ -94,5 +99,23 @@ export async function discoverAll(): Promise<DiscoverAllResult> {
     console.warn("[walletSync] swap recovery failed:", swapErr);
   }
 
-  return { vaultsDiscovered, incomplete, vaultsSkippedLocked };
+  // Activity-history backfill from on-chain get_history. Address-only, so it
+  // runs while locked. Incremental + idempotent (first complete pass per
+  // address is latched; later runs only top up missing txids — which also
+  // catches receives spent while the wallet was closed). An incomplete pass
+  // (scan failure, capped work list, headers not yet deep enough) flips
+  // `incomplete` so the connect-time latch retries on a later connect.
+  let historyRecorded = 0;
+  try {
+    const hist = await electrumWorker.value.backfillHistory(
+      [w.address, w.swapAddress].filter((a): a is string => !!a)
+    );
+    historyRecorded = hist.recorded + hist.reclassified;
+    if (!hist.complete) incomplete = true;
+  } catch (histErr) {
+    incomplete = true;
+    console.warn("[walletSync] history backfill failed:", histErr);
+  }
+
+  return { vaultsDiscovered, incomplete, vaultsSkippedLocked, historyRecorded };
 }

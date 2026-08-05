@@ -78,8 +78,12 @@ const EXACT: Record<string, ActivityMeta> = {
   wave_name_commit: { label: "Name Registering", category: "name", icon: HiOutlineAtSymbol, color: "pink", direction: "neutral" },
   wave_name_reveal: { label: "Name Registered", category: "name", icon: HiOutlineAtSymbol, color: "pink", direction: "in" },
   wave_name_reclaim: { label: "Name Reclaimed", category: "name", icon: HiOutlineAtSymbol, color: "pink", direction: "neutral" },
+  wave_name_renew: { label: "Name Renewed", category: "name", icon: HiOutlineAtSymbol, color: "pink", direction: "neutral" },
   wave_name_burn: { label: "Name Burned", category: "name", icon: TbFlame, color: "red", direction: "out" },
   wave_name_transfer: { label: "Name Transferred", category: "name", icon: TbArrowUpRight, color: "pink", direction: "out" },
+  // Chain-derived backfill entry for a wallet tx that can't be labeled more
+  // precisely (token self-moves, covenant ops) — see electrum/worker/historyBackfill.ts.
+  chain_activity: { label: "On-chain Activity", category: "other", icon: TbArrowsExchange, color: "gray", direction: "neutral" },
 };
 
 const FALLBACK: ActivityMeta = {

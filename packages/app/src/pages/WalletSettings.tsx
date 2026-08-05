@@ -335,13 +335,19 @@ export default function WalletSettings() {
       const found = result.vaultsDiscovered
         ? `Recovered ${result.vaultsDiscovered} vault(s).`
         : "";
+      const history = result.historyRecorded
+        ? `Restored ${result.historyRecorded} history entr${
+            result.historyRecorded === 1 ? "y" : "ies"
+          }.`
+        : "";
       const hint = result.vaultsSkippedLocked
         ? "Unlock the wallet and resync again to also scan for vaults."
         : "";
       toast({
         status: "success",
         title: "Resynced",
-        description: [found, hint].filter(Boolean).join(" ") || undefined,
+        description:
+          [found, history, hint].filter(Boolean).join(" ") || undefined,
       });
     } catch (err) {
       toast({

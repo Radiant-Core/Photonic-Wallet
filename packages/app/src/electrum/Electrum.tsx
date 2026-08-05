@@ -66,6 +66,9 @@ const wrapped = wrap<{
     address: string,
     swapWif?: string
   ) => VaultScanResult;
+  backfillHistory: (
+    addresses: string[]
+  ) => import("./worker/historyBackfill").HistoryBackfillResult;
   addVault: (record: VaultRecord) => void;
   setActive: (active: boolean) => void;
   isActive: () => boolean;
