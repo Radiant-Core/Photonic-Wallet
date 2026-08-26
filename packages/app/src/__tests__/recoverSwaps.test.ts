@@ -143,9 +143,9 @@ it("is idempotent — a second pass does not duplicate the record", async () => 
   expect(await db.swap.where({ txid: SWAP_TXID }).count()).toBe(1);
 });
 
-it("skips a UTXO already tracked by an existing db.swap row", async () => {
-  findSwaps.mockResolvedValue([nftReserve(1)]);
-  await db.swap.put({
+/** A tracked (non-recovery) row for the reserve, with overrides. */
+function trackedRow(overrides: Record<string, unknown> = {}) {
+  return {
     txid: SWAP_TXID,
     vout: 1,
     tx: "deadbeef",
@@ -157,7 +157,19 @@ it("skips a UTXO already tracked by an existing db.swap row", async () => {
     toValue: 0,
     status: SwapStatus.PENDING,
     date: 1,
-  } as any);
+    ...overrides,
+  } as any;
+}
+
+it("leaves an existing db.swap row intact, but still heals the glyph's visibility", async () => {
+  // The record must not be overwritten — but a reserved NFT's glyph gets flipped
+  // to spent:1 by any sync that judges ownership by the MAIN address (its
+  // singleton pays the swap address, which reads as a transfer away). Nothing
+  // else flips it back, so without healing here the token vanishes from the
+  // wallet permanently while the reserve is live on-chain.
+  await db.glyph.put({ ref: REF_BE, name: "Stuck NFT", tokenType: SmartTokenType.NFT, spent: 1 } as any);
+  findSwaps.mockResolvedValue([nftReserve(1)]);
+  await db.swap.put(trackedRow());
 
   await recoverSwaps();
 
@@ -165,6 +177,59 @@ it("skips a UTXO already tracked by an existing db.swap row", async () => {
   expect(rows.length).toBe(1);
   expect(rows[0].tx).toBe("deadbeef"); // original untouched, not overwritten
   expect(rows[0].recovered).toBeUndefined();
+
+  const glyph = await db.glyph.where({ ref: REF_BE }).first();
+  expect(glyph!.spent).toBe(0);
+  expect(glyph!.swapPending).toBe(true);
+  const txo = await db.txo.where({ txid: SWAP_TXID, vout: 1 }).first();
+  expect(glyph!.lastTxoId).toBe(txo!.id);
+});
+
+it("restores a live reserve the reaper wrongly resolved, so Cancel can find it", async () => {
+  // syncSwaps resolves a row as soon as findSwaps stops returning its UTXO and
+  // cannot tell "bought" from "cancelled", so one transient empty lookup marks a
+  // live reserve COMPLETE for good. Cancel searches PENDING rows only, so the
+  // asset is then stranded at the swap address with no way back. findSwaps
+  // returning the UTXO is positive proof the reserve is still there.
+  findSwaps.mockResolvedValue([nftReserve(1)]);
+  await db.swap.put(trackedRow({ status: SwapStatus.COMPLETE }));
+
+  await recoverSwaps();
+
+  const rows = await db.swap.where({ txid: SWAP_TXID }).toArray();
+  expect(rows.length).toBe(1);
+  expect(rows[0].status).toBe(SwapStatus.PENDING);
+});
+
+it("backfills the bookkeeping Cancel needs on an incomplete tracked row", async () => {
+  // cancelSwap needs the glyph ref, the vout and the holding address; a row
+  // written before those were recorded is otherwise uncancellable.
+  findSwaps.mockResolvedValue([nftReserve(1)]);
+  await db.swap.put(
+    trackedRow({ vout: undefined, fromGlyph: null, fromValue: 0, swapAddress: undefined })
+  );
+
+  await recoverSwaps();
+
+  const rows = await db.swap.where({ txid: SWAP_TXID }).toArray();
+  expect(rows.length).toBe(1);
+  expect(rows[0].fromGlyph).toBe(REF_BE);
+  expect(rows[0].vout).toBe(1);
+  expect(rows[0].fromValue).toBe(1);
+  expect(rows[0].swapAddress).toBe(SWAP_ADDR);
+});
+
+it("does not resurrect a sibling reserve at a different vout of the same tx", async () => {
+  // Dedup is by txid, but one tx can carry several reserves — evidence that
+  // vout 1 is live says nothing about vout 5.
+  findSwaps.mockResolvedValue([nftReserve(1)]);
+  await db.swap.put(trackedRow({ vout: 5, status: SwapStatus.COMPLETE }));
+
+  await recoverSwaps();
+
+  const rows = await db.swap.where({ txid: SWAP_TXID }).toArray();
+  expect(rows.length).toBe(1);
+  expect(rows[0].status).toBe(SwapStatus.COMPLETE);
 });
 
 it("scans BOTH coin-type swap addresses (unlocked) and records the holding address", async () => {

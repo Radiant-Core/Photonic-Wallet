@@ -11,8 +11,9 @@ import {
   SmartTokenRemoteFile,
 } from "./types";
 import { bytesToHex } from "@noble/hashes/utils";
-import { pushMinimalAsm } from "./script";
+import { parseMutableScript, pushMinimalAsm } from "./script";
 import { GLYPH_MUT, GLYPH_NFT } from "./protocols";
+import Outpoint from "./Outpoint";
 
 // ESM compatibility
 const { Script } = rjs;
@@ -208,4 +209,112 @@ export function extractRevealPayload(
   }
 
   return { revealIndex, glyph: decodeGlyph(script) };
+}
+
+/**
+ * Decode a glyph payload from a script AND return the hash the mutable
+ * covenant commits to in its state script — `sha256d(<raw cbor payload>)`, the
+ * same value `encodeGlyphMutable` puts in `payloadHash`.
+ *
+ * `decodeGlyph` re-parses the payload into a structured object, so it can't be
+ * re-encoded and hashed to check it against a covenant (CBOR encoding isn't
+ * canonical here, and files are split out of the root object). This walks the
+ * script for the raw payload push and hashes THOSE bytes, letting a caller
+ * verify that a `mod` scriptSig really produced the state a mutable contract
+ * output commits to before trusting its attrs.
+ *
+ * Returns undefined when the script carries no glyph payload.
+ */
+export function decodeGlyphWithPayloadHash(
+  script: Script
+): (DecodedGlyph & { payloadHash: string }) | undefined {
+  const chunks = script.chunks as { opcodenum: number; buf?: Uint8Array }[];
+  let raw: Uint8Array | undefined;
+  chunks.some(({ opcodenum, buf }, index) => {
+    if (
+      !buf ||
+      opcodenum !== 3 ||
+      Buffer.from(buf).toString("hex") !== glyphMagicBytesHex ||
+      chunks.length <= index + 1
+    ) {
+      return false;
+    }
+    raw = chunks[index + 1].buf;
+    return !!raw;
+  });
+
+  if (!raw) return undefined;
+
+  const decoded = decodeGlyph(script);
+  if (!decoded) return undefined;
+
+  return {
+    ...decoded,
+    payloadHash: bytesToHex(sha256(sha256(Buffer.from(raw)))),
+  };
+}
+
+/**
+ * Pull the CURRENT attrs of a mutable glyph out of the `mod` transaction that
+ * holds its singleton.
+ *
+ * A mutable NFT's state lives in the CBOR payload pushed by the scriptSig that
+ * unlocks its mutable-contract UTXO (token ref + 1) — see `encodeGlyphMutable`.
+ * Nothing re-derives that into a wallet's stored glyph row, whose `attrs` come
+ * from the MINT reveal, so a WAVE name re-pointed on-chain otherwise keeps
+ * reporting its registration-time target forever.
+ *
+ * The contract output re-created in the same tx commits to `sha256d(payload)`
+ * in its state script, and the payload is checked against that commitment
+ * before its attrs are returned: any input can push glyph-shaped bytes, but
+ * only the real mod payload hashes to the state this ref's covenant carries
+ * forward.
+ *
+ * Returns undefined when `tx` carries no mod state for `refBE` (the mint, a
+ * plain transfer, another token's mod) or when the payload has no attrs, so a
+ * caller can leave whatever it already holds untouched.
+ */
+export function extractMutableModAttrs(
+  tx: rjs.Transaction,
+  refBE: string
+): { [key: string]: string } | undefined {
+  // The mutable contract ref is always the token ref + 1.
+  let mutRefLE: string;
+  try {
+    const { txid, vout } = Outpoint.fromString(refBE).toObject();
+    mutRefLE = Outpoint.fromUTXO(txid, vout + 1)
+      .reverse()
+      .toString();
+  } catch {
+    return undefined;
+  }
+
+  // The state hash this tx's contract output commits to.
+  let stateHash: string | undefined;
+  for (const o of tx.outputs) {
+    const { hash, ref } = parseMutableScript(o.script.toHex() as string);
+    if (hash && ref === mutRefLE) {
+      stateHash = hash;
+      break;
+    }
+  }
+  if (!stateHash) return undefined;
+
+  // The input whose glyph payload hashes to it.
+  for (const input of tx.inputs) {
+    if (!input.script) continue;
+    let decoded;
+    try {
+      decoded = decodeGlyphWithPayloadHash(input.script);
+    } catch {
+      continue; // unparseable scriptSig — not the payload we're after
+    }
+    if (!decoded || decoded.payloadHash !== stateHash) continue;
+    const { attrs } = decoded.payload;
+    if (!attrs || typeof attrs !== "object") return undefined;
+    const filtered = filterAttrs(attrs) as { [key: string]: string };
+    return Object.keys(filtered).length ? filtered : undefined;
+  }
+
+  return undefined;
 }
