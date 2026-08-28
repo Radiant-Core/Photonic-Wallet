@@ -7,6 +7,7 @@ import {
   ElectrumStatus,
   SwapError,
   SwapStatus,
+  TokenSwap,
 } from "./types";
 import db from "./db";
 import { ftScript, nftScript, p2pkhScript } from "@lib/script";
@@ -253,6 +254,47 @@ export const syncSwaps = async () => {
  * module-level guard prevents two overlapping runs (connect sweep + Resync) from
  * racing the non-atomic check-then-insert and double-inserting a record.
  */
+/**
+ * Bring a tracked swap record back in line with the chain.
+ *
+ * `findSwaps` only returns UTXOs that are STILL sitting at the swap address, so
+ * a row it matches is demonstrably still reserved. `syncSwaps` cannot tell a
+ * completed swap from a cancelled one (there's no cheap way to fetch the
+ * spending tx), so it resolves a row the moment the UTXO stops showing up — and
+ * a single transient/empty lookup permanently marks a live reserve COMPLETE.
+ * That row then fails every "find the pending listing" lookup (Cancel included)
+ * while the asset is still locked away at the swap address, with no way back.
+ *
+ * Restoring it on positive evidence mirrors syncCovenants' RESOLVED→ACTIVE
+ * self-heal. Missing bookkeeping that Cancel needs (`fromGlyph`, `vout`,
+ * `swapAddress`) is backfilled at the same time — an early recovery row, or one
+ * written before those fields existed, is otherwise uncancellable.
+ *
+ * Scoped to the matching output: dedup is by txid, but one tx can carry several
+ * reserves, and a sibling's row must not be resurrected by this one's evidence.
+ */
+const healTrackedReserve = async (
+  tracked: TokenSwap[],
+  utxo: ElectrumUtxo,
+  refBE: string | undefined,
+  swapAddress: string
+) => {
+  for (const row of tracked) {
+    if (row.id === undefined) continue;
+    if (row.vout !== undefined && row.vout !== utxo.tx_pos) continue;
+
+    const patch: Partial<TokenSwap> = {};
+    if (row.status !== SwapStatus.PENDING) patch.status = SwapStatus.PENDING;
+    if (refBE && !row.fromGlyph) patch.fromGlyph = refBE;
+    if (row.vout === undefined) patch.vout = utxo.tx_pos;
+    if (!row.fromValue) patch.fromValue = utxo.value;
+    if (!row.swapAddress) patch.swapAddress = swapAddress;
+    if (Object.keys(patch).length === 0) continue;
+
+    await db.swap.update(row.id, patch).catch(() => undefined);
+  }
+};
+
 let recovering = false;
 export const recoverSwaps = async () => {
   if (electrumStatus.value !== ElectrumStatus.CONNECTED) return;
@@ -273,15 +315,6 @@ export const recoverSwaps = async () => {
       }
 
       for (const { contractType, utxo } of found) {
-        // Skip anything already tracked (incl. a prior recovery). Dedup by txid
-        // to match SwapMissing / the existing reaper. On a query error, assume
-        // tracked so we never create a duplicate.
-        const tracked = await db.swap
-          .where({ txid: utxo.tx_hash })
-          .count()
-          .catch(() => 1);
-        if (tracked > 0) continue;
-
         const refShort = utxo.refs?.[0]?.ref;
         let refBE: string | undefined;
         if (refShort) {
@@ -290,6 +323,38 @@ export const recoverSwaps = async () => {
           } catch {
             refBE = undefined;
           }
+        }
+
+        // Already tracked (incl. a prior recovery)? Don't create a second
+        // record — but DO heal the existing one, the way discoverCovenants /
+        // syncCovenants heal covenant-held tokens. Dedup by txid to match
+        // SwapMissing / the existing reaper; a null read means the query failed,
+        // so assume tracked and never risk a duplicate.
+        const tracked = await db.swap
+          .where({ txid: utxo.tx_hash })
+          .toArray()
+          .catch(() => null);
+        if (tracked === null || tracked.length) {
+          if (tracked)
+            await healTrackedReserve(tracked, utxo, refBE, swapAddress);
+          // Repoint the glyph at the live reserve. A reserved NFT's glyph can be
+          // flipped to `spent:1` by any sync that judges ownership by the MAIN
+          // address (its singleton pays the swap address, which reads as a
+          // transfer away), and nothing else ever flips it back: this scan used
+          // to `continue` here, and syncSwaps only reaps. The token then
+          // vanishes from the wallet permanently even though the reserve is
+          // live on-chain. Re-materialising is idempotent.
+          if (refBE && contractType === ContractType.NFT) {
+            await materializeCovenantUtxo({
+              ref: refBE,
+              txid: utxo.tx_hash,
+              vout: utxo.tx_pos,
+              script: nftScript(swapAddress, reverseRef(refBE)),
+              value: utxo.value,
+              height: utxo.height,
+            });
+          }
+          continue;
         }
 
         // Recreate a minimal PENDING record — enough to surface in My Swaps and

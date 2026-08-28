@@ -221,6 +221,22 @@ export interface SmartToken {
   // Bump GLYPH_DECODE_VERSION (electrum/worker/NFT.ts) whenever the decode adds
   // a persisted field that existing rows need backfilled.
   dv?: number;
+  // Location (txid) whose `mod` payload produced the CURRENT `attrs` of a
+  // mutable glyph (GLYPH_MUT / WAVE names).
+  //
+  // `attrs` is otherwise decoded from the MINT reveal only, so a WAVE name
+  // re-pointed on-chain would keep showing its registration-time target
+  // forever. `reconcileRefTrackedNfts` re-reads the mod payload at the
+  // singleton's live location and stamps that location here; the wallet's own
+  // update/renew flows stamp their broadcast txid. Two invariants follow:
+  //
+  //  - `modLocation === <txid of the tracked singleton txo>` means `attrs` are
+  //    chain-derived and current, so the reconcile can skip the network round
+  //    trip (and `needsTargetUpdate` is safe to act on).
+  //  - undefined means `attrs` are reveal-derived and UNVERIFIED — e.g. a fresh
+  //    row, or one `saveGlyph` just re-decoded. Never spend a fee (auto-repoint)
+  //    on those; re-resolve first.
+  modLocation?: string;
 }
 
 export interface Subscription {

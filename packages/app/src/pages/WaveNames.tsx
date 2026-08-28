@@ -293,9 +293,17 @@ export default function WaveNames() {
           }
         }
 
-        // Check if target needs update (transferred from another owner)
+        // Check if target needs update (transferred from another owner).
+        //
+        // Only when `attrs` are chain-derived (`modLocation` stamped by the ref
+        // reconcile or by this wallet's own update). Reveal-derived attrs are
+        // the REGISTRATION-time target: acting on those flags a name that was
+        // already re-pointed on-chain, and the auto-repoint below would spend a
+        // fee setting the target to what it already is. The reconcile stamps
+        // the row on the next sync pass, so this resolves itself in seconds.
         const target = attrs.target || "";
         const needsTargetUpdate = !!(
+          token.modLocation &&
           target &&
           target !== wallet.value.address &&
           !target.startsWith("ref:") &&
@@ -921,6 +929,11 @@ function WaveNameCard({
         lastTxoId: newTxoId,
         spent: 0,
         height: Infinity,
+        // These attrs mirror the `mod` payload just broadcast, so mark them
+        // chain-derived at that location: the sync's ref reconcile then treats
+        // the row as verified (no redundant re-read) and a later re-decode
+        // won't clobber the new target back to the mint's.
+        modLocation: txid,
       });
 
       if (!opts?.silent) {
@@ -1020,6 +1033,7 @@ function WaveNameCard({
         lastTxoId: newTxoId,
         spent: 0,
         height: Infinity,
+        modLocation: txid,
       });
 
       toast({
@@ -1278,9 +1292,16 @@ function WaveNameCard({
 
           {/* Target update alert for transferred names */}
           {record.needsTargetUpdate && (
-            <Alert status="warning" size="sm" borderRadius="md" py={2}>
-              <AlertIcon boxSize={4} />
-              <VStack align="start" spacing={1} flex={1}>
+            <Alert
+              status="warning"
+              size="sm"
+              borderRadius="md"
+              py={2}
+              w="100%"
+              minW={0}
+            >
+              <AlertIcon boxSize={4} flexShrink={0} />
+              <VStack align="start" spacing={1} flex={1} minW={0}>
                 <Text fontSize="sm" fontWeight="bold">
                   {"⚠️ Target Update Required"}
                 </Text>
@@ -1338,7 +1359,8 @@ function WaveNameCard({
           flexWrap="wrap"
           rowGap={2}
           justify={{ base: "flex-start", xl: "flex-end" }}
-          flexShrink={0}
+          minW={0}
+          maxW={{ base: "100%", xl: "60%" }}
         >
           {/* Primary badge or Set Primary button */}
           {isPrimary ? (

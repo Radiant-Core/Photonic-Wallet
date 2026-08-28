@@ -22,6 +22,7 @@ import db from "@app/db";
 import Outpoint, { reverseRef } from "@lib/Outpoint";
 import { verifyTransactionHash, hexToBytes } from "@lib/crypto";
 import {
+  extractMutableModAttrs,
   extractRevealPayload,
   filterAttrs,
   isImmutableToken,
@@ -360,6 +361,19 @@ export class NFTWorker implements Subscription {
       // height check below, such a glyph would be treated as "done" and latch at
       // height:Infinity forever, showing PENDING even after the tx confirms.
       // Keep re-resolving until we've recorded a real (non-Infinity) height.
+      //
+      // A healthy row still re-resolves while its attrs have never been read
+      // off-chain (`modLocation` unset, or naming a location the singleton has
+      // since left). A mutable glyph's `attrs` come from the MINT reveal
+      // (saveGlyph), so a WAVE name re-pointed by a `mod` would otherwise show
+      // its registration-time target forever.
+      //
+      // Health is tracked rather than just short-circuiting, because it also
+      // gates the hide path below: a healthy row must NEVER be hidden by this
+      // pass. Its singleton can legitimately rest in a covenant (listed for
+      // sale / soulbound, materialized by covenant.ts), which from here is
+      // indistinguishable from a transfer away.
+      let healthy = false;
       if (g.spent === 0 && g.lastTxoId !== undefined) {
         const cur = await db.txo.get(g.lastTxoId);
         if (
@@ -367,8 +381,10 @@ export class NFTWorker implements Subscription {
           cur.spent === 0 &&
           cur.byRef === 1 &&
           cur.height !== Infinity
-        )
-          continue;
+        ) {
+          healthy = true;
+          if (g.modLocation === cur.txid) continue;
+        }
       }
 
       // Resolve the live location of this singleton ref.
@@ -448,8 +464,29 @@ export class NFTWorker implements Subscription {
         // address (sold/transferred). If no singleton for this ref was found at
         // the current location (transient fetch/parse miss, or an in-flight
         // update), leave the row visible — a target update must never hide it.
-        if (foundForRefElsewhere && g.spent !== 1) {
+        //
+        // `!healthy && !g.swapPending` keeps a RESERVED token safe. `ourTail` is
+        // this wallet's main address, so anything held elsewhere on our behalf
+        // reads as `foundForRefElsewhere` every single time: a plain swap
+        // listing parks the token at the SWAP address (Swap.tsx), and a royalty
+        // listing / soulbound mint parks it in a covenant script (covenant.ts).
+        // Those rows are owned by the swap + covenant sync, which restore them
+        // with a working Cancel; hiding them here makes the token vanish from
+        // the wallet instead. `swapPending` also covers the window the health
+        // check can't — a listing still in the mempool has no confirmed height.
+        if (
+          foundForRefElsewhere &&
+          !healthy &&
+          !g.swapPending &&
+          g.spent !== 1
+        ) {
           await db.glyph.update(g.id, { spent: 1 });
+        }
+        // Still record that this location was inspected, so a healthy row
+        // (covenant-held, or otherwise not paying to us right now) doesn't
+        // re-resolve on every single sync.
+        if (healthy && g.modLocation !== loc) {
+          await db.glyph.update(g.id, { modLocation: loc });
         }
         continue;
       }
@@ -503,11 +540,26 @@ export class NFTWorker implements Subscription {
         })) as number;
       }
 
-      if (g.lastTxoId !== txoId || g.spent !== 0 || g.height !== finalHeight) {
+      // Re-read the mutable state at this location so `attrs` track the chain
+      // rather than the mint. Stamp `modLocation` either way: an inspected
+      // location with no mod payload (e.g. a never-modified singleton) still
+      // means the reveal-derived attrs ARE current, and the stamp is what lets
+      // the healthy-skip above go quiet again next pass.
+      const attrs = extractMutableModAttrs(tx, g.ref);
+
+      if (
+        g.lastTxoId !== txoId ||
+        g.spent !== 0 ||
+        g.height !== finalHeight ||
+        g.modLocation !== loc ||
+        attrs
+      ) {
         await db.glyph.update(g.id, {
           lastTxoId: txoId,
           spent: 0,
           height: finalHeight,
+          modLocation: loc,
+          ...(attrs ? { attrs: { ...g.attrs, ...attrs } } : {}),
         });
       }
     }
@@ -1060,6 +1112,17 @@ export class NFTWorker implements Subscription {
       record.id = prior.id;
       if (prior.swapPending !== undefined)
         record.swapPending = prior.swapPending;
+      // Never regress chain-derived mutable state to the mint's. `record.attrs`
+      // above comes from the REVEAL payload, so re-decoding a WAVE name (a dv
+      // bump, a rescan, a restore) would otherwise reset its target to the
+      // registrant's address — making the wallet believe a correctly-pointed
+      // name still "needs a target update", and auto-repointing it at a fee.
+      // A `modLocation` marks attrs that a `mod` payload produced; those win,
+      // with the reveal's as the base so newly-decoded keys still backfill.
+      if (prior.modLocation) {
+        record.attrs = { ...record.attrs, ...prior.attrs };
+        record.modLocation = prior.modLocation;
+      }
       record.fresh = prior.fresh; // don't re-flash the "fresh mint" state
       if (!receivedTxo) {
         record.spent = prior.spent;

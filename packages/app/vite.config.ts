@@ -19,7 +19,11 @@ import path from "path";
  * These headers are only active during `vite dev` and `vite preview`.
  * They MUST also be set in the production web server config (Nginx/Caddy/etc.).
  */
-import { SECURITY_HEADERS, CAPACITOR_CSP } from "./src/config/csp";
+import {
+  SECURITY_HEADERS,
+  CAPACITOR_CSP,
+  CONTENT_SECURITY_POLICY,
+} from "./src/config/csp";
 
 // Capacitor native build (set by the `build:mobile` script). When true we:
 //   1. Drop the PWA service worker — it caches stale assets and misbehaves
@@ -47,25 +51,53 @@ function capacitorCspPlugin() {
   };
 }
 
-// When driving the dev server over HTTP (HTTP_DEV=1), drop the Content-
-// Security-Policy header entirely. The production CSP (canonical in
-// src/config/csp.ts) is unchanged — this only affects the local dev/preview
-// servers. Two reasons we drop it rather than soften it:
-//   1. `upgrade-insecure-requests` forces every asset to https://127.0.0.1,
-//      which fails (no cert) and silently white-screens the app.
-//   2. `script-src 'self'` blocks Vite's React Fast Refresh inline preamble,
-//      which the React plugin requires — without it you get
-//      "@vitejs/plugin-react can't detect preamble" and the app aborts.
+const isHttpDev = process.env.HTTP_DEV === "1";
+
+/**
+ * Rewrite the canonical CSP for a local server. Production is untouched — the
+ * policy in src/config/csp.ts (and its tauri/_headers twins) is what ships;
+ * this only softens the headers Vite itself serves.
+ *
+ * `relaxForVite` is for `vite dev`, which CANNOT run under the production
+ * policy:
+ *   - `script-src 'self'` blocks the React Fast Refresh preamble the React
+ *     plugin injects inline into index.html — you get "@vitejs/plugin-react
+ *     can't detect preamble", the entry module aborts, and boot-recovery.js
+ *     shows the "Photonic Wallet failed to load" screen. This bites over
+ *     HTTPS too, so it can't be conditioned on HTTP_DEV.
+ *   - HMR talks over a ws:/wss: socket that `connect-src` doesn't list.
+ * `vite preview` serves the real build (no preamble, no HMR) and so keeps the
+ * production policy verbatim — which is the point of previewing.
+ *
+ * Dropping `upgrade-insecure-requests` is the HTTP_DEV case for both servers:
+ * it forces every asset to https://127.0.0.1, which fails with no cert and
+ * silently white-screens the app.
+ */
+function localCsp({ relaxForVite }: { relaxForVite: boolean }): string {
+  return CONTENT_SECURITY_POLICY.split("; ")
+    .filter((directive) => !(isHttpDev && directive === "upgrade-insecure-requests"))
+    .map((directive) => {
+      if (!relaxForVite) return directive;
+      // The preamble is inline; react-refresh + dep-optimizer sourcemaps eval.
+      if (directive.startsWith("script-src "))
+        return `${directive} 'unsafe-inline' 'unsafe-eval'`;
+      // HMR socket. Unscoped ws:/wss: because the dev server is routinely
+      // reached by LAN IP or hostname, not just localhost.
+      if (directive.startsWith("connect-src ")) return `${directive} ws: wss:`;
+      return directive;
+    })
+    .join("; ");
+}
+
+const localHeaders = (relaxForVite: boolean): Record<string, string> => ({
+  ...SECURITY_HEADERS,
+  "Content-Security-Policy": localCsp({ relaxForVite }),
+});
+
 // The other security headers (X-Frame-Options etc.) stay on for parity with
 // production.
-const DEV_SERVER_HEADERS: Record<string, string> =
-  process.env.HTTP_DEV === "1"
-    ? Object.fromEntries(
-        Object.entries(SECURITY_HEADERS).filter(
-          ([k]) => k !== "Content-Security-Policy",
-        ),
-      )
-    : SECURITY_HEADERS;
+const DEV_SERVER_HEADERS = localHeaders(true);
+const PREVIEW_SERVER_HEADERS = localHeaders(false);
 
 export default defineConfig({
   base: "./",
@@ -73,7 +105,7 @@ export default defineConfig({
     headers: DEV_SERVER_HEADERS,
   },
   preview: {
-    headers: DEV_SERVER_HEADERS,
+    headers: PREVIEW_SERVER_HEADERS,
   },
   build: {
     chunkSizeWarningLimit: 2000,
