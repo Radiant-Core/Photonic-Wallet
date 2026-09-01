@@ -7,8 +7,10 @@
  * (the verifier the dApp/indexer actually runs), and every failure mode
  * (tamper, wrong address, malformed sig, control chars) must behave safely.
  *
- * NOTE: `Message.sign` is NON-deterministic (random k). Tests therefore assert
- * *verification*, never byte-equality of two signatures.
+ * NOTE: `Message.sign` derives `k` per RFC 6979, so it is deterministic in
+ * practice. Tests still assert *verification* rather than byte-equality, because
+ * the contract a dApp relies on is that a signature verifies - not that a
+ * particular byte string comes back.
  */
 import { it, expect, describe } from "vitest";
 import rjs from "@radiant-core/radiantjs";

@@ -26,9 +26,11 @@
  *      and gating on explicit, per-request approval.
  *
  * The returned signature is a base64 compact recoverable signature, byte-for-
- * byte what `Message.sign` produces and `Message.verify` consumes. Signing is
- * NON-deterministic (random k), so two signatures over the same message
- * differ; both verify.
+ * byte what `Message.sign` produces and `Message.verify` consumes. `k` is
+ * derived per RFC 6979 (`ECDSA.deterministicK`), so the same key and message
+ * produce the same bytes every time; `signRandomK` exists in radiantjs but
+ * this path does not use it. Verifiers must not rely on that either way -
+ * identify a signature by what it recovers to, never by its bytes.
  */
 import rjs from "@radiant-core/radiantjs";
 

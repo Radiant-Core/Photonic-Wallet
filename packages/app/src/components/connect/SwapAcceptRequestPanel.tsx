@@ -27,6 +27,7 @@ import { previewSwapAccept, type SwapAcceptPreview } from "@app/connect/swapFlow
 import { electrumStatus } from "@app/signals";
 import { ElectrumStatus } from "@app/types";
 import type { SwapAcceptRequest } from "@app/connect/protocol";
+import { sanitizeForDisplay } from "@lib/displayText";
 
 export default function SwapAcceptRequestPanel({
   request,
@@ -98,8 +99,8 @@ export default function SwapAcceptRequestPanel({
               Requested by
             </Text>
             <Text fontSize="sm" wordBreak="break-all">
-              {request.app ? `${request.app} — ` : ""}
-              {request.origin ?? "(no origin provided)"}
+              {request.app ? `${sanitizeForDisplay(request.app)} — ` : ""}
+              {request.origin ? sanitizeForDisplay(request.origin) : "(no origin provided)"}
             </Text>
           </Box>
         ) : (
@@ -216,7 +217,7 @@ export default function SwapAcceptRequestPanel({
         {autoReturn && (
           <Text textStyle="small" mt={3}>
             After approving you will be sent back to{" "}
-            {request.app || "the app"} at <b>{request.origin}</b>, which
+            {request.app ? sanitizeForDisplay(request.app) : "the app"} at <b>{sanitizeForDisplay(request.origin ?? "")}</b>, which
             receives the result automatically.
           </Text>
         )}
