@@ -7,6 +7,7 @@
  */
 import rjs from "@radiant-core/radiantjs";
 import { Buffer } from "buffer";
+import { readDataOutput, type DataOutput } from "../dataOutput";
 import { MAX_REASONABLE_FEE_RATE } from "../feePolicy";
 import { transactionFromHex } from "../rjsCompat";
 import {
@@ -51,6 +52,14 @@ export type PsbtOutputSummary = {
   address?: string;
   mine: boolean;
   tokenBearing: boolean;
+  /**
+   * Present when this output is an `OP_RETURN` data carrier.
+   *
+   * A data output pays nobody, so its value says nothing; the payload is the
+   * whole of what it does, and it is permanent. Described rather than
+   * interpreted - see ../dataOutput.
+   */
+  data?: DataOutput;
 };
 
 export type PsbtAnalysis = {
@@ -95,6 +104,7 @@ export function analyzePsbt(psbt: Psbt, ctx?: AnalyzeContext): PsbtAnalysis {
 
   const outputs: PsbtOutputSummary[] = tx.outputs.map((o) => {
     const script = o.script.toHex();
+    const data = readDataOutput(script);
     return {
       script,
       // BN → string → bigint keeps values beyond 2^53 exact.
@@ -102,6 +112,7 @@ export function analyzePsbt(psbt: Psbt, ctx?: AnalyzeContext): PsbtAnalysis {
       address: scriptToAddress(script, net),
       mine: ownScripts.has(script),
       tokenBearing: isTokenBearing(script),
+      ...(data === undefined ? {} : { data }),
     };
   });
   const totalOut = outputs.reduce((sum, o) => sum + o.value, 0n);

@@ -43,6 +43,8 @@ export {
 } from "./wave";
 export * from "./crypto";
 export * from "./sign";
+export * from "./displayText";
+export * from "./dataOutput";
 export * from "./encryption";
 export * from "./timelock";
 export * from "./reveal";
