@@ -59,6 +59,7 @@ import { p2pkhScript } from "@lib/script";
 import { photonsToRXD } from "@lib/format";
 import { transferRadiant } from "@lib/transfer";
 import type { SelectableInput } from "@lib/coinSelect";
+import { sanitizeForDisplay } from "@lib/displayText";
 import { useLiveQuery } from "dexie-react-hooks";
 import { isNativePlatform } from "@app/platform";
 import {
@@ -420,10 +421,10 @@ export default function SignTxAction() {
       <Card2 p={6} mb={4}>
         <Box mb={4}>
           <Text textStyle="label" mb={1}>Signing for</Text>
-          <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">{req.origin}</Code>
+          <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">{sanitizeForDisplay(req.origin ?? "")}</Code>
           <Text color="text.muted" fontSize="xs" mt={1}>
             Any website can open this screen. Only continue if you just started this send
-            on {req.origin}.
+            on {sanitizeForDisplay(req.origin ?? "")}.
           </Text>
         </Box>
         <Box mb={4}>

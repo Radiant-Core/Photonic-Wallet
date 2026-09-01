@@ -81,6 +81,7 @@ import {
 import { withSwapWif, withWif } from "@app/wallet";
 import { signMessageWithWif } from "@lib/sign";
 import { PsbtError, psbtFromBase64, type Psbt } from "@lib/psbt";
+import { hasUnsafeDisplayChars, sanitizeForDisplay } from "@lib/displayText";
 import {
   buildCallbackUrl,
   buildErrorCallbackUrl,
@@ -776,6 +777,13 @@ function RequestPanel({
   onReject: () => void;
 }) {
   const recognized = isRecognizedConnectChallenge(request.challenge);
+  // Bidi overrides and invisible characters can make this screen read as one
+  // thing while the signature covers another. They are replaced below; this
+  // says so, because a silently cleaned string is still a lie by omission.
+  const hiddenFormatting =
+    hasUnsafeDisplayChars(request.challenge) ||
+    hasUnsafeDisplayChars(request.app ?? "") ||
+    hasUnsafeDisplayChars(request.origin ?? "");
   const addressMismatch =
     !!request.address && request.address !== signerAddress;
 
@@ -811,8 +819,8 @@ function RequestPanel({
               Requested by
             </Text>
             <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
-              {request.app ? `${request.app} — ` : ""}
-              {request.origin ?? "(no origin provided)"}
+              {request.app ? `${sanitizeForDisplay(request.app)} — ` : ""}
+              {request.origin ? sanitizeForDisplay(request.origin) : "(no origin provided)"}
             </Code>
           </Box>
         ) : (
@@ -839,6 +847,21 @@ function RequestPanel({
           </Alert>
         )}
 
+        {hiddenFormatting && (
+          <Alert status="warning" mb={4} borderRadius="lg">
+            <AlertIcon />
+            <Box>
+              <AlertTitle fontSize="sm">Contains hidden formatting</AlertTitle>
+              <AlertDescription fontSize="sm">
+                This request contains characters that can hide or reorder text
+                on screen. They are shown as {"\uFFFD"} below. Read what you are
+                signing carefully, and reject it if it does not look like what
+                you expected.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        )}
+
         <Text textStyle="label" mb={1}>
           Message to sign
         </Text>
@@ -851,7 +874,7 @@ function RequestPanel({
           whiteSpace="pre-wrap"
           wordBreak="break-all"
         >
-          {request.challenge}
+          {sanitizeForDisplay(request.challenge)}
         </Code>
 
         <Text textStyle="label" mb={1}>
@@ -874,8 +897,8 @@ function RequestPanel({
 
         {autoReturn && (
           <Text textStyle="small" mt={4}>
-            After signing you will be sent back to {request.app || "the app"} at{" "}
-            <b>{request.origin}</b>, which receives your address and signature
+            After signing you will be sent back to {request.app ? sanitizeForDisplay(request.app) : "the app"} at{" "}
+            <b>{sanitizeForDisplay(request.origin ?? "")}</b>, which receives your address and signature
             automatically.
           </Text>
         )}

@@ -24,9 +24,11 @@ import {
   Text,
   Button,
 } from "@chakra-ui/react";
+import { useState } from "react";
 import { MdCloudUpload, MdUndo, MdWarning } from "react-icons/md";
 import Card from "@app/components/Card";
 import { photonsToRXD } from "@lib/format";
+import { sanitizeForDisplay } from "@lib/displayText";
 import type { PsbtSignRequest } from "@app/connect/protocol";
 import type { EnrichedPsbt } from "@app/connect/psbtFlow";
 import type { PsbtInputSummary, PsbtOutputSummary } from "@lib/psbt";
@@ -95,6 +97,87 @@ function InputRow({
   );
 }
 
+/**
+ * What an `OP_RETURN` output actually carries.
+ *
+ * This output pays nobody and cannot be spent, so its 0 RXD says nothing about
+ * what approving it does. The payload is the whole of it, and it is permanent —
+ * which makes it the one thing on this screen most worth showing, and the thing
+ * that used to read only as "(non-standard output)".
+ *
+ * Described, never interpreted. The wallet does not claim to know what another
+ * application's bytes mean; it says how big they are, how they are structured,
+ * and which parts happen to be readable. Text is rendered through
+ * `sanitizeForDisplay` because it is supplied by the requesting app, and hex is
+ * always available beside it for anything the text form cannot be trusted with.
+ */
+function DataOutputDetail({ data }: { data: NonNullable<PsbtOutputSummary["data"]> }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Box>
+      <HStack spacing={2} mb={1}>
+        <Text fontSize="sm" fontWeight="medium">
+          Data output
+        </Text>
+        <Badge colorScheme="purple" fontSize="xs">
+          {data.size} bytes
+        </Badge>
+      </HStack>
+      <Text fontSize="xs" color="gray.400">
+        Publishes data permanently. Pays no one and can never be spent.
+      </Text>
+      <Button
+        size="xs"
+        variant="link"
+        mt={1}
+        onClick={() => setOpen((shown) => !shown)}
+      >
+        {open ? "Hide contents" : "Show contents"}
+      </Button>
+
+      {open && (
+        <Stack spacing={2} mt={2}>
+          {data.pushes ? (
+            data.pushes.map((push, index) => (
+              <Box key={index}>
+                {push.text !== undefined && (
+                  <Text fontSize="xs" wordBreak="break-all">
+                    {sanitizeForDisplay(push.text)}
+                  </Text>
+                )}
+                <Code
+                  display="block"
+                  fontSize="xs"
+                  p={1}
+                  borderRadius="md"
+                  wordBreak="break-all"
+                >
+                  {push.hex}
+                </Code>
+              </Box>
+            ))
+          ) : (
+            <Code
+              display="block"
+              fontSize="xs"
+              p={1}
+              borderRadius="md"
+              wordBreak="break-all"
+            >
+              {data.payloadHex}
+            </Code>
+          )}
+          <Text fontSize="xs" color="gray.500">
+            Content supplied by the requesting app. Photonic shows it; it does
+            not vouch for what it means.
+          </Text>
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
 function OutputRow({ output }: { output: PsbtOutputSummary }) {
   return (
     <Flex
@@ -106,9 +189,13 @@ function OutputRow({ output }: { output: PsbtOutputSummary }) {
       gap={3}
     >
       <Box minW={0} flex={1}>
-        <Text fontSize="sm" noOfLines={1} title={output.script}>
-          {output.address ?? "(non-standard output)"}
-        </Text>
+        {output.data ? (
+          <DataOutputDetail data={output.data} />
+        ) : (
+          <Text fontSize="sm" noOfLines={1} title={output.script}>
+            {output.address ?? "(unrecognised script)"}
+          </Text>
+        )}
         {output.mine && (
           <Badge colorScheme="green" fontSize="xs" mt={1}>
             To your wallet
@@ -184,8 +271,8 @@ export default function PsbtRequestPanel({
               Requested by
             </Text>
             <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
-              {request.app ? `${request.app} — ` : ""}
-              {request.origin ?? "(no origin provided)"}
+              {request.app ? `${sanitizeForDisplay(request.app)} — ` : ""}
+              {request.origin ? sanitizeForDisplay(request.origin) : "(no origin provided)"}
             </Code>
           </Box>
         ) : (
@@ -288,7 +375,7 @@ export default function PsbtRequestPanel({
         {autoReturn && (
           <Text textStyle="small" mt={2}>
             After approving you will be sent back to{" "}
-            {request.app || "the app"} at <b>{request.origin}</b>, which
+            {request.app ? sanitizeForDisplay(request.app) : "the app"} at <b>{sanitizeForDisplay(request.origin ?? "")}</b>, which
             receives the result automatically.
           </Text>
         )}

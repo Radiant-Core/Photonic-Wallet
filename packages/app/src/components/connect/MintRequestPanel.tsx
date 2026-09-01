@@ -30,6 +30,7 @@ import Card from "@app/components/Card";
 import { feeRate as feeRateSignal } from "@app/signals";
 import { embeddableContentBytes } from "@app/svgSanitize";
 import type { MintRequest } from "@app/connect/protocol";
+import { sanitizeForDisplay } from "@lib/displayText";
 
 /**
  * Data URL for the preview, built from the bytes that will actually be
@@ -137,8 +138,8 @@ export default function MintRequestPanel({
               Requested by
             </Text>
             <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">
-              {request.app ? `${request.app} — ` : ""}
-              {request.origin ?? "(no origin provided)"}
+              {request.app ? `${sanitizeForDisplay(request.app)} — ` : ""}
+              {request.origin ? sanitizeForDisplay(request.origin) : "(no origin provided)"}
             </Code>
           </Box>
         ) : (
@@ -248,7 +249,7 @@ export default function MintRequestPanel({
         {autoReturn && (
           <Text textStyle="small" mt={2}>
             After approving you will be sent back to{" "}
-            {request.app || "the app"} at <b>{request.origin}</b>, which
+            {request.app ? sanitizeForDisplay(request.app) : "the app"} at <b>{sanitizeForDisplay(request.origin ?? "")}</b>, which
             receives the result automatically.
           </Text>
         )}

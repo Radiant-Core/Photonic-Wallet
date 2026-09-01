@@ -83,6 +83,7 @@ import { isNonceConsumed, consumeNonce } from "@app/connect/consumedNonces";
 import SignTxAction from "@app/pages/SignTxAction";
 import type { SelectableInput } from "@lib/coinSelect";
 import type { UnfinalizedInput } from "@lib/types";
+import { sanitizeForDisplay } from "@lib/displayText";
 
 const DEV = import.meta.env.DEV === true;
 /** Bound both API fetches; a hung request must not hold a spend page open. */
@@ -576,10 +577,10 @@ function SignCoreAction() {
               verify a page there initiated it. `origin` is attacker-writable, so
               "requested by" would assert provenance we can't prove. */}
           <Text textStyle="label" mb={1}>Signing for</Text>
-          <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">{req.origin}</Code>
+          <Code w="100%" p={2} borderRadius="md" wordBreak="break-all">{sanitizeForDisplay(req.origin ?? "")}</Code>
           <Text color="text.muted" fontSize="xs" mt={1}>
             Any website can open this screen. Only continue if you just started this
-            action on {req.origin}.
+            action on {sanitizeForDisplay(req.origin ?? "")}.
           </Text>
         </Box>
         <Box mb={4}>
