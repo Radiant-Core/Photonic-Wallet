@@ -65,6 +65,8 @@ import PsbtRequestPanel from "@app/components/connect/PsbtRequestPanel";
 import PsbtResultPanel from "@app/components/connect/PsbtResultPanel";
 import MintRequestPanel from "@app/components/connect/MintRequestPanel";
 import MintResultPanel from "@app/components/connect/MintResultPanel";
+import AnchorRequestPanel from "@app/components/connect/AnchorRequestPanel";
+import AnchorResultPanel from "@app/components/connect/AnchorResultPanel";
 import SwapOfferRequestPanel from "@app/components/connect/SwapOfferRequestPanel";
 import SwapOfferResultPanel from "@app/components/connect/SwapOfferResultPanel";
 import SwapAcceptRequestPanel from "@app/components/connect/SwapAcceptRequestPanel";
@@ -85,6 +87,8 @@ import { hasUnsafeDisplayChars, sanitizeForDisplay } from "@lib/displayText";
 import {
   buildCallbackUrl,
   buildErrorCallbackUrl,
+  buildAnchorCallbackUrl,
+  buildAnchorResult,
   buildMintCallbackUrl,
   buildMintResult,
   buildPsbtCallbackUrl,
@@ -103,6 +107,8 @@ import {
   parseCanonDeclaration,
   parseConnectRequest,
   type ConnectErrorCode,
+  type AnchorRequest,
+  type AnchorResult,
   type MintRequest,
   type MintResult,
   type PsbtSignRequest,
@@ -118,6 +124,7 @@ import {
 } from "@app/connect/protocol";
 import { enrichPsbt, signAndMaybeBroadcast, type EnrichedPsbt } from "@app/connect/psbtFlow";
 import { mintFromRequest } from "@app/connect/mintFlow";
+import { anchorFromRequest } from "@app/connect/anchorFlow";
 import { acceptSwapOffer, cancelSwapOffer, createSwapOffer } from "@app/connect/swapFlow";
 
 /**
@@ -147,6 +154,8 @@ export default function Connect() {
   const [psbtBusy, setPsbtBusy] = useState(false);
   const [mintResult, setMintResult] = useState<MintResult | null>(null);
   const [mintBusy, setMintBusy] = useState(false);
+  const [anchorResult, setAnchorResult] = useState<AnchorResult | null>(null);
+  const [anchorBusy, setAnchorBusy] = useState(false);
   const [swapOfferResult, setSwapOfferResult] = useState<SwapOfferResult | null>(null);
   const [swapOfferBusy, setSwapOfferBusy] = useState(false);
   const [swapAcceptResult, setSwapAcceptResult] = useState<SwapAcceptResult | null>(null);
@@ -467,6 +476,47 @@ export default function Connect() {
     [toast, fromDeepLink, fireConnectError]
   );
 
+  const anchorSign = useCallback(
+    async (req: AnchorRequest) => {
+      setAnchorBusy(true);
+      try {
+        const outcomePromise = withWif((wif) =>
+          anchorFromRequest(req, wif, wallet.value.address)
+        );
+        if (!outcomePromise) {
+          toast({
+            status: "error",
+            title: "Wallet is locked — unable to anchor",
+          });
+          fireConnectError(req, "locked", "Wallet is locked — unable to anchor");
+          return;
+        }
+        const outcome = await outcomePromise;
+        const anchorResultValue = buildAnchorResult(req, outcome);
+        setAnchorResult(anchorResultValue);
+
+        // Same dry-run rule as minting: only navigate away when something
+        // was actually sent.
+        const callbackUrl =
+          outcome.broadcast && canAutoReturn(fromDeepLink)
+            ? buildAnchorCallbackUrl(req, anchorResultValue)
+            : undefined;
+        if (callbackUrl) window.location.assign(callbackUrl);
+      } catch (err) {
+        toast({
+          status: "error",
+          title: "Unable to anchor",
+          description: err instanceof Error ? err.message : String(err),
+        });
+        const { code, message } = classifyConnectError(err);
+        fireConnectError(req, code, message);
+      } finally {
+        setAnchorBusy(false);
+      }
+    },
+    [toast, fromDeepLink, fireConnectError]
+  );
+
   const onApprove = useCallback(() => {
     if (!request) return;
     const doSign = () => {
@@ -485,6 +535,8 @@ export default function Connect() {
         else release();
       } else if (request.t === "mint-request") {
         void mintSign(request).finally(release);
+      } else if (request.t === "anchor-request") {
+        void anchorSign(request).finally(release);
       } else if (request.t === "swap-offer-request") {
         void swapOfferSign(request).finally(release);
       } else if (request.t === "swap-accept-request") {
@@ -516,6 +568,7 @@ export default function Connect() {
     psbtSign,
     psbtParse,
     mintSign,
+    anchorSign,
     swapOfferSign,
     swapAcceptSign,
     swapCancelSign,
@@ -527,6 +580,7 @@ export default function Connect() {
     setPsbtResult(null);
     setEnriched(null);
     setMintResult(null);
+    setAnchorResult(null);
     setSwapOfferResult(null);
     setSwapAcceptResult(null);
     setSwapCancelResult(null);
@@ -553,6 +607,7 @@ export default function Connect() {
 
   const isPsbtRequest = request?.t === "psbt-sign-request";
   const isMintRequest = request?.t === "mint-request";
+  const isAnchorRequest = request?.t === "anchor-request";
   const isSwapOfferRequest = request?.t === "swap-offer-request";
   const isSwapAcceptRequest = request?.t === "swap-accept-request";
   const isSwapCancelRequest = request?.t === "swap-cancel-request";
@@ -567,6 +622,8 @@ export default function Connect() {
           ? "Review and approve a transaction an app is asking you to sign."
           : isMintRequest
           ? "Review and approve an NFT an app is asking you to mint."
+          : isAnchorRequest
+          ? "Review and approve publishing a signed declaration on-chain."
           : isSwapOfferRequest
           ? "Review and approve listing an item for sale."
           : isSwapAcceptRequest
@@ -623,6 +680,15 @@ export default function Connect() {
           locked={locked}
           autoReturn={!!request.callback && canAutoReturn(fromDeepLink)}
           busy={mintBusy}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      ) : anchorResult ? (
+        <AnchorResultPanel result={anchorResult} onDone={reset} />
+      ) : request?.t === "anchor-request" ? (
+        <AnchorRequestPanel
+          request={request}
+          busy={anchorBusy}
           onApprove={onApprove}
           onReject={onReject}
         />

@@ -10,6 +10,9 @@ import {
   parseConnectRequest,
   isRecognizedConnectChallenge,
   parseCanonDeclaration,
+  canonDeclarationFromDocument,
+  buildAnchorResult,
+  buildAnchorCallbackUrl,
   buildCallbackUrl,
   buildSignResult,
   encodeSignResult,
@@ -1668,5 +1671,78 @@ describe("parseCanonDeclaration", () => {
     expect(parsed!.comment).toBe("a|b");
     // The nonce slot echoes just the network — short and harmless.
     expect(extractChallengeNonce(V2)).toBe("radiant-mainnet");
+  });
+});
+
+describe("anchor-request", () => {
+  const REF2 = "cd".repeat(32) + "00000000";
+  const DOC = JSON.stringify({
+    format: "canon-declaration",
+    version: 2,
+    network: "radiant-mainnet",
+    signer: "14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i",
+    declares: [{ kind: "creator", ref: REF2, label: "CraigD Profile" }],
+    issuedAt: "2026-09-02T14:43:29.677Z",
+    signature: "IF9v",
+  });
+
+  it("canonDeclarationFromDocument rebuilds the v2 challenge", () => {
+    const out = canonDeclarationFromDocument(DOC);
+    expect(out).toBeDefined();
+    expect(out!.challenge).toBe(
+      "canon-declaration:wallet-connect:v2:radiant-mainnet:" +
+        "signer=14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i|issued=2026-09-02T14:43:29.677Z|" +
+        `expires=never|declares=creator:${REF2}:CraigD%20Profile|revokes=-|comment=-`
+    );
+    expect(out!.declaration.version).toBe(2);
+    expect(out!.signature).toBe("IF9v");
+  });
+
+  it("rejects malformed documents", () => {
+    expect(canonDeclarationFromDocument("{not json")).toBeUndefined();
+    expect(canonDeclarationFromDocument(DOC.replace('"version":2', '"version":3'))).toBeUndefined();
+    expect(canonDeclarationFromDocument(DOC.replace(REF2, "beef"))).toBeUndefined();
+    expect(canonDeclarationFromDocument(DOC.replace('"signature":"IF9v"', '"signature":5'))).toBeUndefined();
+  });
+
+  it("envelope round-trips through parseConnectRequest", () => {
+    const parsed = parseConnectRequest(
+      JSON.stringify({
+        protocol: "photonic-connect",
+        v: 1,
+        t: "anchor-request",
+        document: DOC,
+        origin: "https://canon.rxd.zone",
+        callback: "https://canon.rxd.zone/declaration",
+      })
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.request.t).toBe("anchor-request");
+    if (parsed.request.t !== "anchor-request") return;
+    expect(parsed.request.document).toBe(DOC);
+    expect(parsed.request.broadcast).toBe(true);
+    expect(parsed.request.callback).toBe("https://canon.rxd.zone/declaration");
+  });
+
+  it("refuses an envelope whose document is not a signed declaration", () => {
+    const parsed = parseConnectRequest(
+      JSON.stringify({ protocol: "photonic-connect", v: 1, t: "anchor-request", document: "{}" })
+    );
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("builds results and callback URLs", () => {
+    const result = buildAnchorResult(
+      { id: "x1" },
+      { broadcast: true, docHash: "ab".repeat(32), commitTxid: "11".repeat(32), revealTxid: "22".repeat(32) }
+    );
+    expect(result.t).toBe("anchor-result");
+    const url = buildAnchorCallbackUrl(
+      { callback: "https://canon.rxd.zone/declaration" },
+      result
+    );
+    expect(url).toContain("#id=x1&broadcast=true&docHash=");
+    expect(url).toContain("revealTxid=" + "22".repeat(32));
   });
 });
