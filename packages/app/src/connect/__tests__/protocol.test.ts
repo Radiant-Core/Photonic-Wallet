@@ -9,6 +9,7 @@ import {
   parseSignRequest,
   parseConnectRequest,
   isRecognizedConnectChallenge,
+  parseCanonDeclaration,
   buildCallbackUrl,
   buildSignResult,
   encodeSignResult,
@@ -1592,5 +1593,80 @@ describe("buildErrorCallbackUrl", () => {
       { code: "unknown", message: "x".repeat(MAX_CALLBACK_URL_LEN) }
     );
     expect(url).toBeUndefined();
+  });
+});
+
+describe("parseCanonDeclaration", () => {
+  const REF = "ab".repeat(32) + "00000000";
+  const MSG =
+    "canon-declaration|v1|radiant-mainnet|signer=14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i|" +
+    "issued=2026-09-02T14:43:29.677Z|expires=2027-12-31T00:00:00.000Z|" +
+    `declares=creator:${REF}:CraigD%20Profile|revokes=-|comment=-`;
+
+  it("parses the canonical single-line message", () => {
+    const parsed = parseCanonDeclaration(MSG);
+    expect(parsed).toBeDefined();
+    expect(parsed!.version).toBe(1);
+    expect(parsed!.network).toBe("radiant-mainnet");
+    expect(parsed!.signer).toBe("14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i");
+    expect(parsed!.declares).toEqual([
+      { kind: "creator", ref: REF, label: "CraigD Profile" },
+    ]);
+    expect(parsed!.revokes).toEqual([]);
+    expect(parsed!.expires).toBe("2027-12-31T00:00:00.000Z");
+    expect(parsed!.comment).toBeUndefined();
+  });
+
+  it("keeps the terminal comment whole, pipes included", () => {
+    const parsed = parseCanonDeclaration(
+      MSG.replace("comment=-", "comment=a|b|c")
+    );
+    expect(parsed!.comment).toBe("a|b|c");
+  });
+
+  it("parses revocations and no-expiry", () => {
+    const parsed = parseCanonDeclaration(
+      "canon-declaration|v1|radiant-mainnet|signer=14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i|" +
+        "issued=2026-09-02T14:43:29.677Z|expires=never|declares=|" +
+        `revokes=${REF}|comment=-`
+    );
+    expect(parsed!.declares).toEqual([]);
+    expect(parsed!.revokes).toEqual([REF]);
+    expect(parsed!.expires).toBeUndefined();
+  });
+
+  it("rejects everything that is not the exact shape", () => {
+    expect(parseCanonDeclaration("just some text")).toBeUndefined();
+    expect(parseCanonDeclaration("")).toBeUndefined();
+    // Wrong magic, missing fields, bad kind, bad ref, empty document.
+    expect(parseCanonDeclaration(MSG.replace("canon-declaration", "canon"))).toBeUndefined();
+    expect(parseCanonDeclaration(MSG.replace("|revokes=-", ""))).toBeUndefined();
+    expect(parseCanonDeclaration(MSG.replace("creator:", "owner:"))).toBeUndefined();
+    expect(parseCanonDeclaration(MSG.replace(REF, "ff".repeat(10)))).toBeUndefined();
+    expect(
+      parseCanonDeclaration(MSG.replace(`declares=creator:${REF}:CraigD%20Profile`, "declares="))
+    ).toBeUndefined();
+    // A recognized wallet-connect challenge is not a declaration.
+    expect(
+      parseCanonDeclaration("glyphgalaxy:wallet-connect:v1:sess:nonce")
+    ).toBeUndefined();
+  });
+
+  it("v1 is display-recognition only; v2 also matches the connect badge", () => {
+    expect(isRecognizedConnectChallenge(MSG)).toBe(false);
+    expect(parseCanonDeclaration(MSG)).toBeDefined();
+    const V2 =
+      "canon-declaration:wallet-connect:v2:radiant-mainnet:" +
+      "signer=14XmXG3dSBWZUukGT3xzS9zxpiZ53vgx1i|issued=2026-09-02T14:43:29.677Z|" +
+      `expires=never|declares=creator:${REF}:CraigD%20Profile|revokes=-|comment=a|b`;
+    expect(isRecognizedConnectChallenge(V2)).toBe(true);
+    const parsed = parseCanonDeclaration(V2);
+    expect(parsed).toBeDefined();
+    expect(parsed!.version).toBe(2);
+    expect(parsed!.declares[0]!.label).toBe("CraigD Profile");
+    expect(parsed!.expires).toBeUndefined();
+    expect(parsed!.comment).toBe("a|b");
+    // The nonce slot echoes just the network — short and harmless.
+    expect(extractChallengeNonce(V2)).toBe("radiant-mainnet");
   });
 });

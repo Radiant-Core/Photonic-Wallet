@@ -100,6 +100,7 @@ import {
   classifyConnectError,
   encodeSignResult,
   isRecognizedConnectChallenge,
+  parseCanonDeclaration,
   parseConnectRequest,
   type ConnectErrorCode,
   type MintRequest,
@@ -777,6 +778,10 @@ function RequestPanel({
   onReject: () => void;
 }) {
   const recognized = isRecognizedConnectChallenge(request.challenge);
+  // A Canon creator declaration (canon.rxd.zone): a format this wallet
+  // understands, rendered structured below so the signer sees WHAT they are
+  // declaring. Display-only — the signature still covers the raw challenge.
+  const canonDeclaration = parseCanonDeclaration(request.challenge);
   // Bidi overrides and invisible characters can make this screen read as one
   // thing while the signature covers another. They are replaced below; this
   // says so, because a silently cleaned string is still a lie by omission.
@@ -792,7 +797,16 @@ function RequestPanel({
       <Card p={5}>
         <Flex align="center" justify="space-between" mb={4}>
           <Text textStyle="label">Signature request</Text>
-          {recognized ? (
+          {canonDeclaration ? (
+            <Badge
+              colorScheme="green"
+              display="flex"
+              alignItems="center"
+              gap={1}
+            >
+              <MdVerifiedUser /> Canon declaration
+            </Badge>
+          ) : recognized ? (
             <Badge
               colorScheme="green"
               display="flex"
@@ -833,7 +847,7 @@ function RequestPanel({
           </Alert>
         )}
 
-        {!recognized && (
+        {!recognized && !canonDeclaration && (
           <Alert status="warning" mb={4} borderRadius="lg">
             <AlertIcon />
             <Box>
@@ -845,6 +859,62 @@ function RequestPanel({
               </AlertDescription>
             </Box>
           </Alert>
+        )}
+
+        {canonDeclaration && (
+          <Box mb={4}>
+            <Text textStyle="label" mb={1}>
+              You are declaring
+            </Text>
+            <Stack
+              spacing={2}
+              p={3}
+              borderRadius="md"
+              borderWidth="1px"
+              fontSize="sm"
+            >
+              {canonDeclaration.declares.map((entry) => (
+                <Box key={entry.kind + entry.ref}>
+                  <Text>
+                    This key recognizes the{" "}
+                    <b>{entry.kind === "container" ? "collection" : "creator token"}</b>
+                    {entry.label
+                      ? ` “${sanitizeForDisplay(entry.label)}”`
+                      : ""}
+                  </Text>
+                  <Code fontSize="xs" wordBreak="break-all">
+                    {entry.ref}
+                  </Code>
+                </Box>
+              ))}
+              {canonDeclaration.revokes.map((ref) => (
+                <Box key={ref}>
+                  <Text>
+                    This key <b>withdraws recognition</b> of
+                  </Text>
+                  <Code fontSize="xs" wordBreak="break-all">
+                    {ref}
+                  </Code>
+                </Box>
+              ))}
+              <Text color="gray.400" fontSize="xs">
+                Network {sanitizeForDisplay(canonDeclaration.network)} · dated{" "}
+                {sanitizeForDisplay(canonDeclaration.issued)} ·{" "}
+                {canonDeclaration.expires
+                  ? `expires ${sanitizeForDisplay(canonDeclaration.expires)}`
+                  : "no expiry"}
+              </Text>
+              {canonDeclaration.comment ? (
+                <Text color="gray.400" fontSize="xs">
+                  “{sanitizeForDisplay(canonDeclaration.comment)}”
+                </Text>
+              ) : null}
+              <Text color="gray.500" fontSize="xs">
+                Published declarations are permanent. The exact signed text is
+                shown below.
+              </Text>
+            </Stack>
+          </Box>
         )}
 
         {hiddenFormatting && (

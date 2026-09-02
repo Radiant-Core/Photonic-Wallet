@@ -958,6 +958,142 @@ export function isRecognizedConnectChallenge(challenge: string): boolean {
   return typeof challenge === "string" && CONNECT_CHALLENGE_RE.test(challenge);
 }
 
+// ---------------------------------------------------------------------------
+// Canon declarations (canon.rxd.zone)
+//
+// Canon's signed creator declarations arrive as sign-requests whose challenge
+// is the canonical single-line declaration message (canon.rxd docs/
+// DECLARATIONS.md). Recognizing the shape lets the approval screen show the
+// signer WHAT they are declaring — structured, not an opaque string — and
+// skip the "not a standard connect request" warning for a format this wallet
+// understands. Parsing here is display-only: the signature always covers the
+// raw challenge verbatim, and a challenge that fails this parser is simply
+// not a Canon declaration (never an error).
+// ---------------------------------------------------------------------------
+
+export type CanonDeclarationEntry = {
+  kind: "container" | "creator";
+  /** 72-hex display-form ref. */
+  ref: string;
+  /** Decoded label — UNTRUSTED display text; sanitize before rendering. */
+  label: string;
+};
+
+export type CanonDeclarationChallenge = {
+  version: number;
+  network: string;
+  signer: string;
+  issued: string;
+  /** ISO date-time, or undefined for `never`. */
+  expires?: string;
+  declares: CanonDeclarationEntry[];
+  revokes: string[];
+  /** UNTRUSTED display text; sanitize before rendering. */
+  comment?: string;
+};
+
+const CANON_REF_RE = /^[0-9a-f]{72}$/;
+const CANON_NETWORK_RE = /^[a-z0-9-]{1,32}$/;
+// Base58check P2PKH address shape (charset + length only; no checksum here —
+// display-side recognition, not validation).
+const CANON_SIGNER_RE = /^[1-9A-HJ-NP-Za-km-z]{26,35}$/;
+
+/**
+ * Parse a Canon declaration challenge, or return undefined for anything else.
+ *
+ * Both message versions are injective by construction (fixed field order,
+ * url-encoded labels, terminal comment):
+ *  - v1: `canon-declaration|v1|<network>|<body>` (pipe-delimited head)
+ *  - v2: `canon-declaration:wallet-connect:v2:<network>:<body>` — the
+ *    recognized connect-challenge shape, so v2 also earns the standard badge.
+ * The body is `signer=…|issued=…|expires=…|declares=kind:ref:label,…|
+ * revokes=…|comment=…`; the comment is TERMINAL and may itself contain `|`,
+ * so the split is bounded: five fixed fields, remainder = comment.
+ */
+export function parseCanonDeclaration(
+  challenge: string
+): CanonDeclarationChallenge | undefined {
+  if (typeof challenge !== "string" || challenge.length > MAX_MESSAGE_LENGTH) {
+    return undefined;
+  }
+  let version: number;
+  let network: string;
+  let body: string;
+  const v2 = /^canon-declaration:wallet-connect:v(\d{1,3}):([a-z0-9-]{1,32}):([\s\S]+)$/.exec(
+    challenge
+  );
+  if (v2) {
+    version = parseInt(v2[1] as string, 10);
+    network = v2[2] as string;
+    body = v2[3] as string;
+  } else {
+    const v1 = /^canon-declaration\|v(\d{1,3})\|([a-z0-9-]{1,32})\|([\s\S]+)$/.exec(challenge);
+    if (!v1) return undefined;
+    version = parseInt(v1[1] as string, 10);
+    network = v1[2] as string;
+    body = v1[3] as string;
+  }
+  if (!CANON_NETWORK_RE.test(network)) return undefined;
+
+  const parts = body.split("|");
+  if (parts.length < 6) return undefined;
+  const [signerF, issuedF, expiresF, declaresF, revokesF] = parts as [
+    string, string, string, string, string,
+  ];
+  const commentF = parts.slice(5).join("|");
+  if (!signerF.startsWith("signer=") || !issuedF.startsWith("issued=")) return undefined;
+  if (!expiresF.startsWith("expires=") || !declaresF.startsWith("declares=")) return undefined;
+  if (!revokesF.startsWith("revokes=") || !commentF.startsWith("comment=")) return undefined;
+
+  const signer = signerF.slice("signer=".length);
+  if (!CANON_SIGNER_RE.test(signer)) return undefined;
+  const issued = issuedF.slice("issued=".length);
+  if (Number.isNaN(Date.parse(issued))) return undefined;
+  const expiresRaw = expiresF.slice("expires=".length);
+  if (expiresRaw !== "never" && Number.isNaN(Date.parse(expiresRaw))) return undefined;
+
+  const declares: CanonDeclarationEntry[] = [];
+  const declaresRaw = declaresF.slice("declares=".length);
+  if (declaresRaw.length > 0) {
+    for (const entry of declaresRaw.split(",")) {
+      const fields = entry.split(":");
+      if (fields.length !== 3) return undefined;
+      const [kind, ref, encodedLabel] = fields as [string, string, string];
+      if (kind !== "container" && kind !== "creator") return undefined;
+      if (!CANON_REF_RE.test(ref)) return undefined;
+      let label: string;
+      try {
+        label = decodeURIComponent(encodedLabel);
+      } catch {
+        return undefined;
+      }
+      declares.push({ kind, ref, label });
+    }
+  }
+
+  const revokesRaw = revokesF.slice("revokes=".length);
+  const revokes: string[] = [];
+  if (revokesRaw !== "-") {
+    for (const ref of revokesRaw.split(",")) {
+      if (!CANON_REF_RE.test(ref)) return undefined;
+      revokes.push(ref);
+    }
+  }
+  if (declares.length === 0 && revokes.length === 0) return undefined;
+
+  const comment = commentF.slice("comment=".length);
+  return {
+    version,
+    network,
+    signer,
+    issued,
+    ...(expiresRaw !== "never" ? { expires: expiresRaw } : {}),
+    declares,
+    revokes,
+    ...(comment !== "-" ? { comment } : {}),
+  };
+}
+
 /** Build a {@link SignResult} from a request + a produced signature. */
 export function buildSignResult(
   req: Pick<SignRequest, "id">,
