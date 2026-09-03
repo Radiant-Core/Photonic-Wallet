@@ -141,6 +141,41 @@ export type PsbtSignResult = {
   complete: boolean;
 };
 
+export type AnchorRequest = {
+  protocol: typeof CONNECT_PROTOCOL;
+  v: typeof CONNECT_VERSION;
+  t: "anchor-request";
+  /**
+   * The SIGNED Canon declaration document, as the exact JSON string. The
+   * string's bytes are the anchor identity (docHash = sha256d("cnd1" + doc)),
+   * so it is carried and committed verbatim - never re-serialized.
+   */
+  document: string;
+  /** Override the wallet's current fee rate (photons/byte), if provided. */
+  feeRate?: number;
+  /** Only the literal `false` opts out of broadcasting - mint-request rules. */
+  broadcast?: boolean;
+  id?: string;
+  origin?: string;
+  app?: string;
+  callback?: string;
+};
+
+export type AnchorResult = {
+  protocol: typeof CONNECT_PROTOCOL;
+  v: typeof CONNECT_VERSION;
+  t: "anchor-result";
+  id?: string;
+  broadcast: boolean;
+  /** sha256d("cnd1" + document bytes), hex - the document's anchor identity. */
+  docHash: string;
+  commitTxid?: string;
+  revealTxid?: string;
+  /** Present when `broadcast: false` - nothing was sent. */
+  commitHex?: string;
+  revealHex?: string;
+};
+
 /** An embedded file: raw bytes carried inline, base64-encoded on the wire. */
 export type MintEmbeddedFile = {
   /** MIME type; must be one of {@link MINT_ALLOWED_MIME_TYPES}. */
@@ -309,6 +344,7 @@ export type SwapCancelResult = {
 export type ConnectRequest =
   | SignRequest
   | PsbtSignRequest
+  | AnchorRequest
   | MintRequest
   | SwapOfferRequest
   | SwapAcceptRequest
@@ -878,6 +914,159 @@ function normalizeSwapCancelEnvelope(obj: Record<string, unknown>): ParsedReques
   };
 }
 
+/** 16 KiB payload cap minus the 4-byte cnd1 magic (Canon anchor scanner cap). */
+export const MAX_ANCHOR_DOCUMENT_LEN = 16 * 1024 - 4;
+
+/**
+ * Validate a Canon declaration DOCUMENT (the JSON string an anchor-request
+ * carries) and rebuild its canonical signed message. Returns undefined for
+ * anything that is not a well-formed signed declaration - anchoring is
+ * permanent, so a document this wallet cannot understand end-to-end is never
+ * anchored. Signature verification happens in the flow (needs crypto); this
+ * is the pure part.
+ */
+export function canonDeclarationFromDocument(
+  json: string
+): { challenge: string; declaration: CanonDeclarationChallenge; signature: string } | undefined {
+  if (typeof json !== "string" || json.length > MAX_ANCHOR_DOCUMENT_LEN) return undefined;
+  let doc: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    doc = parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (doc.format !== "canon-declaration") return undefined;
+  const version = doc.version;
+  if (version !== 1 && version !== 2) return undefined;
+  if (typeof doc.network !== "string" || typeof doc.signer !== "string") return undefined;
+  if (typeof doc.issuedAt !== "string" || typeof doc.signature !== "string") return undefined;
+  if (!Array.isArray(doc.declares)) return undefined;
+
+  const declares: string[] = [];
+  for (const raw of doc.declares) {
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry?.kind !== "string" || typeof entry?.ref !== "string") return undefined;
+    const label = entry.label === undefined ? "" : entry.label;
+    if (typeof label !== "string") return undefined;
+    declares.push(`${entry.kind}:${entry.ref}:${encodeURIComponent(label)}`);
+  }
+  const revokesArr = doc.revokes === undefined ? [] : doc.revokes;
+  if (!Array.isArray(revokesArr) || revokesArr.some((r) => typeof r !== "string")) {
+    return undefined;
+  }
+  const revokes = revokesArr.length > 0 ? revokesArr.join(",") : "-";
+  const comment =
+    doc.comment === undefined || doc.comment === "" ? "-" : (doc.comment as unknown);
+  if (typeof comment !== "string") return undefined;
+  const expires = doc.expiresAt === undefined ? "never" : doc.expiresAt;
+  if (typeof expires !== "string") return undefined;
+
+  const body = [
+    `signer=${doc.signer}`,
+    `issued=${doc.issuedAt}`,
+    `expires=${expires}`,
+    `declares=${declares.join(",")}`,
+    `revokes=${revokes}`,
+    `comment=${comment}`,
+  ].join("|");
+  const challenge =
+    version === 1
+      ? ["canon-declaration", "v1", doc.network, body].join("|")
+      : `canon-declaration:wallet-connect:v2:${doc.network}:${body}`;
+
+  // The declaration parser is the single validation authority - the message
+  // must round-trip through it (refs, kinds, dates, signer shape).
+  const declaration = parseCanonDeclaration(challenge);
+  if (!declaration) return undefined;
+  if (challenge.length > MAX_MESSAGE_LENGTH || hasControlChars(challenge)) return undefined;
+  return { challenge, declaration, signature: doc.signature };
+}
+
+function normalizeAnchorEnvelope(obj: Record<string, unknown>): ParsedRequest {
+  const basicsErr = envelopeBasicsError(obj);
+  if (basicsErr) return { ok: false, error: basicsErr };
+
+  if (typeof obj.document !== "string") {
+    return { ok: false, error: "request is missing the declaration document" };
+  }
+  if (!canonDeclarationFromDocument(obj.document)) {
+    return {
+      ok: false,
+      error:
+        "document is not a well-formed signed Canon declaration - refusing (anchoring is permanent)",
+    };
+  }
+  if (obj.feeRate !== undefined) {
+    if (typeof obj.feeRate !== "number" || !Number.isFinite(obj.feeRate) || obj.feeRate <= 0) {
+      return { ok: false, error: "feeRate must be a positive number" };
+    }
+  }
+  const origin = cleanOrigin(obj.origin);
+  return {
+    ok: true,
+    request: {
+      protocol: CONNECT_PROTOCOL,
+      v: CONNECT_VERSION,
+      t: "anchor-request",
+      document: obj.document,
+      feeRate: typeof obj.feeRate === "number" ? obj.feeRate : undefined,
+      broadcast: obj.broadcast === false ? false : true,
+      id: cleanString(obj.id, MAX_ID_LEN),
+      origin,
+      app: cleanString(obj.app, MAX_LABEL_LEN),
+      callback: cleanCallback(obj.callback, origin),
+    },
+  };
+}
+
+export function buildAnchorResult(
+  req: Pick<AnchorRequest, "id">,
+  out: {
+    broadcast: boolean;
+    docHash: string;
+    commitTxid?: string;
+    revealTxid?: string;
+    commitHex?: string;
+    revealHex?: string;
+  }
+): AnchorResult {
+  return {
+    protocol: CONNECT_PROTOCOL,
+    v: CONNECT_VERSION,
+    t: "anchor-result",
+    ...(req.id ? { id: req.id } : {}),
+    broadcast: out.broadcast,
+    docHash: out.docHash,
+    ...(out.commitTxid !== undefined ? { commitTxid: out.commitTxid } : {}),
+    ...(out.revealTxid !== undefined ? { revealTxid: out.revealTxid } : {}),
+    ...(out.commitHex !== undefined ? { commitHex: out.commitHex } : {}),
+    ...(out.revealHex !== undefined ? { revealHex: out.revealHex } : {}),
+  };
+}
+
+export function buildAnchorCallbackUrl(
+  req: Pick<AnchorRequest, "callback">,
+  result: Pick<
+    AnchorResult,
+    "id" | "broadcast" | "docHash" | "commitTxid" | "revealTxid"
+  >
+): string | undefined {
+  return composeCallbackUrl(req.callback, [
+    ...optionalParam("id", result.id),
+    ["broadcast", String(result.broadcast)],
+    ["docHash", result.docHash],
+    ...optionalParam("commitTxid", result.commitTxid),
+    ...optionalParam("revealTxid", result.revealTxid),
+  ]);
+}
+
+/** Serialize an anchor result for the response QR / copy box. */
+export function encodeAnchorResult(result: AnchorResult): string {
+  return JSON.stringify(result, null, 2);
+}
+
 function normalizeEnvelope(obj: Record<string, unknown>): ParsedRequest {
   const t = obj.t;
   if (
@@ -885,6 +1074,7 @@ function normalizeEnvelope(obj: Record<string, unknown>): ParsedRequest {
     t !== "sign-request" &&
     t !== "psbt-sign-request" &&
     t !== "mint-request" &&
+    t !== "anchor-request" &&
     t !== "swap-offer-request" &&
     t !== "swap-accept-request" &&
     t !== "swap-cancel-request"
@@ -893,6 +1083,7 @@ function normalizeEnvelope(obj: Record<string, unknown>): ParsedRequest {
   }
   if (t === "psbt-sign-request") return normalizePsbtEnvelope(obj);
   if (t === "mint-request") return normalizeMintEnvelope(obj);
+  if (t === "anchor-request") return normalizeAnchorEnvelope(obj);
   if (t === "swap-offer-request") return normalizeSwapOfferEnvelope(obj);
   if (t === "swap-accept-request") return normalizeSwapAcceptEnvelope(obj);
   if (t === "swap-cancel-request") return normalizeSwapCancelEnvelope(obj);
@@ -956,6 +1147,142 @@ export function parseSignRequest(raw: string): ParsedSignRequest {
 /** True if the challenge matches the recognized `…:wallet-connect:vN:…` shape. */
 export function isRecognizedConnectChallenge(challenge: string): boolean {
   return typeof challenge === "string" && CONNECT_CHALLENGE_RE.test(challenge);
+}
+
+// ---------------------------------------------------------------------------
+// Canon declarations (canon.rxd.zone)
+//
+// Canon's signed creator declarations arrive as sign-requests whose challenge
+// is the canonical single-line declaration message (canon.rxd docs/
+// DECLARATIONS.md). Recognizing the shape lets the approval screen show the
+// signer WHAT they are declaring — structured, not an opaque string — and
+// skip the "not a standard connect request" warning for a format this wallet
+// understands. Parsing here is display-only: the signature always covers the
+// raw challenge verbatim, and a challenge that fails this parser is simply
+// not a Canon declaration (never an error).
+// ---------------------------------------------------------------------------
+
+export type CanonDeclarationEntry = {
+  kind: "container" | "creator" | "work";
+  /** 72-hex display-form ref. */
+  ref: string;
+  /** Decoded label — UNTRUSTED display text; sanitize before rendering. */
+  label: string;
+};
+
+export type CanonDeclarationChallenge = {
+  version: number;
+  network: string;
+  signer: string;
+  issued: string;
+  /** ISO date-time, or undefined for `never`. */
+  expires?: string;
+  declares: CanonDeclarationEntry[];
+  revokes: string[];
+  /** UNTRUSTED display text; sanitize before rendering. */
+  comment?: string;
+};
+
+const CANON_REF_RE = /^[0-9a-f]{72}$/;
+const CANON_NETWORK_RE = /^[a-z0-9-]{1,32}$/;
+// Base58check P2PKH address shape (charset + length only; no checksum here —
+// display-side recognition, not validation).
+const CANON_SIGNER_RE = /^[1-9A-HJ-NP-Za-km-z]{26,35}$/;
+
+/**
+ * Parse a Canon declaration challenge, or return undefined for anything else.
+ *
+ * Both message versions are injective by construction (fixed field order,
+ * url-encoded labels, terminal comment):
+ *  - v1: `canon-declaration|v1|<network>|<body>` (pipe-delimited head)
+ *  - v2: `canon-declaration:wallet-connect:v2:<network>:<body>` — the
+ *    recognized connect-challenge shape, so v2 also earns the standard badge.
+ * The body is `signer=…|issued=…|expires=…|declares=kind:ref:label,…|
+ * revokes=…|comment=…`; the comment is TERMINAL and may itself contain `|`,
+ * so the split is bounded: five fixed fields, remainder = comment.
+ */
+export function parseCanonDeclaration(
+  challenge: string
+): CanonDeclarationChallenge | undefined {
+  if (typeof challenge !== "string" || challenge.length > MAX_MESSAGE_LENGTH) {
+    return undefined;
+  }
+  let version: number;
+  let network: string;
+  let body: string;
+  const v2 = /^canon-declaration:wallet-connect:v(\d{1,3}):([a-z0-9-]{1,32}):([\s\S]+)$/.exec(
+    challenge
+  );
+  if (v2) {
+    version = parseInt(v2[1] as string, 10);
+    network = v2[2] as string;
+    body = v2[3] as string;
+  } else {
+    const v1 = /^canon-declaration\|v(\d{1,3})\|([a-z0-9-]{1,32})\|([\s\S]+)$/.exec(challenge);
+    if (!v1) return undefined;
+    version = parseInt(v1[1] as string, 10);
+    network = v1[2] as string;
+    body = v1[3] as string;
+  }
+  if (!CANON_NETWORK_RE.test(network)) return undefined;
+
+  const parts = body.split("|");
+  if (parts.length < 6) return undefined;
+  const [signerF, issuedF, expiresF, declaresF, revokesF] = parts as [
+    string, string, string, string, string,
+  ];
+  const commentF = parts.slice(5).join("|");
+  if (!signerF.startsWith("signer=") || !issuedF.startsWith("issued=")) return undefined;
+  if (!expiresF.startsWith("expires=") || !declaresF.startsWith("declares=")) return undefined;
+  if (!revokesF.startsWith("revokes=") || !commentF.startsWith("comment=")) return undefined;
+
+  const signer = signerF.slice("signer=".length);
+  if (!CANON_SIGNER_RE.test(signer)) return undefined;
+  const issued = issuedF.slice("issued=".length);
+  if (Number.isNaN(Date.parse(issued))) return undefined;
+  const expiresRaw = expiresF.slice("expires=".length);
+  if (expiresRaw !== "never" && Number.isNaN(Date.parse(expiresRaw))) return undefined;
+
+  const declares: CanonDeclarationEntry[] = [];
+  const declaresRaw = declaresF.slice("declares=".length);
+  if (declaresRaw.length > 0) {
+    for (const entry of declaresRaw.split(",")) {
+      const fields = entry.split(":");
+      if (fields.length !== 3) return undefined;
+      const [kind, ref, encodedLabel] = fields as [string, string, string];
+      if (kind !== "container" && kind !== "creator" && kind !== "work") return undefined;
+      if (!CANON_REF_RE.test(ref)) return undefined;
+      let label: string;
+      try {
+        label = decodeURIComponent(encodedLabel);
+      } catch {
+        return undefined;
+      }
+      declares.push({ kind, ref, label });
+    }
+  }
+
+  const revokesRaw = revokesF.slice("revokes=".length);
+  const revokes: string[] = [];
+  if (revokesRaw !== "-") {
+    for (const ref of revokesRaw.split(",")) {
+      if (!CANON_REF_RE.test(ref)) return undefined;
+      revokes.push(ref);
+    }
+  }
+  if (declares.length === 0 && revokes.length === 0) return undefined;
+
+  const comment = commentF.slice("comment=".length);
+  return {
+    version,
+    network,
+    signer,
+    issued,
+    ...(expiresRaw !== "never" ? { expires: expiresRaw } : {}),
+    declares,
+    revokes,
+    ...(comment !== "-" ? { comment } : {}),
+  };
 }
 
 /** Build a {@link SignResult} from a request + a produced signature. */
