@@ -1645,6 +1645,8 @@ describe("parseCanonDeclaration", () => {
     expect(parseCanonDeclaration(MSG.replace("canon-declaration", "canon"))).toBeUndefined();
     expect(parseCanonDeclaration(MSG.replace("|revokes=-", ""))).toBeUndefined();
     expect(parseCanonDeclaration(MSG.replace("creator:", "owner:"))).toBeUndefined();
+    // "work" is a valid third kind (standalone NFTs with nothing to derive from).
+    expect(parseCanonDeclaration(MSG.replace("creator:", "work:"))?.declares[0]?.kind).toBe("work");
     expect(parseCanonDeclaration(MSG.replace(REF, "ff".repeat(10)))).toBeUndefined();
     expect(
       parseCanonDeclaration(MSG.replace(`declares=creator:${REF}:CraigD%20Profile`, "declares="))

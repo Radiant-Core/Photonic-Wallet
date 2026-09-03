@@ -943,7 +943,13 @@ function RequestPanel({
                 <Box key={entry.kind + entry.ref}>
                   <Text>
                     This key recognizes the{" "}
-                    <b>{entry.kind === "container" ? "collection" : "creator token"}</b>
+                    <b>
+                      {entry.kind === "container"
+                        ? "collection"
+                        : entry.kind === "work"
+                        ? "individual work"
+                        : "creator token"}
+                    </b>
                     {entry.label
                       ? ` “${sanitizeForDisplay(entry.label)}”`
                       : ""}

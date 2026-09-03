@@ -1163,7 +1163,7 @@ export function isRecognizedConnectChallenge(challenge: string): boolean {
 // ---------------------------------------------------------------------------
 
 export type CanonDeclarationEntry = {
-  kind: "container" | "creator";
+  kind: "container" | "creator" | "work";
   /** 72-hex display-form ref. */
   ref: string;
   /** Decoded label — UNTRUSTED display text; sanitize before rendering. */
@@ -1250,7 +1250,7 @@ export function parseCanonDeclaration(
       const fields = entry.split(":");
       if (fields.length !== 3) return undefined;
       const [kind, ref, encodedLabel] = fields as [string, string, string];
-      if (kind !== "container" && kind !== "creator") return undefined;
+      if (kind !== "container" && kind !== "creator" && kind !== "work") return undefined;
       if (!CANON_REF_RE.test(ref)) return undefined;
       let label: string;
       try {
